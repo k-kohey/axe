@@ -33,6 +33,14 @@
       {
         "command": "axe.nextPreview",
         "title": "axe: Next Preview"
+      },
+      {
+        "command": "axe.selectSimulator",
+        "title": "axe: Select Preview Simulator"
+      },
+      {
+        "command": "axe.addSimulator",
+        "title": "axe: Add Preview Simulator"
       }
     ],
     "configuration": {
@@ -70,6 +78,11 @@
           },
           "default": [],
           "description": "Additional CLI arguments passed to axe preview"
+        },
+        "axe.preview.device": {
+          "type": "string",
+          "default": "",
+          "description": "Simulator UDID to use for preview. Set via 'axe: Select Preview Simulator' command."
         }
       }
     }

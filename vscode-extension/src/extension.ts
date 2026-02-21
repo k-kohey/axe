@@ -4,6 +4,7 @@ import { StatusBar } from "./statusBar";
 import { containsPreview } from "./previewDetector";
 import { BinaryResolver } from "./binaryResolver";
 import { SimulatorWebviewPanel } from "./simulatorWebview";
+import { selectSimulator, addSimulator } from "./simulatorPicker";
 
 const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
 const MIN_FRAME_LENGTH = 1000;
@@ -74,6 +75,38 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   );
 
+  // Shared helper: resolve binary, run a simulator picker, and save the result.
+  async function runSimulatorPicker(
+    picker: (execPath: string, cwd?: string) => Promise<string | undefined>
+  ): Promise<void> {
+    let execPath: string;
+    try {
+      execPath = await resolver.resolve();
+    } catch (err) {
+      vscode.window.showErrorMessage(`Failed to resolve axe binary: ${err}`);
+      return;
+    }
+    const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const udid = await picker(execPath, cwd);
+    if (udid) {
+      await vscode.workspace
+        .getConfiguration("axe")
+        .update("preview.device", udid, vscode.ConfigurationTarget.Workspace);
+    }
+  }
+
+  // Register selectSimulator command
+  const selectSimulatorCmd = vscode.commands.registerCommand(
+    "axe.selectSimulator",
+    () => runSimulatorPicker(selectSimulator)
+  );
+
+  // Register addSimulator command
+  const addSimulatorCmd = vscode.commands.registerCommand(
+    "axe.addSimulator",
+    () => runSimulatorPicker(addSimulator)
+  );
+
   // Clear resolver cache when executablePath changes
   const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration("axe.executablePath")) {
@@ -86,6 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
     startPreviewCmd,
     stopPreviewCmd,
     nextPreviewCmd,
+    selectSimulatorCmd,
+    addSimulatorCmd,
     configListener,
     {
       dispose: () => {

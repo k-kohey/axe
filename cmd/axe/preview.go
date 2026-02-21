@@ -18,6 +18,7 @@ var (
 	previewWatch         bool
 	previewSelector      string
 	previewServe         bool
+	previewDevice        string
 )
 
 var previewCmd = &cobra.Command{
@@ -52,6 +53,9 @@ var previewCmd = &cobra.Command{
 		if previewConfiguration == "" && rc["CONFIGURATION"] != "" {
 			previewConfiguration = rc["CONFIGURATION"]
 		}
+		if previewDevice == "" && rc["DEVICE"] != "" {
+			previewDevice = rc["DEVICE"]
+		}
 
 		if previewProject != "" && previewWorkspace != "" {
 			return fmt.Errorf("--project and --workspace are mutually exclusive")
@@ -77,7 +81,7 @@ var previewCmd = &cobra.Command{
 			return err
 		}
 
-		return preview.Run(sourceFile, pc, previewWatch, previewSelector, previewServe)
+		return preview.Run(sourceFile, pc, previewWatch, previewSelector, previewServe, previewDevice)
 	},
 }
 
@@ -89,5 +93,6 @@ func init() {
 	previewCmd.Flags().StringVar(&previewConfiguration, "configuration", "", "build configuration (e.g. Debug, Release)")
 	previewCmd.Flags().StringVar(&previewSelector, "preview", "", "select preview by title or index (e.g. --preview \"Dark Mode\" or --preview 1)")
 	previewCmd.Flags().BoolVar(&previewServe, "serve", false, "run as IDE backend: stream video via idb, accept JSON commands on stdin (requires idb_companion)")
+	previewCmd.Flags().StringVar(&previewDevice, "device", "", "simulator UDID to use for preview (overrides .axerc DEVICE and global default)")
 	rootCmd.AddCommand(previewCmd)
 }

@@ -9,6 +9,7 @@ suite("buildArgs", () => {
     scheme: "",
     configuration: "",
     additionalArgs: [],
+    previewDevice: "",
   };
 
   test("minimal args with default config", () => {
@@ -70,6 +71,7 @@ suite("buildArgs", () => {
       scheme: "App",
       configuration: "Debug",
       additionalArgs: ["--extra"],
+      previewDevice: "",
     };
     const args = buildArgs("/src/View.swift", config);
     assert.deepStrictEqual(args, [
@@ -85,6 +87,15 @@ suite("buildArgs", () => {
       "--serve",
       "--extra",
     ]);
+  });
+
+  test("includes --device when previewDevice is set", () => {
+    const config = { ...defaultConfig, previewDevice: "ABCD-1234-UDID" };
+    const args = buildArgs("/path/to/File.swift", config);
+    assert.ok(args.includes("--device"));
+    assert.strictEqual(args[args.indexOf("--device") + 1], "ABCD-1234-UDID");
+    // --device should come before --serve
+    assert.ok(args.indexOf("--device") < args.indexOf("--serve"));
   });
 
   test("always includes --serve", () => {

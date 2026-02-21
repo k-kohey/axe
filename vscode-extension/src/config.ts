@@ -7,6 +7,7 @@ export interface AxeConfig {
   scheme: string;
   configuration: string;
   additionalArgs: string[];
+  previewDevice: string;
 }
 
 export function getConfig(): AxeConfig {
@@ -18,6 +19,7 @@ export function getConfig(): AxeConfig {
     scheme: cfg.get<string>("scheme", ""),
     configuration: cfg.get<string>("configuration", ""),
     additionalArgs: cfg.get<string[]>("additionalArgs", []),
+    previewDevice: cfg.get<string>("preview.device", ""),
   };
 }
 
@@ -35,6 +37,9 @@ export function buildArgs(filePath: string, config: AxeConfig): string[] {
   }
   if (config.configuration) {
     args.push("--configuration", config.configuration);
+  }
+  if (config.previewDevice) {
+    args.push("--device", config.previewDevice);
   }
   args.push("--serve");
   args.push(...config.additionalArgs);

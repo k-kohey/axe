@@ -31,11 +31,11 @@ func (s *stepper) begin(label string) func() {
 	}
 }
 
-func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool) error {
+func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string) error {
 	step := &stepper{total: 9}
 
 	done := step.begin("Resolving simulator...")
-	device, deviceSetPath, err := platform.ResolveAxeSimulator()
+	device, deviceSetPath, err := platform.ResolveAxeSimulator(preferredDevice)
 	done()
 	if err != nil {
 		return err
@@ -105,6 +105,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	done()
 	if err != nil {
 		return fmt.Errorf("booting simulator: %w", err)
+	}
+
+	// Verify the simulator didn't crash immediately after boot.
+	select {
+	case <-bootCompanion.Done():
+		return fmt.Errorf("simulator crashed immediately after boot: %v", bootCompanion.Err())
+	default:
 	}
 
 	// Shared cleanup: runs on normal return, error return, and signal-triggered return.
@@ -218,14 +225,18 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			}
 		}
 
-		events := watchEvents{idbErr: idbErrCh}
+		events := watchEvents{idbErr: idbErrCh, bootDied: bootCompanion.Done()}
 
 		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
 		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, events)
 	}
 
-	// Non-watch mode: wait for signal to exit.
+	// Non-watch mode: wait for signal or boot companion crash.
 	fmt.Fprintln(os.Stderr, "Preview launched successfully.")
-	<-ctx.Done()
-	return nil
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-bootCompanion.Done():
+		return fmt.Errorf("simulator crashed unexpectedly: %v", bootCompanion.Err())
+	}
 }

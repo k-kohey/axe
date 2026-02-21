@@ -223,6 +223,9 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 			if ok && err != nil {
 				return fmt.Errorf("idb_companion error: %w", err)
 			}
+
+		case <-events.bootDied:
+			return fmt.Errorf("simulator crashed unexpectedly (boot companion process exited)")
 		}
 	}
 }

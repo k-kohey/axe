@@ -149,7 +149,8 @@ type watchContext struct {
 
 // watchEvents groups external event channels for the watch loop.
 type watchEvents struct {
-	idbErr <-chan error // idb_companion error channel (nil when not in serve mode)
+	idbErr   <-chan error    // idb_companion error channel (nil when not in serve mode)
+	bootDied <-chan struct{} // closed when boot companion process exits unexpectedly
 }
 
 // previewDirs manages temp directories scoped per project path.

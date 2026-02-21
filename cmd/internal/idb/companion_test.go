@@ -1,10 +1,12 @@
 package idb
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeCmd implements CmdRunner for testing.
@@ -14,6 +16,7 @@ type fakeCmd struct {
 	stdoutPR    *os.File
 	stdoutPW    *os.File
 	onPipeReady func()
+	waitCh      chan error // if set, Wait blocks until a value is sent
 }
 
 func (f *fakeCmd) StdoutPipe() (*os.File, error) {
@@ -41,6 +44,9 @@ func (f *fakeCmd) Process() *os.Process {
 
 func (f *fakeCmd) Wait() error {
 	f.waited = true
+	if f.waitCh != nil {
+		return <-f.waitCh
+	}
 	return nil
 }
 
@@ -50,6 +56,7 @@ type fakeCommander struct {
 	lastCmd   *fakeCmd
 	lastArgs  []string
 	pipeReady chan struct{}
+	commandFn func(name string, args ...string) CmdRunner // override for custom behavior
 }
 
 func newFakeCommander() *fakeCommander {
@@ -57,6 +64,9 @@ func newFakeCommander() *fakeCommander {
 }
 
 func (fc *fakeCommander) Command(name string, args ...string) CmdRunner {
+	if fc.commandFn != nil {
+		return fc.commandFn(name, args...)
+	}
 	cmd := &fakeCmd{
 		onPipeReady: func() {
 			close(fc.pipeReady)
@@ -258,5 +268,103 @@ func TestBootHeadlessWith_EmptyDeviceSetPath(t *testing.T) {
 	args := strings.Join(cmdr.lastArgs, " ")
 	if strings.Contains(args, "--device-set-path") {
 		t.Errorf("should not include --device-set-path when empty: %s", args)
+	}
+}
+
+// newBlockingFakeCommander creates a fakeCommander whose Wait blocks
+// until the caller sends a value on the returned channel.
+func newBlockingFakeCommander() (*fakeCommander, chan error) {
+	waitCh := make(chan error, 1)
+	cmdr := &fakeCommander{pipeReady: make(chan struct{})}
+	cmdr.commandFn = func(name string, args ...string) CmdRunner {
+		cmd := &fakeCmd{
+			waitCh: waitCh,
+			onPipeReady: func() {
+				close(cmdr.pipeReady)
+			},
+		}
+		cmdr.mu.Lock()
+		cmdr.lastCmd = cmd
+		cmdr.lastArgs = append([]string{name}, args...)
+		cmdr.mu.Unlock()
+		return cmd
+	}
+	return cmdr, waitCh
+}
+
+func TestCompanionDone_ClosesOnExit(t *testing.T) {
+	cmdr, waitCh := newBlockingFakeCommander()
+
+	go writeToPipe(cmdr, `{"state":"Booted","udid":"TEST"}`+"\n")
+
+	companion, err := BootHeadlessWith(cmdr, "TEST", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Done should not be closed yet (process still "running").
+	select {
+	case <-companion.Done():
+		t.Fatal("Done() should not be closed while process is running")
+	default:
+	}
+
+	// Simulate process exit.
+	waitCh <- nil
+
+	// Done should now close.
+	select {
+	case <-companion.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Done() did not close after process exited")
+	}
+
+	if companion.Err() != nil {
+		t.Errorf("expected nil error, got %v", companion.Err())
+	}
+}
+
+func TestCompanionDone_ReportsExitError(t *testing.T) {
+	cmdr, waitCh := newBlockingFakeCommander()
+
+	go writeToPipe(cmdr, `{"state":"Booted","udid":"TEST"}`+"\n")
+
+	companion, err := BootHeadlessWith(cmdr, "TEST", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate crash.
+	crashErr := fmt.Errorf("signal: killed")
+	waitCh <- crashErr
+
+	<-companion.Done()
+	if companion.Err() == nil || companion.Err().Error() != "signal: killed" {
+		t.Errorf("expected crash error, got %v", companion.Err())
+	}
+}
+
+func TestStartWith_DoneClosesOnExit(t *testing.T) {
+	cmdr, waitCh := newBlockingFakeCommander()
+
+	go writeToPipe(cmdr, `{"grpc_swift_port":10882,"grpc_port":10882}`+"\n")
+
+	companion, err := StartWith(cmdr, "UDID-123", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case <-companion.Done():
+		t.Fatal("Done() should not be closed while process is running")
+	default:
+	}
+
+	waitCh <- nil
+
+	select {
+	case <-companion.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("Done() did not close after process exited")
 	}
 }

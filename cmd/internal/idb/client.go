@@ -15,9 +15,17 @@ type Client struct {
 	client pb.CompanionServiceClient
 }
 
+// maxRecvMsgSize is the maximum gRPC receive message size.
+// iPad Pro 13-inch RBGA frames at 0.5x scale are ~5.7 MB, exceeding the
+// default 4 MB limit. 16 MB provides headroom for future larger displays.
+const maxRecvMsgSize = 16 * 1024 * 1024
+
 // NewClient connects to idb_companion at the given address (host:port).
 func NewClient(addr string) (*Client, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxRecvMsgSize)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to idb_companion at %s: %w", addr, err)
 	}

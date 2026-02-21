@@ -63,6 +63,7 @@ const DEFAULT_CONFIG: AxeConfig = {
   scheme: "",
   configuration: "",
   additionalArgs: [],
+  previewDevice: "",
 };
 
 suite("PreviewManager", () => {

@@ -31,6 +31,31 @@ type Companion struct {
 	cmd     CmdRunner
 	port    string
 	process *os.Process
+	done    chan struct{} // closed when the process exits
+	exitErr error         // set before done is closed; read only after <-done
+}
+
+// startMonitor launches a goroutine that waits for the process to exit
+// and signals via the done channel. Must be called exactly once after
+// the process is started.
+func (c *Companion) startMonitor() {
+	go func() {
+		c.exitErr = c.cmd.Wait()
+		close(c.done)
+	}()
+}
+
+// Done returns a channel that is closed when the companion process exits
+// (either normally or due to a crash).
+func (c *Companion) Done() <-chan struct{} {
+	return c.done
+}
+
+// Err blocks until the process exits and returns its exit error.
+// If the process exited normally, returns nil.
+func (c *Companion) Err() error {
+	<-c.done
+	return c.exitErr
 }
 
 type defaultCommander struct{}
@@ -124,11 +149,14 @@ func StartWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
 			}
 			return nil, fmt.Errorf("idb_companion did not output a port")
 		}
-		return &Companion{
+		c := &Companion{
 			cmd:     cmd,
 			port:    port,
 			process: cmd.Process(),
-		}, nil
+			done:    make(chan struct{}),
+		}
+		c.startMonitor()
+		return c, nil
 	case <-time.After(10 * time.Second):
 		if proc := cmd.Process(); proc != nil {
 			_ = proc.Kill()
@@ -166,25 +194,29 @@ func (c *Companion) Stop() error {
 		return nil
 	}
 
+	// Already exited (crash or previous stop).
+	select {
+	case <-c.done:
+		return nil
+	default:
+	}
+
 	// Send SIGTERM.
 	if err := c.process.Signal(syscall.SIGTERM); err != nil {
 		slog.Debug("SIGTERM failed, trying SIGKILL", "err", err)
 		_ = c.process.Kill()
+		<-c.done // wait for the monitor goroutine to finish
 		return nil
 	}
 
 	// Wait up to 5 seconds for graceful exit.
-	done := make(chan error, 1)
-	go func() {
-		done <- c.cmd.Wait()
-	}()
-
 	select {
-	case <-done:
+	case <-c.done:
 		return nil
 	case <-time.After(5 * time.Second):
 		slog.Debug("idb_companion did not exit after SIGTERM, sending SIGKILL")
 		_ = c.process.Kill()
+		<-c.done // wait for the monitor goroutine to finish
 		return nil
 	}
 }
@@ -240,10 +272,13 @@ func BootHeadlessWith(cmdr Commander, udid, deviceSetPath string) (*Companion, e
 			}
 			return nil, fmt.Errorf("idb_companion boot did not report Booted state")
 		}
-		return &Companion{
+		c := &Companion{
 			cmd:     cmd,
 			process: cmd.Process(),
-		}, nil
+			done:    make(chan struct{}),
+		}
+		c.startMonitor()
+		return c, nil
 	case <-time.After(120 * time.Second):
 		if proc := cmd.Process(); proc != nil {
 			_ = proc.Kill()
