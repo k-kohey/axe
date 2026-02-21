@@ -17,27 +17,27 @@ golangci-lint = "latest"
 [tasks]
 # Build the application
 # Usage: mise run build
-build = { depends = ["proto"], run = "go build -o .output/axe ./axe-cli" }
+build = { depends = ["proto"], run = "go build -C cmd -o ../.output/axe ./axe" }
 
 # Format the source code
 # Usage: mise run fmt
 fmt = { run = """
-go fmt ./...
-xcrun swift-format format --in-place --recursive internal/preview/swift-parser/Sources internal/preview/swift-parser/Tests
+go fmt -C cmd ./...
+xcrun swift-format format --in-place --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
 """ }
 
 # Tidy up dependencies
 # Usage: mise run tidy
-tidy = { run = "go mod tidy" }
+tidy = { run = "go mod tidy -C cmd" }
 
 # Add a new cobra command
 # Usage: mise run add-command -- <command-name>
 # Example: mise run add-command -- new-cmd
-add-command = { run = "cobra-cli add" }
+add-command = { run = "cd cmd && cobra-cli add" }
 
 # Clean the binary
 # Usage: mise run clean
-clean = { run = "go clean && rm -f .output/axe" }
+clean = { run = "go clean -C cmd && rm -f .output/axe" }
 
 # Run the application with given arguments after building
 # Usage: mise run exec -- <subcommand> [args...]
@@ -50,21 +50,21 @@ default = { depends = ["build"] }
 # --- Proto Generation ---
 [tasks.proto]
 description = "Fetch idb proto from GitHub and generate Go code"
-sources = ["internal/idb/proto/idb.proto"]
-outputs = ["internal/idb/idbproto/idb.pb.go", "internal/idb/idbproto/idb_grpc.pb.go"]
+sources = ["cmd/internal/idb/proto/idb.proto"]
+outputs = ["cmd/internal/idb/idbproto/idb.pb.go", "cmd/internal/idb/idbproto/idb_grpc.pb.go"]
 run = """
-mkdir -p internal/idb/proto
+mkdir -p cmd/internal/idb/proto
 IDB_PROTO_URL="https://raw.githubusercontent.com/facebook/idb/e10a90af5372dbcd404eb2fbc38fa3c88630fbd7/proto/idb.proto"
-curl -fsSL "$IDB_PROTO_URL" -o internal/idb/proto/idb.proto
+curl -fsSL "$IDB_PROTO_URL" -o cmd/internal/idb/proto/idb.proto
 # Inject go_package option for our module
 sed -i '' '/^package idb;/a\\
 option go_package = "github.com/k-kohey/axe/internal/idb/idbproto";
-' internal/idb/proto/idb.proto
+' cmd/internal/idb/proto/idb.proto
 protoc \
-  --go_out=. --go_opt=module=github.com/k-kohey/axe \
-  --go-grpc_out=. --go-grpc_opt=module=github.com/k-kohey/axe \
-  --proto_path=internal/idb/proto \
-  internal/idb/proto/*.proto
+  --go_out=cmd --go_opt=module=github.com/k-kohey/axe \
+  --go-grpc_out=cmd --go-grpc_opt=module=github.com/k-kohey/axe \
+  --proto_path=cmd/internal/idb/proto \
+  cmd/internal/idb/proto/*.proto
 """
 
 # --- Release Tasks ---
@@ -73,8 +73,8 @@ description = "Build release artifacts (Go binaries + VSIX)"
 depends = ["proto"]
 run = """
 mkdir -p .output
-GOOS=darwin GOARCH=arm64 go build -o .output/axe-darwin-arm64 ./axe-cli
-GOOS=darwin GOARCH=amd64 go build -o .output/axe-darwin-amd64 ./axe-cli
+GOOS=darwin GOARCH=arm64 go build -C cmd -o ../.output/axe-darwin-arm64 ./axe
+GOOS=darwin GOARCH=amd64 go build -C cmd -o ../.output/axe-darwin-amd64 ./axe
 cd vscode-extension && pnpm install && pnpm run compile && npx vsce package -o ../.output/
 """
 
@@ -83,12 +83,12 @@ cd vscode-extension && pnpm install && pnpm run compile && npx vsce package -o .
 description = "Run fmt, vet, and deadcode detection"
 depends = ["proto"]
 run = """
-gofmt -w .
-xcrun swift-format format --in-place --recursive internal/preview/swift-parser/Sources internal/preview/swift-parser/Tests
-xcrun swift-format lint --recursive internal/preview/swift-parser/Sources internal/preview/swift-parser/Tests
-go vet ./...
-golangci-lint run ./...
-deadcode -test ./... 2>&1 | { output=$(cat); [ -z "$output" ] && echo "deadcode: no unreachable functions found" || { echo "$output"; exit 1; }; }
+gofmt -w cmd
+xcrun swift-format format --in-place --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
+xcrun swift-format lint --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
+go vet -C cmd ./...
+(cd cmd && golangci-lint run ./...)
+(cd cmd && deadcode -test ./... 2>&1 | { output=$(cat); [ -z "$output" ] && echo "deadcode: no unreachable functions found" || { echo "$output"; exit 1; }; })
 """
 
 # --- Test Tasks ---
@@ -96,7 +96,7 @@ deadcode -test ./... 2>&1 | { output=$(cat); [ -z "$output" ] && echo "deadcode:
 description = "Run all tests (Go + Swift + VSCode extension)"
 depends = ["proto"]
 run = """
-swift test --package-path internal/preview/swift-parser
-go test ./... -cover
+swift test --package-path cmd/internal/preview/swift-parser
+go test -C cmd ./... -cover
 cd vscode-extension && pnpm install && pnpm run compile && pnpm test
 """
