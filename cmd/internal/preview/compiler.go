@@ -29,6 +29,29 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 	objPath := filepath.Join(dirs.Thunk, fmt.Sprintf("thunk_%d.o", reloadCounter))
 	dylibPath := filepath.Join(dirs.Thunk, fmt.Sprintf("thunk_%d.dylib", reloadCounter))
 
+	// Compile and link under shared lock (reads BuiltProductsDir).
+	if err := compileAndLink(ctx, bs, dirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath); err != nil {
+		return "", err
+	}
+
+	// codesign only touches dirs.Thunk — no lock needed.
+	if out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("codesigning dylib: %w\n%s", err, out)
+	}
+
+	slog.Debug("Thunk dylib ready", "path", dylibPath)
+	return dylibPath, nil
+}
+
+// compileAndLink runs swiftc compile (.swift → .o) and link (.o → .dylib)
+// under LOCK_SH to protect against concurrent xcodebuild writes to dirs.Build.
+func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath string) error {
+	lock := newBuildLock(dirs.Build)
+	if err := lock.RLock(ctx); err != nil {
+		return fmt.Errorf("acquiring read lock: %w", err)
+	}
+	defer lock.RUnlock()
+
 	// .swift -> .o
 	compileArgs := []string{
 		"xcrun", "swiftc",
@@ -67,7 +90,7 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 	}
 	slog.Debug("Compiling thunk .swift -> .o", "args", compileArgs)
 	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("compiling thunk.swift -> .o: %w\n%s", err, out)
+		return fmt.Errorf("compiling thunk.swift -> .o: %w\n%s", err, out)
 	}
 
 	// .o -> .dylib
@@ -88,14 +111,8 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 	}
 	slog.Debug("Linking thunk .o -> .dylib", "args", linkArgs)
 	if out, err := exec.CommandContext(ctx, linkArgs[0], linkArgs[1:]...).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("linking thunk.o -> .dylib: %w\n%s", err, out)
+		return fmt.Errorf("linking thunk.o -> .dylib: %w\n%s", err, out)
 	}
 
-	// codesign
-	if out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("codesigning dylib: %w\n%s", err, out)
-	}
-
-	slog.Debug("Thunk dylib ready", "path", dylibPath)
-	return dylibPath, nil
+	return nil
 }

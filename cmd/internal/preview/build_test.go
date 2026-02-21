@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +13,7 @@ func TestExtractCompilerPaths_IncludePaths(t *testing.T) {
 -I
 /path/split/across/lines
 `)
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 3 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 3", len(bs.ExtraIncludePaths))
@@ -32,7 +33,7 @@ func TestExtractCompilerPaths_SkipsHmapAndBuiltProducts(t *testing.T) {
 `)
 	bs.BuiltProductsDir = "/products/dir"
 
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 1 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 1", len(bs.ExtraIncludePaths))
@@ -50,7 +51,7 @@ func TestExtractCompilerPaths_FrameworkPaths(t *testing.T) {
 `)
 	bs.BuiltProductsDir = "/products/dir"
 
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraFrameworkPaths) != 1 {
 		t.Fatalf("ExtraFrameworkPaths count = %d, want 1", len(bs.ExtraFrameworkPaths))
@@ -64,7 +65,7 @@ func TestExtractCompilerPaths_ModuleMapFiles(t *testing.T) {
 	bs, dirs := setupRespFile(t, `-fmodule-map-file=/path/to/FirebaseCore.modulemap
 -fmodule-map-file=/path/to/nanopb.modulemap
 `)
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraModuleMapFiles) != 2 {
 		t.Fatalf("ExtraModuleMapFiles count = %d, want 2", len(bs.ExtraModuleMapFiles))
@@ -79,7 +80,7 @@ func TestExtractCompilerPaths_DeduplicatesIncludePaths(t *testing.T) {
 -I/path/to/headers
 -I/path/to/other
 `)
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 2 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 2", len(bs.ExtraIncludePaths))
@@ -91,7 +92,7 @@ func TestExtractCompilerPaths_NoRespFile(t *testing.T) {
 	dirs := previewDirs{Build: t.TempDir()}
 
 	// Should not panic or error, just silently return.
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 0 {
 		t.Errorf("ExtraIncludePaths should be empty, got %d", len(bs.ExtraIncludePaths))
@@ -108,7 +109,7 @@ arm64-apple-ios17.0-simulator
 -swift-version
 5
 `)
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 1 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 1", len(bs.ExtraIncludePaths))

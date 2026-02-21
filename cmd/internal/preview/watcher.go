@@ -329,7 +329,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		}
 		// 4. Retry: rebuild project then try compile again.
 		slog.Info("Thunk compile failed, attempting rebuild", "err", err)
-		if buildErr := buildProject(pc, dirs); buildErr != nil {
+		if buildErr := buildProject(ctx, pc, dirs); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
 		dylibPath, err = compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile)
@@ -391,7 +391,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
 
-	if err := buildProject(pc, dirs); err != nil {
+	if err := buildProject(ctx, pc, dirs); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
 	}
 
@@ -431,7 +431,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	terminateApp(bs, wctx.device, wctx.deviceSetPath)
 
-	if _, err := installApp(bs, dirs, wctx.device, wctx.deviceSetPath); err != nil {
+	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 

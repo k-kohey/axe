@@ -32,6 +32,11 @@ func (s *stepper) begin(label string) func() {
 }
 
 func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string, reuseBuild bool) error {
+	// Set up signal-based context early so that long-running operations
+	// (build with lock, compileThunk, etc.) can be cancelled via Ctrl+C.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
 	step := &stepper{total: 9}
 
 	done := step.begin("Resolving simulator...")
@@ -41,7 +46,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return err
 	}
 
-	dirs := newPreviewDirs(pc.primaryPath())
+	dirs := newPreviewDirs(pc.primaryPath(), device)
 
 	done = step.begin("Fetching build settings...")
 	bs, err := fetchBuildSettings(pc, dirs)
@@ -59,14 +64,14 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			label = "No previous build found, building project..."
 		}
 		done = step.begin(label)
-		err = buildProject(pc, dirs)
+		err = buildProject(ctx, pc, dirs)
 		done()
 		if err != nil {
 			return err
 		}
 	}
 
-	extractCompilerPaths(bs, dirs)
+	extractCompilerPaths(ctx, bs, dirs)
 
 	// Resolve 1-level dependencies from the target file.
 	projectRoot := filepath.Dir(pc.primaryPath())
@@ -94,11 +99,6 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	if err != nil {
 		return err
 	}
-
-	// Set up signal-based context so that Ctrl+C cancels in-flight external
-	// commands (compileThunk, etc.) via context propagation.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer stop()
 
 	done = step.begin("Compiling thunk dylib...")
 	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, 0, sourceFile)
@@ -153,7 +153,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	terminateApp(bs, device, deviceSetPath)
 
 	done = step.begin("Installing app on simulator...")
-	_, err = installApp(bs, dirs, device, deviceSetPath)
+	_, err = installApp(ctx, bs, dirs, device, deviceSetPath)
 	done()
 	if err != nil {
 		return err

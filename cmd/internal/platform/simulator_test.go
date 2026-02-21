@@ -101,6 +101,82 @@ func TestFindLatestIPhone(t *testing.T) {
 	}
 }
 
+func TestSelectAvailableSimulator(t *testing.T) {
+	t.Run("all booted returns empty", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Booted"},
+			{UDID: "B", State: "Booted"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "")
+		if ok || udid != "" {
+			t.Errorf("expected (\"\", false), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("empty devices returns empty", func(t *testing.T) {
+		udid, ok := selectAvailableSimulator(nil, "")
+		if ok || udid != "" {
+			t.Errorf("expected (\"\", false), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("default is Shutdown and preferred", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Shutdown"},
+			{UDID: "B", State: "Shutdown"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "B")
+		if !ok || udid != "B" {
+			t.Errorf("expected (\"B\", true), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("default is Booted skips to other Shutdown", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Booted"},
+			{UDID: "B", State: "Shutdown"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "A")
+		if !ok || udid != "B" {
+			t.Errorf("expected (\"B\", true), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("default absent falls back to first Shutdown", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Booted"},
+			{UDID: "B", State: "Shutdown"},
+			{UDID: "C", State: "Shutdown"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "MISSING")
+		if !ok || udid != "B" {
+			t.Errorf("expected (\"B\", true), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("no default picks first Shutdown", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Booted"},
+			{UDID: "B", State: "Shutdown"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "")
+		if !ok || udid != "B" {
+			t.Errorf("expected (\"B\", true), got (%q, %v)", udid, ok)
+		}
+	})
+
+	t.Run("all Booted with Booted default returns empty", func(t *testing.T) {
+		devices := []simDevice{
+			{UDID: "A", State: "Booted"},
+			{UDID: "B", State: "Booted"},
+		}
+		udid, ok := selectAvailableSimulator(devices, "A")
+		if ok || udid != "" {
+			t.Errorf("expected (\"\", false), got (%q, %v)", udid, ok)
+		}
+	})
+}
+
 func TestParseIOSVersion(t *testing.T) {
 	tests := []struct {
 		runtime   string

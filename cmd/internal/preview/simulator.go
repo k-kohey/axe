@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -47,20 +48,43 @@ func resolveAppBundle(bs *buildSettings, dirs previewDirs) (string, error) {
 	return srcAppPath, nil
 }
 
-func installApp(bs *buildSettings, dirs previewDirs, device, deviceSetPath string) (string, error) {
+// stageAppBundle copies the .app bundle from dirs.Build to dirs.Staging
+// under LOCK_SH to protect against concurrent xcodebuild writes.
+func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs) (string, error) {
+	lock := newBuildLock(dirs.Build)
+	if err := lock.RLock(ctx); err != nil {
+		return "", fmt.Errorf("acquiring read lock: %w", err)
+	}
+	defer lock.RUnlock()
+
 	srcAppPath, err := resolveAppBundle(bs, dirs)
 	if err != nil {
 		return "", err
 	}
 
-	// Copy the app bundle to the staging directory so we can modify
-	// Info.plist without touching the original build artifacts.
-	stagedAppPath := filepath.Join(dirs.Root, filepath.Base(srcAppPath))
+	// Copy the app bundle to the session-specific staging directory so we
+	// can modify Info.plist without touching the original build artifacts
+	// and without colliding with other preview sessions.
+	if err := os.MkdirAll(dirs.Staging, 0o755); err != nil {
+		return "", fmt.Errorf("creating staging directory: %w", err)
+	}
+	stagedAppPath := filepath.Join(dirs.Staging, filepath.Base(srcAppPath))
 	_ = os.RemoveAll(stagedAppPath)
 	if out, err := exec.Command("cp", "-a", srcAppPath, stagedAppPath).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("copying app bundle to staging: %w\n%s", err, out)
 	}
 
+	return stagedAppPath, nil
+}
+
+func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device, deviceSetPath string) (string, error) {
+	// Stage the app bundle under shared lock (reads dirs.Build).
+	stagedAppPath, err := stageAppBundle(ctx, bs, dirs)
+	if err != nil {
+		return "", err
+	}
+
+	// Remaining operations only touch dirs.Staging — no lock needed.
 	// Rewrite BundleID and display name so the preview app doesn't
 	// overwrite the original app on the simulator.
 	rewriteInfoPlist(

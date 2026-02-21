@@ -49,10 +49,26 @@ func AxeDeviceSetPath() (string, error) {
 // It returns the UDID and device set path for the resolved simulator.
 //
 // Resolution priority:
-//  1. preferredUDID (from --device flag or .axerc DEVICE) — must exist, error if not found
-//  2. config.json defaultSimulator — warn and fall through if not found
-//  3. First existing device in the axe set
+//  1. preferredUDID (from --device flag) — must exist, used regardless of state
+//  2. config.json defaultSimulator — Shutdown only; skip if Booted or absent
+//  3. First Shutdown device in the axe set
 //  4. Auto-create from the latest available iPhone
+//
+// NOTE: Race condition with concurrent processes
+// This function is not protected by a lock. When multiple axe preview processes
+// start simultaneously, the following races may occur:
+//   - Two processes both see a Shutdown device and select it before either boots it.
+//     The later boot will fail or the app will be overwritten on the same simulator.
+//   - Two processes both reach priority 4, finding no Shutdown devices, and each
+//     creates a new simulator. This results in duplicate devices but both work correctly.
+//
+// A proper fix would require either:
+//
+//	(A) Holding a file lock that spans selection through boot (simctl boot), or
+//	(B) A claim-file mechanism (e.g. devices/<udid>/.axe-claimed) checked before selection.
+//
+// Both add complexity and startup latency; the current behavior is acceptable for typical
+// usage since duplicate creation is harmless and same-device collision is unlikely in practice.
 func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err error) {
 	deviceSetPath, err = AxeDeviceSetPath()
 	if err != nil {
@@ -78,24 +94,16 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 		return "", "", fmt.Errorf("simulator %s not found in axe device set. Run 'axe preview simulator list' to see available devices", preferredUDID)
 	}
 
-	// Priority 2: config.json default.
+	// Priority 2-3: pick a Shutdown simulator (config default preferred, then any).
+	var defaultUDID string
 	store, storeErr := NewConfigStore()
 	if storeErr == nil {
-		if defaultUDID, _ := store.GetDefault(); defaultUDID != "" {
-			for _, d := range devices {
-				if d.UDID == defaultUDID {
-					slog.Info("Using default simulator", "name", d.Name, "udid", d.UDID)
-					return d.UDID, deviceSetPath, nil
-				}
-			}
-			slog.Warn("Default simulator not found, falling back to auto-select", "udid", defaultUDID)
-		}
+		defaultUDID, _ = store.GetDefault()
 	}
 
-	// Priority 3: reuse first existing device.
-	for _, d := range devices {
-		slog.Info("Reusing existing axe simulator", "name", d.Name, "udid", d.UDID)
-		return d.UDID, deviceSetPath, nil
+	if selected, ok := selectAvailableSimulator(devices, defaultUDID); ok {
+		slog.Info("Using simulator", "udid", selected)
+		return selected, deviceSetPath, nil
 	}
 
 	// Priority 4: auto-create from the latest iPhone.
@@ -110,6 +118,37 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 		return "", "", fmt.Errorf("creating simulator: %w", err)
 	}
 	return createdUDID, deviceSetPath, nil
+}
+
+// selectAvailableSimulator picks a Shutdown simulator from devices.
+// defaultUDID is tried first; if it is Booted or absent, other Shutdown devices
+// are checked. Returns ("", false) if no Shutdown device is available.
+func selectAvailableSimulator(devices []simDevice, defaultUDID string) (string, bool) {
+	// Prefer the configured default if it is Shutdown.
+	if defaultUDID != "" {
+		found := false
+		for _, d := range devices {
+			if d.UDID == defaultUDID {
+				found = true
+				if d.State == "Shutdown" {
+					return d.UDID, true
+				}
+				slog.Warn("Default simulator is in use, selecting another", "udid", defaultUDID, "state", d.State)
+				break
+			}
+		}
+		if !found {
+			slog.Warn("Default simulator not found in device set, falling back to auto-select", "udid", defaultUDID)
+		}
+	}
+
+	// Fall back to the first Shutdown device.
+	for _, d := range devices {
+		if d.State == "Shutdown" {
+			return d.UDID, true
+		}
+	}
+	return "", false
 }
 
 // findLatestIPhone selects the latest available iPhone from the default device set

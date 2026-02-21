@@ -70,18 +70,24 @@ func (s *ConfigStore) Save(cfg axeConfig) error {
 		return fmt.Errorf("creating temp config file: %w", err)
 	}
 	tmpPath := tmp.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
+		// Remove temp file on any error; on success tmpPath no longer exists
+		// (it was renamed), so Remove is a harmless no-op.
+		_ = os.Remove(tmpPath)
+	}()
 
 	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("writing temp config file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("closing temp config file: %w", err)
 	}
+	closed = true
 	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming config file: %w", err)
 	}
 	return nil

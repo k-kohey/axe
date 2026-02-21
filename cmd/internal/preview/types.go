@@ -154,19 +154,25 @@ type watchEvents struct {
 }
 
 // previewDirs manages temp directories scoped per project path.
+// Session-specific resources (Thunk, Loader, Staging, Socket) live under
+// devices/<udid>/ so that multiple preview processes for the same project
+// do not collide. Build artifacts are shared at the project level.
 type previewDirs struct {
-	Root   string // /tmp/axe-preview-<hash>
-	Build  string // Root/build
-	Thunk  string // Root/thunk
-	Loader string // Root/loader
-	Socket string // Root/loader.sock
+	Root    string // ~/.cache/axe/preview-<project-hash>
+	Build   string // Root/build (shared across sessions)
+	Session string // Root/devices/<device-udid>
+	Thunk   string // Session/thunk
+	Loader  string // Session/loader
+	Staging string // Session/staging
+	Socket  string // Session/loader.sock
 }
 
-// newPreviewDirs creates a previewDirs based on a hash of the project/workspace path.
+// newPreviewDirs creates a previewDirs based on a hash of the project/workspace
+// path, with session-specific directories scoped by deviceUDID.
 // Uses ~/Library/Caches/axe/ instead of /tmp so that dylibs are accessible
 // from within the iOS Simulator via dlopen (separated runtimes cannot resolve
 // host /tmp paths).
-func newPreviewDirs(projectPath string) previewDirs {
+func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 	abs, _ := filepath.Abs(projectPath)
 	h := sha256.Sum256([]byte(abs))
 	short := fmt.Sprintf("%x", h[:8])
@@ -176,11 +182,14 @@ func newPreviewDirs(projectPath string) previewDirs {
 		cacheDir = filepath.Join(os.Getenv("HOME"), "Library", "Caches")
 	}
 	root := filepath.Join(cacheDir, "axe", "preview-"+short)
+	session := filepath.Join(root, "devices", deviceUDID)
 	return previewDirs{
-		Root:   root,
-		Build:  filepath.Join(root, "build"),
-		Thunk:  filepath.Join(root, "thunk"),
-		Loader: filepath.Join(root, "loader"),
-		Socket: filepath.Join(root, "loader.sock"),
+		Root:    root,
+		Build:   filepath.Join(root, "build"),
+		Session: session,
+		Thunk:   filepath.Join(session, "thunk"),
+		Loader:  filepath.Join(session, "loader"),
+		Staging: filepath.Join(session, "staging"),
+		Socket:  filepath.Join(session, "loader.sock"),
 	}
 }

@@ -2,6 +2,7 @@ package preview
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -75,7 +76,13 @@ func fetchBuildSettings(pc ProjectConfig, dirs previewDirs) (*buildSettings, err
 	return bs, nil
 }
 
-func buildProject(pc ProjectConfig, dirs previewDirs) error {
+func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs) error {
+	lock := newBuildLock(dirs.Build)
+	if err := lock.Lock(ctx); err != nil {
+		return fmt.Errorf("acquiring build lock: %w", err)
+	}
+	defer lock.Unlock()
+
 	args := append(
 		[]string{"xcodebuild", "build"},
 		pc.xcodebuildArgs()...,
@@ -99,7 +106,13 @@ func buildProject(pc ProjectConfig, dirs previewDirs) error {
 // flags. These are required so that the thunk compilation can resolve
 // transitive SPM dependencies (C module headers, framework bundles, and
 // generated ObjC module maps) that xcodebuild manages internally.
-func extractCompilerPaths(bs *buildSettings, dirs previewDirs) {
+func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDirs) {
+	lock := newBuildLock(dirs.Build)
+	if err := lock.RLock(ctx); err != nil {
+		slog.Warn("Failed to acquire read lock for compiler paths", "err", err)
+		return
+	}
+	defer lock.RUnlock()
 	// Response files live under:
 	//   <dirs.Build>/Build/Intermediates.noindex/
 	//     <project>.build/<config>-iphonesimulator/<module>.build/
