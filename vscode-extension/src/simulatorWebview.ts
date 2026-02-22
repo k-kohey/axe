@@ -91,6 +91,11 @@ export class SimulatorWebviewPanel {
     this.panel?.webview.postMessage({ type: "status", streamId, phase });
   }
 
+  /** Show the Next button on a card (when previewCount > 1). */
+  showNextButton(streamId: string): void {
+    this.panel?.webview.postMessage({ type: "showNextButton", streamId });
+  }
+
   dispose(): void {
     this.panel?.dispose();
     this.panel = null;
@@ -198,8 +203,7 @@ function getWebviewHtml(): string {
           btnDevice.textContent = 'Device';
           const btnNext = document.createElement('button');
           btnNext.className = 'btn-next';
-          // TODO(Phase 4): Show "Next" button when previewCount > 1 (from StreamStarted event).
-          // Currently hidden because nextPreview dispatching per-stream is not yet implemented on the CLI side.
+          // Hidden by default; shown via showNextButton message when previewCount > 1.
           btnNext.style.display = 'none';
           btnNext.textContent = 'Next';
           const btnRemove = document.createElement('button');
@@ -236,6 +240,11 @@ function getWebviewHtml(): string {
             overlay.textContent = msg.phase;
             overlay.style.display = 'flex';
           }
+          break;
+        }
+        case 'showNextButton': {
+          const btn = document.querySelector('[data-stream-id="' + msg.streamId + '"] .btn-next');
+          if (btn) btn.style.display = '';
           break;
         }
       }
@@ -295,9 +304,8 @@ function getWebviewHtml(): string {
     }
 
     // Global keypress → send to all cards.
-    // TODO(Phase 4): Track which card has focus and send input only to that card.
-    // Currently broadcasts to all streams because WebView focus management (card selection,
-    // visual indicator, keyboard shortcut conflicts) is scoped out of Phase 1-2.
+    // Future improvement: track which card has focus and send input only to that card.
+    // Currently broadcasts to all streams because per-card focus management is out of scope.
     document.addEventListener('keypress', (e) => {
       if (e.key.length === 1) {
         const cards = document.querySelectorAll('.card');

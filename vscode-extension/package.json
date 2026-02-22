@@ -27,10 +27,6 @@
         "title": "axe: Show Preview"
       },
       {
-        "command": "axe.stopPreview",
-        "title": "axe: Stop Preview"
-      },
-      {
         "command": "axe.nextPreview",
         "title": "axe: Next Preview"
       }

@@ -306,6 +306,26 @@ suite("SimulatorWebviewPanel", () => {
     assert.strictEqual(received[0].streamId, "stream-b");
   });
 
+  test("showNextButton sends showNextButton message to webview", () => {
+    const fakePanel = createFakePanel();
+    const webview = new SimulatorWebviewPanel(createDeps(fakePanel));
+
+    webview.show();
+    webview.showNextButton("stream-a");
+
+    assert.deepStrictEqual(fakePanel.webview.messages, [
+      { type: "showNextButton", streamId: "stream-a" },
+    ]);
+  });
+
+  test("showNextButton is no-op when panel is not shown", () => {
+    const fakePanel = createFakePanel();
+    const webview = new SimulatorWebviewPanel(createDeps(fakePanel));
+
+    webview.showNextButton("stream-a");
+    assert.strictEqual(fakePanel.webview.messages.length, 0);
+  });
+
   test("HTML includes multi-card grid layout", () => {
     const fakePanel = createFakePanel();
     const webview = new SimulatorWebviewPanel(createDeps(fakePanel));
@@ -320,5 +340,6 @@ suite("SimulatorWebviewPanel", () => {
     assert.ok(fakePanel.webview.html.includes("touchDown"));
     assert.ok(fakePanel.webview.html.includes("removeStream"));
     assert.ok(fakePanel.webview.html.includes("changeDevice"));
+    assert.ok(fakePanel.webview.html.includes("showNextButton"));
   });
 });

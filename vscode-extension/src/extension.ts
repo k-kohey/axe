@@ -17,6 +17,7 @@ let resolver: BinaryResolver;
 // Track active streams: file → streamId.
 const activeStreams = new Map<string, string>();
 let lastDevice: DeviceSelection | null = null;
+let handleEditorBusy = false;
 
 function generateStreamId(): string {
   return crypto.randomUUID();
@@ -41,7 +42,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (isFrame(event)) {
         webviewPanel.postFrame(event.streamId, event.frame.data);
       } else if (isStreamStarted(event)) {
-        // Panel is already shown when addStream is called.
+        if (event.streamStarted.previewCount > 1) {
+          webviewPanel.showNextButton(event.streamId);
+        }
       } else if (isStreamStopped(event)) {
         outputChannel.appendLine(
           `[axe] Stream stopped: ${event.streamStopped.reason} - ${event.streamStopped.message}`
@@ -49,7 +52,22 @@ export function activate(context: vscode.ExtensionContext): void {
         if (event.streamStopped.diagnostic) {
           outputChannel.appendLine(event.streamStopped.diagnostic);
         }
-        webviewPanel.postStatus(event.streamId, `Stopped: ${event.streamStopped.reason}`);
+
+        // "removed" is user-initiated — card already removed by untrackStream.
+        if (event.streamStopped.reason !== "removed") {
+          // CLI-side error — show error status on the card and remove from activeStreams.
+          const msg = event.streamStopped.diagnostic
+            ? `${event.streamStopped.message}\n${event.streamStopped.diagnostic}`
+            : event.streamStopped.message || event.streamStopped.reason;
+          webviewPanel.postStatus(event.streamId, `Error: ${msg}`);
+
+          for (const [file, sid] of activeStreams) {
+            if (sid === event.streamId) {
+              activeStreams.delete(file);
+              break;
+            }
+          }
+        }
       } else if (isStreamStatus(event)) {
         webviewPanel.postStatus(event.streamId, event.streamStatus.phase);
       }
@@ -85,7 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!editor) {
         return;
       }
-      handleEditor(editor);
+      void handleEditor(editor);
     }
   );
 
@@ -100,14 +118,6 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       const file = editor.document.uri.fsPath;
       showDevicePickerAndAddStream(file);
-    }
-  );
-
-  // Register stopPreview command — stop all streams.
-  const stopPreviewCmd = vscode.commands.registerCommand(
-    "axe.stopPreview",
-    () => {
-      previewManager.stopPreview();
     }
   );
 
@@ -131,7 +141,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     editorListener,
     showPreviewCmd,
-    stopPreviewCmd,
     nextPreviewCmd,
     configListener,
     {
@@ -146,7 +155,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Check the currently active editor on activation.
   if (vscode.window.activeTextEditor) {
-    handleEditor(vscode.window.activeTextEditor);
+    void handleEditor(vscode.window.activeTextEditor);
   }
 }
 
@@ -178,14 +187,20 @@ async function untrackStream(streamId: string): Promise<void> {
       break;
     }
   }
+  if (activeStreams.size === 0) {
+    webviewPanel.dispose();
+  }
 }
 
 /**
  * Auto-detect #Preview files and manage streams.
  * Uses the last device selection for auto-start. If no device has been
  * selected yet, this is a no-op (user must run "axe: Show Preview" first).
+ *
+ * When other streams are active, prompts the user to choose between
+ * replacing all streams ("Clear & Add") or adding alongside ("Add").
  */
-function handleEditor(editor: vscode.TextEditor): void {
+async function handleEditor(editor: vscode.TextEditor): Promise<void> {
   const doc = editor.document;
   if (doc.languageId !== "swift") {
     return;
@@ -206,8 +221,33 @@ function handleEditor(editor: vscode.TextEditor): void {
     return;
   }
 
-  // Replace all existing streams with the new file (avoids unnecessary process restart).
-  replaceWithNewStream(file, lastDevice);
+  if (activeStreams.size === 0) {
+    // No active streams — start fresh.
+    await replaceWithNewStream(file, lastDevice);
+  } else {
+    // Prevent duplicate dialogs when editor switches rapidly during await.
+    if (handleEditorBusy) {
+      return;
+    }
+    handleEditorBusy = true;
+    try {
+      // Other streams are active — ask the user.
+      const fileName = path.basename(file);
+      const choice = await vscode.window.showInformationMessage(
+        `Preview: ${fileName}`,
+        "Clear & Add",
+        "Add"
+      );
+      if (choice === "Clear & Add") {
+        await replaceWithNewStream(file, lastDevice);
+      } else if (choice === "Add") {
+        await addStreamForFile(file, lastDevice);
+      }
+      // Cancel → no-op.
+    } finally {
+      handleEditorBusy = false;
+    }
+  }
 }
 
 /** Show device picker and add a stream for the given file. */
@@ -312,4 +352,5 @@ export function deactivate(): void {
   statusBar?.dispose();
   activeStreams.clear();
   lastDevice = null;
+  handleEditorBusy = false;
 }
