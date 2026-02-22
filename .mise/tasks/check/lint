@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run golangci-lint"
+#MISE depends=["proto"]
+
+set -euo pipefail
+cd cmd && golangci-lint run ./...

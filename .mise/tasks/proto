@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#MISE description="Generate Go/TS code from proto files (idb + preview)"
+#MISE depends=["vscode-deps"]
+#MISE sources=["cmd/internal/idb/proto/idb.proto", "cmd/internal/preview/proto/preview.proto"]
+#MISE outputs=["cmd/internal/idb/idbproto/idb.pb.go", "cmd/internal/idb/idbproto/idb_grpc.pb.go", "cmd/internal/preview/previewproto/preview.pb.go", "vscode-extension/src/generated/preview.ts"]
+
+set -euo pipefail
+
+# --- idb proto ---
+mkdir -p cmd/internal/idb/proto
+IDB_PROTO_URL="https://raw.githubusercontent.com/facebook/idb/e10a90af5372dbcd404eb2fbc38fa3c88630fbd7/proto/idb.proto"
+curl -fsSL "$IDB_PROTO_URL" -o cmd/internal/idb/proto/idb.proto
+# Inject go_package option for our module
+sed -i '' '/^package idb;/a\
+option go_package = "'"$GO_MODULE"'/internal/idb/idbproto";
+' cmd/internal/idb/proto/idb.proto
+protoc \
+  --go_out=cmd --go_opt=module="$GO_MODULE" \
+  --go-grpc_out=cmd --go-grpc_opt=module="$GO_MODULE" \
+  --proto_path=cmd/internal/idb/proto \
+  cmd/internal/idb/proto/*.proto
+
+# --- preview proto -> Go ---
+protoc \
+  --go_out=cmd --go_opt=module="$GO_MODULE" \
+  --proto_path=cmd/internal/preview/proto \
+  cmd/internal/preview/proto/preview.proto
+
+# --- preview proto -> TypeScript (ts-proto) ---
+mkdir -p vscode-extension/src/generated
+protoc \
+  --plugin=./vscode-extension/node_modules/.bin/protoc-gen-ts_proto \
+  --ts_proto_out=vscode-extension/src/generated \
+  --ts_proto_opt=onlyTypes=true,outputJsonMethods=false,outputEncodeMethods=false,esModuleInterop=true \
+  --proto_path=cmd/internal/preview/proto \
+  cmd/internal/preview/proto/preview.proto

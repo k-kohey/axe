@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Detect unreachable functions"
+#MISE depends=["proto"]
+
+set -euo pipefail
+cd cmd
+output=$(deadcode -test ./... 2>&1) || true
+if [ -z "$output" ]; then
+  echo "deadcode: no unreachable functions found"
+else
+  echo "$output"
+  exit 1
+fi

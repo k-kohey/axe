@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="Build release artifacts (Go binaries + VSIX)"
+#MISE depends=["proto", "vscode-deps"]
+
+set -euo pipefail
+mkdir -p .output
+GOOS=darwin GOARCH=arm64 go build -C cmd -o ../.output/axe-darwin-arm64 ./axe
+GOOS=darwin GOARCH=amd64 go build -C cmd -o ../.output/axe-darwin-amd64 ./axe
+cd vscode-extension && pnpm run compile && npx vsce package -o ../.output/

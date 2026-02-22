@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Format Go and Swift code, then lint Swift"
+
+set -euo pipefail
+gofmt -w cmd
+xcrun swift-format format --in-place --recursive "$SWIFT_PARSER/Sources" "$SWIFT_PARSER/Tests"
+xcrun swift-format lint --recursive "$SWIFT_PARSER/Sources" "$SWIFT_PARSER/Tests"

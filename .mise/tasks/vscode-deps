@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Install VSCode extension dependencies"
+#MISE sources=["vscode-extension/package.json", "vscode-extension/pnpm-lock.yaml"]
+#MISE outputs=["vscode-extension/node_modules/.modules.yaml"]
+
+set -euo pipefail
+cd vscode-extension && pnpm install --frozen-lockfile

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run Go tests"
+#MISE depends=["proto"]
+
+set -euo pipefail
+go test -C cmd ./... -cover

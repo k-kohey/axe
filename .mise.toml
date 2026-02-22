@@ -14,6 +14,10 @@ protoc = "33.4"
 "go:golang.org/x/tools/cmd/deadcode" = "latest"
 golangci-lint = "2.10"
 
+[env]
+GO_MODULE = "github.com/k-kohey/axe"
+SWIFT_PARSER = "cmd/internal/preview/swift-parser"
+
 [tasks]
 # Build the application
 # Usage: mise run build
@@ -23,7 +27,7 @@ build = { depends = ["proto"], run = "go build -C cmd -o ../.output/axe ./axe" }
 # Usage: mise run fmt
 fmt = { run = """
 go fmt -C cmd ./...
-xcrun swift-format format --in-place --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
+xcrun swift-format format --in-place --recursive $SWIFT_PARSER/Sources $SWIFT_PARSER/Tests
 """ }
 
 # Tidy up dependencies
@@ -47,72 +51,13 @@ exec = { depends = ["build"], run = "./.output/axe -v" }
 # Default task when running `mise run`
 default = { depends = ["build"] }
 
-# --- Proto Generation ---
-[tasks.proto]
-description = "Generate Go/TS code from proto files (idb + preview)"
-sources = ["cmd/internal/idb/proto/idb.proto", "cmd/internal/preview/proto/preview.proto"]
-outputs = ["cmd/internal/idb/idbproto/idb.pb.go", "cmd/internal/idb/idbproto/idb_grpc.pb.go", "cmd/internal/preview/previewproto/preview.pb.go", "vscode-extension/src/generated/preview.ts"]
-run = """
-# --- idb proto ---
-mkdir -p cmd/internal/idb/proto
-IDB_PROTO_URL="https://raw.githubusercontent.com/facebook/idb/e10a90af5372dbcd404eb2fbc38fa3c88630fbd7/proto/idb.proto"
-curl -fsSL "$IDB_PROTO_URL" -o cmd/internal/idb/proto/idb.proto
-# Inject go_package option for our module
-sed -i '' '/^package idb;/a\\
-option go_package = "github.com/k-kohey/axe/internal/idb/idbproto";
-' cmd/internal/idb/proto/idb.proto
-protoc \
-  --go_out=cmd --go_opt=module=github.com/k-kohey/axe \
-  --go-grpc_out=cmd --go-grpc_opt=module=github.com/k-kohey/axe \
-  --proto_path=cmd/internal/idb/proto \
-  cmd/internal/idb/proto/*.proto
-
-# --- preview proto → Go ---
-protoc \
-  --go_out=cmd --go_opt=module=github.com/k-kohey/axe \
-  --proto_path=cmd/internal/preview/proto \
-  cmd/internal/preview/proto/preview.proto
-
-# --- preview proto → TypeScript (ts-proto) ---
-mkdir -p vscode-extension/src/generated
-(cd vscode-extension && pnpm install --frozen-lockfile)
-protoc \
-  --plugin=./vscode-extension/node_modules/.bin/protoc-gen-ts_proto \
-  --ts_proto_out=vscode-extension/src/generated \
-  --ts_proto_opt=onlyTypes=true,outputJsonMethods=false,outputEncodeMethods=false,esModuleInterop=true \
-  --proto_path=cmd/internal/preview/proto \
-  cmd/internal/preview/proto/preview.proto
-"""
-
-# --- Release Tasks ---
-[tasks.release]
-description = "Build release artifacts (Go binaries + VSIX)"
-depends = ["proto"]
-run = """
-mkdir -p .output
-GOOS=darwin GOARCH=arm64 go build -C cmd -o ../.output/axe-darwin-arm64 ./axe
-GOOS=darwin GOARCH=amd64 go build -C cmd -o ../.output/axe-darwin-amd64 ./axe
-cd vscode-extension && pnpm install && pnpm run compile && npx vsce package -o ../.output/
-"""
-
-# --- Check Tasks ---
-[tasks.check]
-description = "Run fmt, lint, and deadcode detection"
-depends = ["proto"]
-run = """
-gofmt -w cmd
-xcrun swift-format format --in-place --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
-xcrun swift-format lint --recursive cmd/internal/preview/swift-parser/Sources cmd/internal/preview/swift-parser/Tests
-(cd cmd && golangci-lint run ./...)
-(cd cmd && deadcode -test ./... 2>&1 | { output=$(cat); [ -z "$output" ] && echo "deadcode: no unreachable functions found" || { echo "$output"; exit 1; }; })
-"""
-
-# --- Test Tasks ---
+# --- Composite Tasks ---
+# Run all tests: mise run test
+# Run individually: mise run test:go, test:swift, test:vscode
 [tasks.test]
-description = "Run all tests (Go + Swift + VSCode extension)"
-depends = ["proto"]
-run = """
-swift test --package-path cmd/internal/preview/swift-parser
-go test -C cmd ./... -cover
-cd vscode-extension && pnpm install && pnpm run compile && pnpm test
-"""
+depends = ["test:swift", "test:go", "test:vscode"]
+
+# Run all checks: mise run check
+# Run individually: mise run check:fmt, check:lint, check:deadcode
+[tasks.check]
+depends = ["tidy", "check:fmt", "check:lint", "check:deadcode"]

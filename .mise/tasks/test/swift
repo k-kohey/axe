@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run Swift tests"
+
+set -euo pipefail
+swift test --package-path "$SWIFT_PARSER"

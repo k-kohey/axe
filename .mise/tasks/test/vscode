@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Run VSCode extension tests"
+#MISE depends=["proto", "vscode-deps"]
+
+set -euo pipefail
+cd vscode-extension && pnpm run compile && pnpm test
