@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var version = "dev"
+
 var appName string
 var verbose bool
 
@@ -23,6 +25,8 @@ func main() {
 }
 
 func init() {
+	rootCmd.Version = version
+
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&appName, "app", "", "target app process name (overrides .axerc)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")

@@ -21,7 +21,7 @@ SWIFT_PARSER = "cmd/internal/preview/swift-parser"
 [tasks]
 # Build the application
 # Usage: mise run build
-build = { depends = ["proto"], run = "go build -C cmd -o ../.output/axe ./axe" }
+build = { depends = ["proto"], run = "go build -C cmd -ldflags \"-X main.version=${AXE_VERSION:-dev}\" -o ../.output/axe ./axe" }
 
 # Format the source code
 # Usage: mise run fmt

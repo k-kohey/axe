@@ -1,4 +1,7 @@
 #!/bin/sh
+# Install axe CLI.
+# To install a specific version, set VERSION before running:
+#   VERSION=v1.0.0 sh install.sh
 set -e
 
 REPO="k-kohey/axe"

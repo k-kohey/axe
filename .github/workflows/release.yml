@@ -12,7 +12,11 @@ jobs:
       - uses: jdx/mise-action@v2
       - name: Set extension version from tag
         run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}" --prefix vscode-extension
+      - name: Inject minimum CLI version into extension
+        run: sed -i '' "s/export const MIN_CLI_VERSION = \"0.0.0\"/export const MIN_CLI_VERSION = \"${GITHUB_REF_NAME#v}\"/" vscode-extension/src/versionCheck.ts
       - run: mise run release
+        env:
+          AXE_VERSION: ${{ github.ref_name }}
       - run: gh release create "${{ github.ref_name }}" .output/* --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

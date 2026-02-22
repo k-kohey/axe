@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import * as vscode from "vscode";
+import { runInstallScript } from "./installScript";
+import { checkCliVersion, type VersionCheckDeps } from "./versionCheck";
 
 export interface BinaryResolverDeps {
 	which?: (command: string) => Promise<string | null>;
@@ -9,6 +11,7 @@ export interface BinaryResolverDeps {
 	) => Thenable<string | undefined>;
 	openSettings?: (settingId: string) => Promise<void>;
 	createTerminal?: (name: string) => vscode.Terminal;
+	versionCheck?: VersionCheckDeps;
 }
 
 function defaultWhich(command: string): Promise<string | null> {
@@ -45,6 +48,7 @@ export class BinaryResolver {
 			openSettings: deps?.openSettings ?? defaultOpenSettings,
 			createTerminal:
 				deps?.createTerminal ?? ((name) => vscode.window.createTerminal(name)),
+			versionCheck: deps?.versionCheck ?? {},
 		};
 	}
 
@@ -58,6 +62,9 @@ export class BinaryResolver {
 		const configured = cfg.get<string>("executablePath", "axe");
 		if (configured !== "axe") {
 			this.cachedPath = configured;
+			// Fire-and-forget: version check runs in the background so it never
+			// blocks binary resolution. Warnings are shown asynchronously.
+			checkCliVersion(configured, this.deps.versionCheck);
 			return configured;
 		}
 
@@ -65,6 +72,8 @@ export class BinaryResolver {
 		const whichPath = await this.deps.which("axe");
 		if (whichPath) {
 			this.cachedPath = whichPath;
+			// Fire-and-forget: same rationale as above.
+			checkCliVersion(whichPath, this.deps.versionCheck);
 			return whichPath;
 		}
 
@@ -76,11 +85,7 @@ export class BinaryResolver {
 		);
 
 		if (choice === "Run Install Script") {
-			const terminal = this.deps.createTerminal("axe install");
-			terminal.show();
-			terminal.sendText(
-				"curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh",
-			);
+			runInstallScript(this.deps.createTerminal);
 		}
 
 		if (choice === "Configure Path") {

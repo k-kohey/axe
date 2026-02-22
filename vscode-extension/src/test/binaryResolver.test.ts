@@ -1,6 +1,7 @@
 import * as assert from "node:assert";
 import * as vscode from "vscode";
 import { BinaryResolver, type BinaryResolverDeps } from "../binaryResolver";
+import type { VersionCheckDeps } from "../versionCheck";
 
 // --- Helpers ---
 
@@ -155,6 +156,45 @@ suite("BinaryResolver", () => {
 			resolver.clearCache();
 			await resolver.resolve();
 			assert.strictEqual(whichCallCount, 2);
+		});
+	});
+
+	suite("version check integration", () => {
+		test("skips version check in dev mode (MIN_CLI_VERSION=0.0.0)", async () => {
+			let queriedPath = "";
+			const versionCheckDeps: VersionCheckDeps = {
+				queryCliVersion: async (path) => {
+					queriedPath = path;
+					return "1.0.0";
+				},
+				showWarning: async () => undefined,
+			};
+			const deps = createDeps({
+				which: async () => "/usr/local/bin/axe",
+				versionCheck: versionCheckDeps,
+			});
+			const resolver = new BinaryResolver(deps);
+
+			await resolver.resolve();
+			// MIN_CLI_VERSION is "0.0.0" in dev builds, so checkCliVersion
+			// returns early without calling queryCliVersion.
+			assert.strictEqual(queriedPath, "");
+		});
+
+		test("does not block resolve when version check fails", async () => {
+			const versionCheckDeps: VersionCheckDeps = {
+				queryCliVersion: async () => {
+					throw new Error("version query failed");
+				},
+			};
+			const deps = createDeps({
+				which: async () => "/usr/local/bin/axe",
+				versionCheck: versionCheckDeps,
+			});
+			const resolver = new BinaryResolver(deps);
+
+			const result = await resolver.resolve();
+			assert.strictEqual(result, "/usr/local/bin/axe");
 		});
 	});
 });

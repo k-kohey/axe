@@ -4,6 +4,9 @@
 
 set -euo pipefail
 mkdir -p .output
-GOOS=darwin GOARCH=arm64 go build -C cmd -o ../.output/axe-darwin-arm64 ./axe
-GOOS=darwin GOARCH=amd64 go build -C cmd -o ../.output/axe-darwin-amd64 ./axe
+# AXE_VERSION includes the "v" prefix (e.g. "v1.2.3") matching the git tag.
+# The vscode extension's versionCheck.ts regex strips the prefix for semver comparison.
+LDFLAGS="-X main.version=${AXE_VERSION:-dev}"
+GOOS=darwin GOARCH=arm64 go build -C cmd -ldflags "$LDFLAGS" -o ../.output/axe-darwin-arm64 ./axe
+GOOS=darwin GOARCH=amd64 go build -C cmd -ldflags "$LDFLAGS" -o ../.output/axe-darwin-amd64 ./axe
 cd vscode-extension && pnpm run compile && npx vsce package -o ../.output/
