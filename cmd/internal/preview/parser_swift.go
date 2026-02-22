@@ -12,42 +12,24 @@ import (
 
 // swiftParseResult mirrors the JSON output from the axe-parser CLI.
 type swiftParseResult struct {
-	Types           []swiftTypeInfo    `json:"types"`
-	Imports         []string           `json:"imports"`
-	Previews        []swiftPreviewInfo `json:"previews"`
-	SkeletonHash    string             `json:"skeletonHash"`
-	ReferencedTypes []string           `json:"referencedTypes"`
-	DefinedTypes    []string           `json:"definedTypes"`
+	Types           []swiftTypeInfo `json:"types"`
+	Imports         []string        `json:"imports"`
+	Previews        []previewBlock  `json:"previews"`
+	SkeletonHash    string          `json:"skeletonHash"`
+	ReferencedTypes []string        `json:"referencedTypes"`
+	DefinedTypes    []string        `json:"definedTypes"`
 }
 
+// swiftTypeInfo is the raw per-type JSON from axe-parser.
+// Unlike typeInfo, it includes ALL properties/methods (including stored ones).
+// convertTypes filters out types with no computed properties or methods.
 type swiftTypeInfo struct {
-	Name           string              `json:"name"`
-	Kind           string              `json:"kind"`
-	AccessLevel    string              `json:"accessLevel"`
-	InheritedTypes []string            `json:"inheritedTypes"`
-	Properties     []swiftPropertyInfo `json:"properties"`
-	Methods        []swiftMethodInfo   `json:"methods"`
-}
-
-type swiftPropertyInfo struct {
-	Name     string `json:"name"`
-	TypeExpr string `json:"typeExpr"`
-	BodyLine int    `json:"bodyLine"`
-	Source   string `json:"source"`
-}
-
-type swiftMethodInfo struct {
-	Name      string `json:"name"`
-	Selector  string `json:"selector"`
-	Signature string `json:"signature"`
-	BodyLine  int    `json:"bodyLine"`
-	Source    string `json:"source"`
-}
-
-type swiftPreviewInfo struct {
-	StartLine int    `json:"startLine"`
-	Title     string `json:"title"`
-	Source    string `json:"source"`
+	Name           string         `json:"name"`
+	Kind           string         `json:"kind"`
+	AccessLevel    string         `json:"accessLevel"`
+	InheritedTypes []string       `json:"inheritedTypes"`
+	Properties     []propertyInfo `json:"properties"`
+	Methods        []methodInfo   `json:"methods"`
 }
 
 // parseCacheEntry holds a cached parse result for a single file.
@@ -124,23 +106,8 @@ func swiftParse(path string) (*swiftParseResult, error) {
 func convertTypes(swiftTypes []swiftTypeInfo) []typeInfo {
 	var types []typeInfo
 	for _, st := range swiftTypes {
-		var props []propertyInfo
-		for _, sp := range st.Properties {
-			props = append(props, propertyInfo(sp))
-		}
-		var methods []methodInfo
-		for _, sm := range st.Methods {
-			methods = append(methods, methodInfo(sm))
-		}
-		if len(props) > 0 || len(methods) > 0 {
-			types = append(types, typeInfo{
-				Name:           st.Name,
-				Kind:           st.Kind,
-				AccessLevel:    st.AccessLevel,
-				InheritedTypes: st.InheritedTypes,
-				Properties:     props,
-				Methods:        methods,
-			})
+		if len(st.Properties) > 0 || len(st.Methods) > 0 {
+			types = append(types, typeInfo(st))
 		}
 	}
 	return types
@@ -184,13 +151,11 @@ func parsePreviewBlocks(path string) ([]previewBlock, error) {
 		return nil, fmt.Errorf("parsing preview blocks: %w", err)
 	}
 
-	var blocks []previewBlock
-	for _, sp := range result.Previews {
-		blocks = append(blocks, previewBlock(sp))
-		slog.Debug("Found #Preview block", "line", sp.StartLine, "title", sp.Title)
+	for _, b := range result.Previews {
+		slog.Debug("Found #Preview block", "line", b.StartLine, "title", b.Title)
 	}
 
-	return blocks, nil
+	return result.Previews, nil
 }
 
 // computeSkeleton computes a SHA-256 hash of the source file with body regions

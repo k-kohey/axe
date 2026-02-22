@@ -24,19 +24,19 @@ type buildSettings struct {
 
 // propertyInfo describes a computed property inside a Swift type.
 type propertyInfo struct {
-	Name     string // "body", "backgroundColor", etc.
-	TypeExpr string // "some View", "Color", etc.
-	BodyLine int
-	Source   string
+	Name     string `json:"name"`     // "body", "backgroundColor", etc.
+	TypeExpr string `json:"typeExpr"` // "some View", "Color", etc.
+	BodyLine int    `json:"bodyLine"`
+	Source   string `json:"source"`
 }
 
 // methodInfo describes a method (func) inside a Swift type.
 type methodInfo struct {
-	Name      string // "greet"
-	Selector  string // "greet(name:)" — @_dynamicReplacement 用セレクタ
-	Signature string // "(name: String) -> String" — ( から { の直前まで
-	BodyLine  int
-	Source    string
+	Name      string `json:"name"`      // "greet"
+	Selector  string `json:"selector"`  // "greet(name:)" — @_dynamicReplacement 用セレクタ
+	Signature string `json:"signature"` // "(name: String) -> String" — ( から { の直前まで
+	BodyLine  int    `json:"bodyLine"`
+	Source    string `json:"source"`
 }
 
 // typeInfo describes a Swift type parsed from a source file.
@@ -69,9 +69,9 @@ type fileThunkData struct {
 
 // previewBlock describes a #Preview { ... } block in the source.
 type previewBlock struct {
-	StartLine int
-	Title     string // e.g. "Dark Mode", empty for unnamed
-	Source    string
+	StartLine int    `json:"startLine"`
+	Title     string `json:"title"` // e.g. "Dark Mode", empty for unnamed
+	Source    string `json:"source"`
 }
 
 // previewableProperty holds a single @Previewable declaration
