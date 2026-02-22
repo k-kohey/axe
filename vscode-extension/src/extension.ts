@@ -32,7 +32,7 @@ function generateStreamId(): string {
 
 export function activate(context: vscode.ExtensionContext): void {
 	const outputChannel = vscode.window.createOutputChannel(
-		"axe SwiftUI Preview",
+		"SwiftUI Preview with axe",
 	);
 	statusBar = new StatusBar();
 

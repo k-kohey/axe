@@ -1,6 +1,6 @@
 {
   "name": "axe-swiftui-preview",
-  "displayName": "axe SwiftUI Preview",
+  "displayName": "SwiftUI Preview with axe",
   "description": "Automatically run axe preview for SwiftUI #Preview files",
   "version": "0.0.0",
   "publisher": "k-kohey",
@@ -32,7 +32,7 @@
       }
     ],
     "configuration": {
-      "title": "axe SwiftUI Preview",
+      "title": "SwiftUI Preview with axe",
       "properties": {
         "axe.executablePath": {
           "type": "string",
