@@ -342,7 +342,15 @@ func RunServe(pc ProjectConfig) error {
 		slog.Warn("Failed to clean up orphaned devices", "err", err)
 	}
 
-	sm := NewStreamManager(pool, ew)
+	sm := NewStreamManager(pool, ew, pc, deviceSetPath)
+
+	// Start shared file watcher for all streams.
+	watcher, err := newSharedWatcher(ctx, pc)
+	if err != nil {
+		return fmt.Errorf("creating shared file watcher: %w", err)
+	}
+	sm.watcher = watcher
+	defer watcher.close()
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.

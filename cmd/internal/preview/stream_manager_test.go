@@ -117,12 +117,43 @@ func filterEvents(events []parsedEvent, streamID string) []parsedEvent {
 	return filtered
 }
 
+// newTestStreamManager creates a StreamManager with a fake launcher that acquires
+// a device, sends a "booting" status event, and blocks until ctx is cancelled.
+func newTestStreamManager(pool DevicePoolInterface, ew *EventWriter) *StreamManager {
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		if err := sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "booting"}},
+		}); err != nil {
+			return
+		}
+
+		udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		if err != nil {
+			s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("acquiring device: %v", err), "")
+			return
+		}
+		s.deviceUDID = udid
+
+		if err := sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "running"}},
+		}); err != nil {
+			return
+		}
+
+		<-ctx.Done()
+	}
+	return sm
+}
+
 func TestStreamManager_AddStream_Events(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -154,7 +185,7 @@ func TestStreamManager_RemoveStream(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -173,7 +204,7 @@ func TestStreamManager_RemoveStream(t *testing.T) {
 	})
 
 	// Wait for StreamStopped event.
-	waitForEvents(t, &buf, 2, 2*time.Second)
+	waitForEvents(t, &buf, 3, 2*time.Second)
 
 	sm.StopAll()
 
@@ -205,7 +236,7 @@ func TestStreamManager_NonexistentRemove(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 
 	ctx := context.Background()
 
@@ -223,7 +254,7 @@ func TestStreamManager_TwoStreams(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -259,7 +290,7 @@ func TestStreamManager_StopAll_ShutdownsPool(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -286,7 +317,7 @@ func TestStreamManager_AcquireError(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
 
 	ctx := context.Background()
@@ -318,7 +349,7 @@ func TestStreamManager_DuplicateStreamID(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -345,11 +376,400 @@ func TestStreamManager_EmptyCommand(t *testing.T) {
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew)
+	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
 
 	// Command with no payload should not panic.
 	sm.HandleCommand(context.Background(), &pb.Command{StreamId: "x"})
+}
+
+// TestStreamManager_FullLifecycle verifies the fake launcher sends StreamStarted
+// and Frame events, and RemoveStream produces StreamStopped{removed}.
+func TestStreamManager_FullLifecycle(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		if err != nil {
+			s.sendStopped(sm.ew, "resource_error", err.Error(), "")
+			return
+		}
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStarted{StreamStarted: &pb.StreamStarted{PreviewCount: 2}},
+		})
+
+		// Simulate frame sending.
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: udid, File: s.file, Data: "AAAA"}},
+		})
+
+		<-ctx.Done()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 2, 2*time.Second) // StreamStarted + Frame
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_RemoveStream{RemoveStream: &pb.RemoveStream{}},
+	})
+
+	waitForEvents(t, &buf, 3, 2*time.Second) // + StreamStopped
+
+	sm.StopAll()
+
+	events := filterEvents(collectEvents(t, &buf), "stream-a")
+	var hasStarted, hasFrame, hasStopped bool
+	for _, e := range events {
+		if e.StreamStarted != nil {
+			hasStarted = true
+		}
+		if e.Frame != nil {
+			hasFrame = true
+		}
+		if e.StreamStopped != nil {
+			if reason, ok := e.StreamStopped["reason"].(string); ok && reason == "removed" {
+				hasStopped = true
+			}
+		}
+	}
+	if !hasStarted {
+		t.Error("expected StreamStarted event")
+	}
+	if !hasFrame {
+		t.Error("expected Frame event")
+	}
+	if !hasStopped {
+		t.Error("expected StreamStopped{removed} event")
+	}
+}
+
+// TestStreamManager_TwoStreamsWithFrames verifies that two streams receive
+// independent Frame events with correct streamIds.
+func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: udid, File: s.file, Data: "frame-" + s.id}},
+		})
+
+		<-ctx.Done()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-b",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/FugaView.swift", DeviceType: "iPad-Air", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 2, 2*time.Second)
+
+	sm.StopAll()
+
+	events := collectEvents(t, &buf)
+	eventsA := filterEvents(events, "stream-a")
+	eventsB := filterEvents(events, "stream-b")
+
+	if len(eventsA) == 0 || eventsA[0].Frame == nil {
+		t.Error("expected Frame for stream-a")
+	}
+	if len(eventsB) == 0 || eventsB[0].Frame == nil {
+		t.Error("expected Frame for stream-b")
+	}
+}
+
+// TestStreamManager_LauncherError_NoDoubleStopped verifies that when a launcher
+// sends StreamStopped due to error, and RemoveStream is then called, only one
+// StreamStopped event is produced.
+func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+
+	launcherDone := make(chan struct{})
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		// Simulate an error: send StreamStopped and return.
+		s.sendStopped(sm.ew, "build_error", "compilation failed", "error: type 'Foo' not found")
+		close(launcherDone)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	// Wait for the launcher to complete.
+	select {
+	case <-launcherDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("launcher did not complete")
+	}
+
+	// Give runStream's defer a moment to clean up and self-remove.
+	time.Sleep(50 * time.Millisecond)
+
+	// RemoveStream should be safe (stream may already be cleaned up).
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_RemoveStream{RemoveStream: &pb.RemoveStream{}},
+	})
+
+	sm.StopAll()
+
+	events := filterEvents(collectEvents(t, &buf), "stream-a")
+	stoppedCount := 0
+	for _, e := range events {
+		if e.StreamStopped != nil {
+			stoppedCount++
+		}
+	}
+	if stoppedCount != 1 {
+		t.Errorf("expected exactly 1 StreamStopped, got %d; events: %+v", stoppedCount, events)
+	}
+}
+
+// TestStreamManager_SwitchFileRouting verifies that SwitchFile commands are
+// delivered to the stream's switchFileCh.
+func TestStreamManager_SwitchFileRouting(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+
+	receivedFile := make(chan string, 1)
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "running"}},
+		})
+
+		select {
+		case file := <-s.switchFileCh:
+			receivedFile <- file
+		case <-ctx.Done():
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 1, 2*time.Second)
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_SwitchFile{SwitchFile: &pb.SwitchFile{File: "/path/to/FugaView.swift"}},
+	})
+
+	select {
+	case file := <-receivedFile:
+		if file != "/path/to/FugaView.swift" {
+			t.Errorf("expected /path/to/FugaView.swift, got %s", file)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SwitchFile not received by stream")
+	}
+
+	sm.StopAll()
+}
+
+// TestStreamManager_InputRouting verifies that Input commands are delivered
+// to the stream's inputCh.
+func TestStreamManager_InputRouting(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+
+	receivedInput := make(chan *pb.Input, 1)
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "running"}},
+		})
+
+		select {
+		case input := <-s.inputCh:
+			receivedInput <- input
+		case <-ctx.Done():
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 1, 2*time.Second)
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_Input{Input: &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: "hello"}}}},
+	})
+
+	select {
+	case input := <-receivedInput:
+		if input.GetText().GetValue() != "hello" {
+			t.Errorf("expected text 'hello', got %v", input)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Input not received by stream")
+	}
+
+	sm.StopAll()
+}
+
+// TestStreamManager_CleanupOnError verifies that when the launcher exits with
+// error, the device is released and the stream is removed from the map.
+func TestStreamManager_CleanupOnError(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+
+	launcherDone := make(chan struct{})
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+		s.sendStopped(sm.ew, "build_error", "failed", "")
+		close(launcherDone)
+	}
+
+	ctx := context.Background()
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	select {
+	case <-launcherDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("launcher did not complete")
+	}
+
+	// Wait for runStream's defer to complete cleanup.
+	time.Sleep(100 * time.Millisecond)
+
+	// Device should be released.
+	pool.mu.Lock()
+	released := len(pool.released)
+	pool.mu.Unlock()
+	if released == 0 {
+		t.Error("expected pool.Release to be called after launcher error")
+	}
+
+	// Stream should be self-removed from map.
+	sm.mu.Lock()
+	count := len(sm.streams)
+	sm.mu.Unlock()
+	if count != 0 {
+		t.Errorf("expected 0 streams in map after error, got %d", count)
+	}
+
+	sm.StopAll()
+}
+
+// TestStreamManager_NextPreviewRouting verifies that NextPreview commands are
+// delivered to the stream's nextPreviewCh.
+func TestStreamManager_NextPreviewRouting(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "")
+
+	received := make(chan struct{}, 1)
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "running"}},
+		})
+
+		select {
+		case <-s.nextPreviewCh:
+			received <- struct{}{}
+		case <-ctx.Done():
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 1, 2*time.Second)
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_NextPreview{NextPreview: &pb.NextPreview{}},
+	})
+
+	select {
+	case <-received:
+		// Success.
+	case <-time.After(2 * time.Second):
+		t.Fatal("NextPreview not received by stream")
+	}
+
+	sm.StopAll()
 }
 
 // waitForEvents polls until the buffer contains at least n newlines (events).
