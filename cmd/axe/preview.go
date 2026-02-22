@@ -29,18 +29,15 @@ var previewCmd = &cobra.Command{
 	this command builds the project, extracts the View body from the source file, generates a @_dynamicReplacement thunk,
 	compiles it into a dylib, and launches the app on a headless simulator with the dylib injected.
 	The simulator is managed automatically in axe's dedicated device set and shut down on exit.
-	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		sourceFile, err := filepath.Abs(args[0])
-		if err != nil {
-			return fmt.Errorf("resolving source path: %w", err)
-		}
-		if _, err := os.Stat(sourceFile); err != nil {
-			return fmt.Errorf("source file not found: %s", sourceFile)
-		}
 
-		// Fall back to .axerc for unset flags
+	With --serve, the command runs as a multi-stream IDE backend. No source file argument is needed;
+	streams are managed via JSON Lines commands on stdin (AddStream/RemoveStream), and events
+	(Frame/StreamStarted/StreamStopped/StreamStatus) are emitted on stdout.
+
+	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,
+	Args: cobra.RangeArgs(0, 1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Fall back to .axerc for unset flags.
 		rc := platform.ReadRC()
 		if previewProject == "" && rc["PROJECT"] != "" {
 			previewProject = rc["PROJECT"]
@@ -73,13 +70,26 @@ var previewCmd = &cobra.Command{
 			return err
 		}
 
-		if previewServe && !previewWatch {
-			return fmt.Errorf("--serve requires --watch")
-		}
-
 		// idb_companion is always required (headless boot + serve mode).
 		if err := platform.CheckIDBCompanion(); err != nil {
 			return err
+		}
+
+		// Multi-stream serve mode: source file comes via AddStream commands on stdin.
+		if previewServe {
+			return preview.RunServe(pc)
+		}
+
+		// Single-stream mode requires a source file argument.
+		if len(args) == 0 {
+			return fmt.Errorf("source file argument is required (or use --serve for multi-stream mode)")
+		}
+		sourceFile, err := filepath.Abs(args[0])
+		if err != nil {
+			return fmt.Errorf("resolving source path: %w", err)
+		}
+		if _, err := os.Stat(sourceFile); err != nil {
+			return fmt.Errorf("source file not found: %s", sourceFile)
 		}
 
 		return preview.Run(sourceFile, pc, previewWatch, previewSelector, previewServe, previewDevice, previewReuseBuild)

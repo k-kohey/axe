@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
 // watchState holds mutable state for the watch loop, protected by a mutex.
@@ -60,8 +61,14 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	fmt.Fprintf(os.Stderr, "Watching %s for changes (Enter to cycle previews, Ctrl+C to stop)...\n", watchRoot)
 
 	// Read commands from stdin (preview cycling or file switching in serve mode).
+	// In serve mode, new Command protocol is used. In non-serve mode, legacy stdinCommand.
 	cmdCh := make(chan stdinCommand, 1)
-	go readStdinCommands(cmdCh, wctx.serve)
+	protoCmdCh := make(chan *pb.Command, 1)
+	if wctx.serve {
+		go readProtocolCommands(ctx, protoCmdCh)
+	} else {
+		go readStdinCommands(cmdCh, false)
+	}
 
 	var trackedDebounce *time.Timer // fast path: tracked file change → hot reload
 	var depDebounce *time.Timer     // full path: untracked dependency change → rebuild + relaunch
@@ -211,6 +218,45 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				}
 			case "tap", "swipe", "text", "touchDown", "touchMove", "touchUp":
 				hid.Handle(cmd)
+			}
+
+		case protoCmd := <-protoCmdCh:
+			switch {
+			case protoCmd.GetSwitchFile() != nil:
+				if protoCmd.GetSwitchFile().GetFile() == "" {
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", protoCmd.GetSwitchFile().GetFile())
+				if err := switchFile(ctx, protoCmd.GetSwitchFile().GetFile(), pc, bs, dirs, wctx, ws); err != nil {
+					fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)
+				} else {
+					sourceFile = protoCmd.GetSwitchFile().GetFile()
+					ws.mu.Lock()
+					trackedSet = make(map[string]bool, len(ws.trackedFiles))
+					for _, tf := range ws.trackedFiles {
+						trackedSet[filepath.Clean(tf)] = true
+					}
+					ws.mu.Unlock()
+				}
+			case protoCmd.GetNextPreview() != nil:
+				ws.mu.Lock()
+				count := ws.previewCount
+				ws.mu.Unlock()
+				if count <= 1 {
+					continue
+				}
+				ws.mu.Lock()
+				ws.previewIndex = (ws.previewIndex + 1) % count
+				ws.previewSelector = strconv.Itoa(ws.previewIndex)
+				ws.mu.Unlock()
+				fmt.Fprintf(os.Stderr, "\nSwitching to preview %d/%d...\n", ws.previewIndex+1, count)
+				if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
+					fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
+				}
+			case protoCmd.GetInput() != nil:
+				hid.HandleInput(protoCmd.GetInput())
+			default:
+				slog.Warn("Ignoring unhandled command in single-stream mode", "streamId", protoCmd.GetStreamId())
 			}
 
 		case err, ok := <-watcher.Errors:
@@ -516,6 +562,18 @@ func readStdinCommands(ch chan<- stdinCommand, serve bool) {
 		default: // don't block if previous command hasn't been processed
 		}
 	}
+}
+
+// readProtocolCommands reads JSON Lines from stdin and parses them as Command structs.
+// Invalid JSON lines are logged and skipped. EOF causes the channel to close.
+func readProtocolCommands(ctx context.Context, ch chan<- *pb.Command) {
+	readCommands(ctx, os.Stdin, func(cmd *pb.Command) {
+		select {
+		case ch <- cmd:
+		default:
+		}
+	})
+	close(ch)
 }
 
 // gitSwiftDirs returns unique directories containing Swift files tracked by git

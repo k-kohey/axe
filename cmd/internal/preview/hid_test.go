@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
-	pb "github.com/k-kohey/axe/internal/idb/idbproto"
+	idbpb "github.com/k-kohey/axe/internal/idb/idbproto"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -97,12 +98,12 @@ type mockHIDStream struct {
 	closeRecvCalled bool
 }
 
-func (s *mockHIDStream) Send(_ *pb.HIDEvent) error { return nil }
-func (s *mockHIDStream) CloseAndRecv() (*pb.HIDResponse, error) {
+func (s *mockHIDStream) Send(_ *idbpb.HIDEvent) error { return nil }
+func (s *mockHIDStream) CloseAndRecv() (*idbpb.HIDResponse, error) {
 	s.mu.Lock()
 	s.closeRecvCalled = true
 	s.mu.Unlock()
-	return &pb.HIDResponse{}, nil
+	return &idbpb.HIDResponse{}, nil
 }
 func (s *mockHIDStream) Header() (metadata.MD, error) { return nil, nil }
 func (s *mockHIDStream) Trailer() metadata.MD         { return nil }
@@ -357,6 +358,56 @@ func TestHIDHandler_TouchDownError_ClosesStream(t *testing.T) {
 	if !closed {
 		t.Error("expected CloseAndRecv to be called on stream after TouchDown error")
 	}
+}
+
+// --- HandleInput (protocol.Input) ---
+
+func TestHIDHandler_HandleInput_TouchDown(t *testing.T) {
+	mock := &mockHIDClient{}
+	h := newHIDHandler(mock, 390, 844)
+
+	h.HandleInput(&pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.3}}})
+
+	calls := mock.getCalls()
+	if len(calls) != 2 { // OpenHIDStream + TouchDown
+		t.Fatalf("expected 2 calls, got %d: %+v", len(calls), calls)
+	}
+	if calls[1].method != "TouchDown" {
+		t.Errorf("expected TouchDown, got %s", calls[1].method)
+	}
+	wantX, wantY := 195.0, 253.2
+	if calls[1].args[0] != wantX || calls[1].args[1] != wantY {
+		t.Errorf("expected (%v, %v), got (%v, %v)", wantX, wantY, calls[1].args[0], calls[1].args[1])
+	}
+}
+
+func TestHIDHandler_HandleInput_Text(t *testing.T) {
+	mock := &mockHIDClient{}
+	h := newHIDHandler(mock, 390, 844)
+
+	h.HandleInput(&pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: "z"}}})
+	time.Sleep(50 * time.Millisecond)
+
+	calls := mock.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call, got %d", len(calls))
+	}
+	if calls[0].text != "z" {
+		t.Errorf("expected text 'z', got %q", calls[0].text)
+	}
+}
+
+func TestHIDHandler_HandleInput_NilReceiver(t *testing.T) {
+	var h *hidHandler
+	// Should not panic.
+	h.HandleInput(&pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
+}
+
+func TestHIDHandler_HandleInput_NilInput(t *testing.T) {
+	mock := &mockHIDClient{}
+	h := newHIDHandler(mock, 390, 844)
+	// Should not panic.
+	h.HandleInput(nil)
 }
 
 // --- Guard conditions ---

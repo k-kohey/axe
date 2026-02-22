@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
 // streamRetryConfig controls the retry behavior for video stream reconnection.
@@ -28,18 +29,33 @@ var defaultRetryConfig = streamRetryConfig{
 	maxBackoff:     5 * time.Second,
 }
 
+// videoOutputConfig controls how video frames are output.
+// When ew is non-nil, frames are sent as JSON Lines Events.
+// When ew is nil, frames are written as raw base64 lines to stdout (legacy mode).
+type videoOutputConfig struct {
+	ew       *EventWriter
+	streamID string
+	device   string
+	file     string
+}
+
 // relayVideoStream opens a raw-pixel video stream from idb_companion, converts
 // frames to JPEG, and writes base64-encoded lines to stdout.
 // On stream disconnection it retries with exponential backoff.
 func relayVideoStream(ctx context.Context, client idb.IDBClient, errCh chan<- error) {
-	relayVideoStreamWithConfig(ctx, client, errCh, defaultRetryConfig)
+	relayVideoStreamWithConfig(ctx, client, errCh, defaultRetryConfig, nil)
 }
 
-func relayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh chan<- error, cfg streamRetryConfig) {
+// relayVideoStreamEvents is the serve-mode variant that outputs JSON Lines Events.
+func relayVideoStreamEvents(ctx context.Context, client idb.IDBClient, errCh chan<- error, voc *videoOutputConfig) {
+	relayVideoStreamWithConfig(ctx, client, errCh, defaultRetryConfig, voc)
+}
+
+func relayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh chan<- error, cfg streamRetryConfig, voc *videoOutputConfig) {
 	backoff := cfg.initialBackoff
 
 	for attempt := 0; ; attempt++ {
-		err := runVideoStreamLoop(ctx, client)
+		err := runVideoStreamLoop(ctx, client, voc)
 		if ctx.Err() != nil {
 			return
 		}
@@ -68,7 +84,7 @@ func relayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh
 // RBGA format is used instead of H264 because idb_companion's H264 encoder
 // produces severe ghosting artifacts during rapid screen changes.
 // See survey/idb_companion_h264_issue.md for details.
-func runVideoStreamLoop(ctx context.Context, client idb.IDBClient) error {
+func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOutputConfig) error {
 	frameCh, err := client.VideoStream(ctx, 30)
 	if err != nil {
 		return fmt.Errorf("video stream open: %w", err)
@@ -130,7 +146,16 @@ func runVideoStreamLoop(ctx context.Context, client idb.IDBClient) error {
 				continue
 			}
 
-			fmt.Println(encoded)
+			if voc != nil && voc.ew != nil {
+				if sendErr := voc.ew.Send(&pb.Event{
+					StreamId: voc.streamID,
+					Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: voc.device, File: voc.file, Data: encoded}},
+				}); sendErr != nil {
+					slog.Warn("Failed to send frame event", "err", sendErr)
+				}
+			} else {
+				fmt.Println(encoded)
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
 // hidClient is the HID-relevant subset of idb.IDBClient.
@@ -145,6 +146,24 @@ func (h *hidHandler) handleTouchMove(cmd stdinCommand) {
 		if err := h.client.TouchMove(stream, cmd.X*float64(sw), cmd.Y*float64(sh)); err != nil {
 			slog.Warn("TouchMove failed", "err", err)
 		}
+	}
+}
+
+// HandleInput dispatches a protocol Input message to the appropriate HID handler.
+// Safe to call on a nil receiver.
+func (h *hidHandler) HandleInput(input *pb.Input) {
+	if h == nil || h.client == nil || input == nil {
+		return
+	}
+	switch {
+	case input.GetText() != nil:
+		h.handleText(stdinCommand{Type: "text", Value: input.GetText().GetValue()})
+	case input.GetTouchDown() != nil:
+		h.handleTouchDown(stdinCommand{Type: "touchDown", X: input.GetTouchDown().GetX(), Y: input.GetTouchDown().GetY()})
+	case input.GetTouchMove() != nil:
+		h.handleTouchMove(stdinCommand{Type: "touchMove", X: input.GetTouchMove().GetX(), Y: input.GetTouchMove().GetY()})
+	case input.GetTouchUp() != nil:
+		h.handleTouchUp(stdinCommand{Type: "touchUp", X: input.GetTouchUp().GetX(), Y: input.GetTouchUp().GetY()})
 	}
 }
 
