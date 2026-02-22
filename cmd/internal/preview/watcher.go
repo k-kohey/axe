@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
@@ -44,7 +43,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	// Watch directories containing Swift source files.
 	// Use git to discover them (fast, respects .gitignore), falling back to WalkDir.
 	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := gitSwiftDirs(watchRoot)
+	watchDirs, err := gitSwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
 		watchDirs, err = walkSwiftDirs(watchRoot)
@@ -70,32 +69,18 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 		go readStdinCommands(cmdCh, false)
 	}
 
-	var trackedDebounce *time.Timer // fast path: tracked file change → hot reload
-	var depDebounce *time.Timer     // full path: untracked dependency change → rebuild + relaunch
-
-	// Channels for debounce timer signals. The actual work runs in the select
-	// loop to avoid data races on local variables (depDebounce, trackedDebounce).
-	trackedDebounceCh := make(chan string, 1) // carries the changed file path
-	depDebounceCh := make(chan struct{}, 1)
+	db := newDebouncer()
+	defer db.stop()
 
 	// Build a set of tracked file paths for efficient lookup.
 	ws.mu.Lock()
 	trackedFiles := ws.trackedFiles
 	ws.mu.Unlock()
-	trackedSet := make(map[string]bool, len(trackedFiles))
-	for _, tf := range trackedFiles {
-		trackedSet[filepath.Clean(tf)] = true
-	}
+	trackedSet := buildTrackedSet(trackedFiles)
 
 	for {
 		select {
 		case <-ctx.Done():
-			if trackedDebounce != nil {
-				trackedDebounce.Stop()
-			}
-			if depDebounce != nil {
-				depDebounce.Stop()
-			}
 			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
 			return nil // cleanup handled by defer in Run
 
@@ -114,44 +99,9 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				continue
 			}
 
-			cleanEvent := filepath.Clean(event.Name)
+			db.handleFileChange(filepath.Clean(event.Name), trackedSet)
 
-			if trackedSet[cleanEvent] {
-				// Tracked file changed (target or 1-level dependency)
-				// → decide hot-reload vs full rebuild via skeleton comparison.
-				if depDebounce != nil {
-					// A dependency rebuild is already pending; it will
-					// include the tracked change too, so skip fast path.
-					continue
-				}
-				if trackedDebounce != nil {
-					trackedDebounce.Stop()
-				}
-				changedFile := cleanEvent
-				trackedDebounce = time.AfterFunc(200*time.Millisecond, func() {
-					select {
-					case trackedDebounceCh <- changedFile:
-					default:
-					}
-				})
-			} else {
-				// Untracked .swift file changed → full rebuild path
-				if trackedDebounce != nil {
-					trackedDebounce.Stop()
-					trackedDebounce = nil
-				}
-				if depDebounce != nil {
-					depDebounce.Stop()
-				}
-				depDebounce = time.AfterFunc(500*time.Millisecond, func() {
-					select {
-					case depDebounceCh <- struct{}{}:
-					default:
-					}
-				})
-			}
-
-		case changedFile := <-trackedDebounceCh:
+		case changedFile := <-db.TrackedCh:
 			ws.mu.Lock()
 			prev := ws.skeletonMap[changedFile]
 			ws.mu.Unlock()
@@ -180,8 +130,8 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				ws.mu.Unlock()
 			}
 
-		case <-depDebounceCh:
-			depDebounce = nil
+		case <-db.DepCh:
+			db.clearDepTimer()
 			if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
 				fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
 			}
@@ -192,38 +142,11 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				if cmd.Path == "" {
 					continue
 				}
-				// File switch request from IDE
-				fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", cmd.Path)
-				if err := switchFile(ctx, cmd.Path, pc, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)
-				} else {
-					sourceFile = cmd.Path
-					// Rebuild trackedSet from updated watchState.
-					ws.mu.Lock()
-					trackedSet = make(map[string]bool, len(ws.trackedFiles))
-					for _, tf := range ws.trackedFiles {
-						trackedSet[filepath.Clean(tf)] = true
-					}
-					ws.mu.Unlock()
-				}
+				sourceFile, trackedSet = handleSwitchFileCmd(ctx, cmd.Path, sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
 			case "nextPreview":
-				// Preview cycle
-				ws.mu.Lock()
-				count := ws.previewCount
-				ws.mu.Unlock()
-				if count <= 1 {
-					continue
-				}
-				ws.mu.Lock()
-				ws.previewIndex = (ws.previewIndex + 1) % count
-				ws.previewSelector = strconv.Itoa(ws.previewIndex)
-				ws.mu.Unlock()
-				fmt.Fprintf(os.Stderr, "\nSwitching to preview %d/%d...\n", ws.previewIndex+1, count)
-				if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
-				}
+				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
 			case "tap", "swipe", "text", "touchDown", "touchMove", "touchUp":
-				hid.Handle(cmd)
+				hid.Handle(ctx, cmd)
 			}
 
 		case protoCmd, ok := <-protoCmdCh:
@@ -236,35 +159,11 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				if protoCmd.GetSwitchFile().GetFile() == "" {
 					continue
 				}
-				fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", protoCmd.GetSwitchFile().GetFile())
-				if err := switchFile(ctx, protoCmd.GetSwitchFile().GetFile(), pc, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)
-				} else {
-					sourceFile = protoCmd.GetSwitchFile().GetFile()
-					ws.mu.Lock()
-					trackedSet = make(map[string]bool, len(ws.trackedFiles))
-					for _, tf := range ws.trackedFiles {
-						trackedSet[filepath.Clean(tf)] = true
-					}
-					ws.mu.Unlock()
-				}
+				sourceFile, trackedSet = handleSwitchFileCmd(ctx, protoCmd.GetSwitchFile().GetFile(), sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
 			case protoCmd.GetNextPreview() != nil:
-				ws.mu.Lock()
-				count := ws.previewCount
-				ws.mu.Unlock()
-				if count <= 1 {
-					continue
-				}
-				ws.mu.Lock()
-				ws.previewIndex = (ws.previewIndex + 1) % count
-				ws.previewSelector = strconv.Itoa(ws.previewIndex)
-				ws.mu.Unlock()
-				fmt.Fprintf(os.Stderr, "\nSwitching to preview %d/%d...\n", ws.previewIndex+1, count)
-				if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
-				}
+				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
 			case protoCmd.GetInput() != nil:
-				hid.HandleInput(protoCmd.GetInput())
+				hid.HandleInput(ctx, protoCmd.GetInput())
 			default:
 				slog.Warn("Ignoring unhandled command in single-stream mode", "streamId", protoCmd.GetStreamId())
 			}
@@ -316,7 +215,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 		return err
 	}
 
-	if err := deploy(dylibPath, dirs, bs, wctx); err != nil {
+	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
 		return err
 	}
 
@@ -346,7 +245,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 1. Resolve dependencies for the new file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(newSourceFile, projectRoot)
+	depFiles, err := resolveDependencies(ctx, newSourceFile, projectRoot)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies for new file", "err", err)
 	}
@@ -396,7 +295,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		}
 	}
 
-	if err := deploy(dylibPath, dirs, bs, wctx); err != nil {
+	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
 		return err
 	}
 
@@ -485,13 +384,13 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("compile: %w", err)
 	}
 
-	terminateApp(bs, wctx.device, wctx.deviceSetPath)
+	terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath)
 
 	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 
-	if err := launchWithHotReload(bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
+	if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
 		return fmt.Errorf("launch: %w", err)
 	}
 
@@ -588,9 +487,9 @@ func readProtocolCommands(ctx context.Context, ch chan<- *pb.Command) {
 
 // gitSwiftDirs returns unique directories containing Swift files tracked by git
 // (or untracked but not ignored). This is fast and automatically respects .gitignore.
-func gitSwiftDirs(root string) ([]string, error) {
+func gitSwiftDirs(ctx context.Context, root string) ([]string, error) {
 	// --cached: tracked files, --others --exclude-standard: new files not yet gitignored
-	out, err := exec.Command(
+	out, err := exec.CommandContext(ctx,
 		"git", "-C", root, "ls-files",
 		"--cached", "--others", "--exclude-standard",
 		"*.swift",
@@ -643,6 +542,45 @@ func walkSwiftDirs(root string) ([]string, error) {
 		return nil
 	})
 	return dirs, err
+}
+
+// handleSwitchFileCmd handles a file switch command from either legacy stdin or
+// the protocol. On success it returns the new sourceFile and updated trackedSet.
+// On error it logs and returns the original values unchanged.
+func handleSwitchFileCmd(
+	ctx context.Context, newFile, sourceFile string, trackedSet map[string]bool,
+	pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
+) (string, map[string]bool) {
+	fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", newFile)
+	if err := switchFile(ctx, newFile, pc, bs, dirs, wctx, ws); err != nil {
+		fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)
+		return sourceFile, trackedSet
+	}
+	ws.mu.Lock()
+	ts := buildTrackedSet(ws.trackedFiles)
+	ws.mu.Unlock()
+	return newFile, ts
+}
+
+// handleNextPreviewCmd cycles to the next preview index and hot-reloads.
+func handleNextPreviewCmd(
+	ctx context.Context, sourceFile string,
+	bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
+) {
+	ws.mu.Lock()
+	count := ws.previewCount
+	if count <= 1 {
+		ws.mu.Unlock()
+		return
+	}
+	ws.previewIndex = (ws.previewIndex + 1) % count
+	ws.previewSelector = strconv.Itoa(ws.previewIndex)
+	newIdx := ws.previewIndex
+	ws.mu.Unlock()
+	fmt.Fprintf(os.Stderr, "\nSwitching to preview %d/%d...\n", newIdx+1, count)
+	if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
+		fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
+	}
 }
 
 // cleanOldDylibs removes thunk dylib and object files older than keepAfter.

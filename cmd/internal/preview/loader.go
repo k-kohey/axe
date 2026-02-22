@@ -2,6 +2,7 @@ package preview
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	_ "embed"
 	"fmt"
@@ -38,7 +39,7 @@ func loaderCacheKey(source, sdk, deploymentTarget string) string {
 
 // compileLoader compiles the Obj-C loader dylib for the simulator.
 // The result is cached: recompilation is skipped if the source hash matches.
-func compileLoader(dirs previewDirs, deploymentTarget string) (string, error) {
+func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget string) (string, error) {
 	if err := os.MkdirAll(dirs.Loader, 0o755); err != nil {
 		return "", fmt.Errorf("creating loader dir: %w", err)
 	}
@@ -47,7 +48,7 @@ func compileLoader(dirs previewDirs, deploymentTarget string) (string, error) {
 	hashPath := filepath.Join(dirs.Loader, "loader.sha256")
 
 	// SDK path is needed both for cache key and compilation
-	sdkPathOut, err := exec.Command("xcrun", "--sdk", "iphonesimulator", "--show-sdk-path").Output()
+	sdkPathOut, err := exec.CommandContext(ctx, "xcrun", "--sdk", "iphonesimulator", "--show-sdk-path").Output()
 	if err != nil {
 		return "", fmt.Errorf("getting simulator SDK path: %w", err)
 	}
@@ -81,12 +82,12 @@ func compileLoader(dirs previewDirs, deploymentTarget string) (string, error) {
 		srcPath,
 	}
 	slog.Debug("Compiling loader", "args", compileArgs)
-	if out, err := exec.Command(compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("compiling loader: %w\n%s", err, out)
 	}
 
 	// Ad-hoc codesign
-	if out, err := exec.Command("codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("codesigning loader: %w\n%s", err, out)
 	}
 

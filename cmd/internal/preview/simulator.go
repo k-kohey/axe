@@ -14,16 +14,16 @@ import (
 // simctlCmd builds an exec.Cmd for "xcrun simctl" with optional --set for
 // custom device sets. When deviceSetPath is non-empty, "--set <path>" is
 // inserted right after "simctl".
-func simctlCmd(deviceSetPath string, args ...string) *exec.Cmd {
+func simctlCmd(ctx context.Context, deviceSetPath string, args ...string) *exec.Cmd {
 	base := []string{"simctl"}
 	if deviceSetPath != "" {
 		base = append(base, "--set", deviceSetPath)
 	}
-	return exec.Command("xcrun", append(base, args...)...)
+	return exec.CommandContext(ctx, "xcrun", append(base, args...)...)
 }
 
-func terminateApp(bs *buildSettings, device, deviceSetPath string) {
-	out, err := simctlCmd(deviceSetPath, "terminate", device, bs.BundleID).CombinedOutput()
+func terminateApp(ctx context.Context, bs *buildSettings, device, deviceSetPath string) {
+	out, err := simctlCmd(ctx, deviceSetPath, "terminate", device, bs.BundleID).CombinedOutput()
 	if err != nil {
 		slog.Debug("terminate app (may not be running)", "err", err, "out", string(out))
 	}
@@ -70,7 +70,7 @@ func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs) (s
 	}
 	stagedAppPath := filepath.Join(dirs.Staging, filepath.Base(srcAppPath))
 	_ = os.RemoveAll(stagedAppPath)
-	if out, err := exec.Command("cp", "-a", srcAppPath, stagedAppPath).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(ctx, "cp", "-a", srcAppPath, stagedAppPath).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("copying app bundle to staging: %w\n%s", err, out)
 	}
 
@@ -93,7 +93,7 @@ func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device
 		"axe "+bs.ModuleName,
 	)
 
-	if out, err := simctlCmd(deviceSetPath, "install", device, stagedAppPath).CombinedOutput(); err != nil {
+	if out, err := simctlCmd(ctx, deviceSetPath, "install", device, stagedAppPath).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("simctl install failed: %w\n%s", err, out)
 	}
 
@@ -133,11 +133,11 @@ func rewriteInfoPlist(plistPath, bundleID, displayName string) {
 
 // launchWithHotReload launches the app with both the loader dylib and the
 // initial thunk dylib injected, plus the socket path for hot-reload communication.
-func launchWithHotReload(bs *buildSettings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string) error {
+func launchWithHotReload(ctx context.Context, bs *buildSettings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string) error {
 
 	insertLibs := loaderPath + ":" + thunkPath
 
-	launchCmd := simctlCmd(deviceSetPath, "launch", device, bs.BundleID)
+	launchCmd := simctlCmd(ctx, deviceSetPath, "launch", device, bs.BundleID)
 	launchCmd.Env = append(os.Environ(),
 		"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="+insertLibs,
 		"SIMCTL_CHILD_AXE_PREVIEW_SOCKET_PATH="+socketPath,

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
@@ -174,8 +175,13 @@ func (sm *StreamManager) handleRemoveStream(streamID string) {
 	// Cancel the stream goroutine and wait for cleanup to finish.
 	// Resource cleanup (device release, companion stop, etc.) is handled by
 	// runStream's defer chain, not here.
+	// A 30-second timeout prevents a hung stream from blocking the command loop.
 	s.cancel()
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(30 * time.Second):
+		slog.Error("Stream cleanup timed out, proceeding without waiting", "streamId", streamID)
+	}
 
 	s.sendStopped(sm.ew, "removed", "", "")
 }
@@ -191,6 +197,7 @@ func (sm *StreamManager) handleSwitchFile(streamID string, sf *pb.SwitchFile) {
 	select {
 	case s.switchFileCh <- sf.GetFile():
 	default:
+		slog.Warn("SwitchFile command dropped (stream busy)", "streamId", streamID)
 	}
 }
 
@@ -205,6 +212,7 @@ func (sm *StreamManager) handleNextPreview(streamID string) {
 	select {
 	case s.nextPreviewCh <- struct{}{}:
 	default:
+		slog.Warn("NextPreview command dropped (stream busy)", "streamId", streamID)
 	}
 }
 
@@ -219,6 +227,7 @@ func (sm *StreamManager) handleInput(streamID string, input *pb.Input) {
 	select {
 	case s.inputCh <- input:
 	default:
+		slog.Debug("Input command dropped (stream busy)", "streamId", streamID)
 	}
 }
 
@@ -259,7 +268,9 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 		bs := sm.bs
 		sm.bsMu.RUnlock()
 		if bs != nil {
-			terminateApp(bs, s.deviceUDID, sm.deviceSetPath)
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			terminateApp(cleanupCtx, bs, s.deviceUDID, sm.deviceSetPath)
+			cleanupCancel()
 		}
 	}
 
@@ -293,9 +304,11 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 
 	// Release the device back to pool.
 	if s.deviceUDID != "" {
-		if err := sm.pool.Release(context.Background(), s.deviceUDID); err != nil {
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := sm.pool.Release(releaseCtx, s.deviceUDID); err != nil {
 			slog.Warn("Failed to release device", "streamId", s.id, "udid", s.deviceUDID, "err", err)
 		}
+		releaseCancel()
 	}
 }
 
@@ -316,7 +329,7 @@ func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDi
 		return sm.bs, nil
 	}
 
-	bs, err := fetchBuildSettings(sm.pc, dirs)
+	bs, err := fetchBuildSettings(ctx, sm.pc, dirs)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +368,12 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	s.deviceUDID = udid
 
 	// 2. Create per-stream preview directories.
-	s.dirs = newPreviewDirs(sm.pc.primaryPath(), udid)
+	dirs, err := newPreviewDirs(sm.pc.primaryPath(), udid)
+	if err != nil {
+		s.sendStopped(sm.ew, "resource_error", err.Error(), "")
+		return
+	}
+	s.dirs = dirs
 
 	// 3. Boot simulator headlessly via idb_companion.
 	bootCompanion, err := idb.BootHeadless(udid, sm.deviceSetPath)
@@ -393,7 +411,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 8. Resolve dependencies and parse source.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depFiles, err := resolveDependencies(s.file, projectRoot)
+	depFiles, err := resolveDependencies(ctx, s.file, projectRoot)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
@@ -421,14 +439,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 10. Install app and compile loader.
 	sendStatus("installing")
-	terminateApp(bs, udid, sm.deviceSetPath)
+	terminateApp(ctx, bs, udid, sm.deviceSetPath)
 
 	if _, err := installApp(ctx, bs, s.dirs, udid, sm.deviceSetPath); err != nil {
 		s.sendStopped(sm.ew, "install_error", err.Error(), "")
 		return
 	}
 
-	loaderPath, err := compileLoader(s.dirs, bs.DeploymentTarget)
+	loaderPath, err := compileLoader(ctx, s.dirs, bs.DeploymentTarget)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -437,7 +455,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 11. Launch app with hot-reload.
 	sendStatus("running")
-	if err := launchWithHotReload(bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath); err != nil {
+	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath); err != nil {
 		s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
 		return
 	}
@@ -525,9 +543,17 @@ func (sm *StreamManager) StopAll() {
 		s.cancel()
 	}
 	// Wait for all goroutines to finish (cleanup happens in runStream defer).
+	// Use a timeout consistent with handleRemoveStream to prevent hanging
+	// if a stream goroutine is stuck.
 	for _, s := range streams {
-		<-s.done
+		select {
+		case <-s.done:
+		case <-time.After(30 * time.Second):
+			slog.Error("Stream cleanup timed out during StopAll", "streamId", s.id)
+		}
 	}
 
-	sm.pool.ShutdownAll(context.Background())
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	sm.pool.ShutdownAll(shutdownCtx)
+	shutdownCancel()
 }

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strconv"
-	"time"
 )
 
 // runStreamLoop is the per-stream event loop. It blocks until the context is
@@ -33,11 +32,8 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	trackedSet := buildTrackedSet(s.ws.trackedFiles)
 	s.ws.mu.Unlock()
 
-	// Debounce state (mirrors watcher.go pattern).
-	var trackedDebounce *time.Timer
-	var depDebounce *time.Timer
-	trackedDebounceCh := make(chan string, 1)
-	depDebounceCh := make(chan struct{}, 1)
+	db := newDebouncer()
+	defer db.stop()
 
 	// Safely handle nil channels: a receive on nil channel blocks forever,
 	// effectively disabling that select case.
@@ -49,49 +45,12 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	for {
 		select {
 		case <-ctx.Done():
-			if trackedDebounce != nil {
-				trackedDebounce.Stop()
-			}
-			if depDebounce != nil {
-				depDebounce.Stop()
-			}
 			return nil
 
 		case path := <-s.fileChangeCh:
-			if trackedSet[path] {
-				// Tracked file: fast hot-reload path with 200ms debounce.
-				if depDebounce != nil {
-					// Dependency rebuild pending; it will include this change.
-					continue
-				}
-				if trackedDebounce != nil {
-					trackedDebounce.Stop()
-				}
-				changedFile := path
-				trackedDebounce = time.AfterFunc(200*time.Millisecond, func() {
-					select {
-					case trackedDebounceCh <- changedFile:
-					default:
-					}
-				})
-			} else {
-				// Untracked .swift file: full rebuild path with 500ms debounce.
-				if trackedDebounce != nil {
-					trackedDebounce.Stop()
-					trackedDebounce = nil
-				}
-				if depDebounce != nil {
-					depDebounce.Stop()
-				}
-				depDebounce = time.AfterFunc(500*time.Millisecond, func() {
-					select {
-					case depDebounceCh <- struct{}{}:
-					default:
-					}
-				})
-			}
+			db.handleFileChange(path, trackedSet)
 
-		case changedFile := <-trackedDebounceCh:
+		case changedFile := <-db.TrackedCh:
 			s.ws.mu.Lock()
 			prev := s.ws.skeletonMap[changedFile]
 			s.ws.mu.Unlock()
@@ -120,8 +79,8 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 				s.ws.mu.Unlock()
 			}
 
-		case <-depDebounceCh:
-			depDebounce = nil
+		case <-db.DepCh:
+			db.clearDepTimer()
 			if err := rebuildAndRelaunch(ctx, sourceFile, sm.pc, bs, s.dirs, wctx, s.ws); err != nil {
 				slog.Warn("Dependency rebuild error", "streamId", s.id, "err", err)
 			}
@@ -157,7 +116,7 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 			}
 
 		case input := <-s.inputCh:
-			s.hid.HandleInput(input)
+			s.hid.HandleInput(ctx, input)
 
 		case <-bootDiedCh:
 			msg := "simulator crashed unexpectedly"

@@ -49,13 +49,13 @@ func newHIDHandler(client hidClient, screenWidth, screenHeight int) *hidHandler 
 
 // Handle dispatches a stdinCommand to the appropriate HID handler.
 // Safe to call on a nil receiver.
-func (h *hidHandler) Handle(cmd stdinCommand) {
+func (h *hidHandler) Handle(ctx context.Context, cmd stdinCommand) {
 	if h == nil || h.client == nil {
 		return
 	}
 	// text input does not require screen coordinates.
 	if cmd.Type == "text" {
-		h.handleText(cmd)
+		h.handleText(ctx, cmd)
 		return
 	}
 
@@ -66,11 +66,11 @@ func (h *hidHandler) Handle(cmd stdinCommand) {
 
 	switch cmd.Type {
 	case "tap":
-		h.handleTap(cmd)
+		h.handleTap(ctx, cmd)
 	case "swipe":
-		h.handleSwipe(cmd)
+		h.handleSwipe(ctx, cmd)
 	case "touchDown":
-		h.handleTouchDown(cmd)
+		h.handleTouchDown(ctx, cmd)
 	case "touchMove":
 		h.handleTouchMove(cmd)
 	case "touchUp":
@@ -78,23 +78,23 @@ func (h *hidHandler) Handle(cmd stdinCommand) {
 	}
 }
 
-func (h *hidHandler) handleTap(cmd stdinCommand) {
+func (h *hidHandler) handleTap(ctx context.Context, cmd stdinCommand) {
 	sw, sh := h.screenWidth, h.screenHeight
 	go func() {
-		if err := h.client.Tap(context.Background(), cmd.X*float64(sw), cmd.Y*float64(sh)); err != nil {
+		if err := h.client.Tap(ctx, cmd.X*float64(sw), cmd.Y*float64(sh)); err != nil {
 			slog.Warn("Tap failed", "err", err)
 		}
 	}()
 }
 
-func (h *hidHandler) handleSwipe(cmd stdinCommand) {
+func (h *hidHandler) handleSwipe(ctx context.Context, cmd stdinCommand) {
 	sw, sh := h.screenWidth, h.screenHeight
 	dur := cmd.Duration
 	if dur <= 0 {
 		dur = 0.5
 	}
 	go func() {
-		if err := h.client.Swipe(context.Background(),
+		if err := h.client.Swipe(ctx,
 			cmd.StartX*float64(sw), cmd.StartY*float64(sh),
 			cmd.EndX*float64(sw), cmd.EndY*float64(sh),
 			dur); err != nil {
@@ -103,18 +103,18 @@ func (h *hidHandler) handleSwipe(cmd stdinCommand) {
 	}()
 }
 
-func (h *hidHandler) handleText(cmd stdinCommand) {
+func (h *hidHandler) handleText(ctx context.Context, cmd stdinCommand) {
 	if cmd.Value == "" {
 		return
 	}
 	go func() {
-		if err := h.client.Text(context.Background(), cmd.Value); err != nil {
+		if err := h.client.Text(ctx, cmd.Value); err != nil {
 			slog.Warn("Text input failed", "err", err)
 		}
 	}()
 }
 
-func (h *hidHandler) handleTouchDown(cmd stdinCommand) {
+func (h *hidHandler) handleTouchDown(ctx context.Context, cmd stdinCommand) {
 	sw, sh := h.screenWidth, h.screenHeight
 
 	// Close any existing stream first (e.g. if a previous touchUp was lost).
@@ -126,7 +126,7 @@ func (h *hidHandler) handleTouchDown(cmd stdinCommand) {
 		_, _ = old.CloseAndRecv()
 	}
 
-	stream, err := h.client.OpenHIDStream(context.Background())
+	stream, err := h.client.OpenHIDStream(ctx)
 	if err != nil {
 		slog.Warn("OpenHIDStream failed", "err", err)
 		return
@@ -161,13 +161,13 @@ func (h *hidHandler) handleTouchMove(cmd stdinCommand) {
 
 // HandleInput dispatches a protocol Input message to the appropriate HID handler.
 // Safe to call on a nil receiver.
-func (h *hidHandler) HandleInput(input *pb.Input) {
+func (h *hidHandler) HandleInput(ctx context.Context, input *pb.Input) {
 	if h == nil || h.client == nil || input == nil {
 		return
 	}
 	// text input does not require screen coordinates.
 	if input.GetText() != nil {
-		h.handleText(stdinCommand{Type: "text", Value: input.GetText().GetValue()})
+		h.handleText(ctx, stdinCommand{Type: "text", Value: input.GetText().GetValue()})
 		return
 	}
 	if h.screenWidth <= 0 || h.screenHeight <= 0 {
@@ -176,7 +176,7 @@ func (h *hidHandler) HandleInput(input *pb.Input) {
 	}
 	switch {
 	case input.GetTouchDown() != nil:
-		h.handleTouchDown(stdinCommand{Type: "touchDown", X: input.GetTouchDown().GetX(), Y: input.GetTouchDown().GetY()})
+		h.handleTouchDown(ctx, stdinCommand{Type: "touchDown", X: input.GetTouchDown().GetX(), Y: input.GetTouchDown().GetY()})
 	case input.GetTouchMove() != nil:
 		h.handleTouchMove(stdinCommand{Type: "touchMove", X: input.GetTouchMove().GetX(), Y: input.GetTouchMove().GetY()})
 	case input.GetTouchUp() != nil:

@@ -75,10 +75,14 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return err
 	}
 
-	dirs := newPreviewDirs(pc.primaryPath(), device)
+	dirs, err := newPreviewDirs(pc.primaryPath(), device)
+	if err != nil {
+		sendStopped("resource_error", err.Error(), "")
+		return err
+	}
 
 	done = step.begin("Fetching build settings...")
-	bs, err := fetchBuildSettings(pc, dirs)
+	bs, err := fetchBuildSettings(ctx, pc, dirs)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -107,7 +111,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Resolve 1-level dependencies from the target file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(sourceFile, projectRoot)
+	depFiles, err := resolveDependencies(ctx, sourceFile, projectRoot)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
@@ -170,7 +174,9 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		if cancelStream != nil {
 			cancelStream()
 		}
-		terminateApp(bs, device, deviceSetPath)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		terminateApp(cleanupCtx, bs, device, deviceSetPath)
 		if err := os.Remove(dirs.Socket); err != nil && !os.IsNotExist(err) {
 			slog.Debug("Failed to remove socket", "path", dirs.Socket, "err", err)
 		}
@@ -189,7 +195,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 	}()
 
-	terminateApp(bs, device, deviceSetPath)
+	terminateApp(ctx, bs, device, deviceSetPath)
 
 	sendStatus("installing")
 	done = step.begin("Installing app on simulator...")
@@ -200,7 +206,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return err
 	}
 
-	loaderPath, err := compileLoader(dirs, bs.DeploymentTarget)
+	loaderPath, err := compileLoader(ctx, dirs, bs.DeploymentTarget)
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
@@ -208,7 +214,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	sendStatus("running")
 	done = step.begin("Launching app...")
-	err = launchWithHotReload(bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath)
+	err = launchWithHotReload(ctx, bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath)
 	done()
 	if err != nil {
 		sendStopped("runtime_error", err.Error(), "")

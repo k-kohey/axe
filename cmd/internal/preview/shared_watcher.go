@@ -31,7 +31,7 @@ func newSharedWatcher(ctx context.Context, pc ProjectConfig) (*sharedWatcher, er
 	}
 
 	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := gitSwiftDirs(watchRoot)
+	watchDirs, err := gitSwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
 		watchDirs, err = walkSwiftDirs(watchRoot)

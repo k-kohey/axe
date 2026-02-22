@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -10,7 +11,7 @@ import (
 
 // resolveDependencies finds source files that define types referenced by the target file.
 // It returns a list of absolute paths to 1-level dependency files (excluding the target itself).
-func resolveDependencies(targetFile string, projectRoot string) ([]string, error) {
+func resolveDependencies(ctx context.Context, targetFile string, projectRoot string) ([]string, error) {
 	targetResult, err := swiftParse(targetFile)
 	if err != nil {
 		return nil, fmt.Errorf("parsing target file: %w", err)
@@ -39,7 +40,7 @@ func resolveDependencies(targetFile string, projectRoot string) ([]string, error
 	slog.Debug("Looking for dependency files", "referencedTypes", refSet)
 
 	// Get all Swift files in the project.
-	swiftFiles, err := gitSwiftFiles(projectRoot)
+	swiftFiles, err := gitSwiftFiles(ctx, projectRoot)
 	if err != nil {
 		return nil, fmt.Errorf("listing swift files: %w", err)
 	}
@@ -72,8 +73,8 @@ func resolveDependencies(targetFile string, projectRoot string) ([]string, error
 
 // gitSwiftFiles returns absolute paths of all .swift files tracked by git
 // (or untracked but not ignored) under the given root.
-func gitSwiftFiles(root string) ([]string, error) {
-	out, err := exec.Command(
+func gitSwiftFiles(ctx context.Context, root string) ([]string, error) {
+	out, err := exec.CommandContext(ctx,
 		"git", "-C", root, "ls-files",
 		"--cached", "--others", "--exclude-standard",
 		"*.swift",

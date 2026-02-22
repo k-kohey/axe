@@ -118,11 +118,11 @@ func compilePipeline(
 }
 
 // deploy attempts hot-reload via socket, falling back to full app relaunch.
-func deploy(dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
+func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
 	if err := sendReloadCommand(dirs.Socket, dylibPath); err != nil {
 		slog.Warn("Hot-reload failed, falling back to full relaunch", "err", err)
-		terminateApp(bs, wctx.device, wctx.deviceSetPath)
-		if err := launchWithHotReload(bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
+		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath)
+		if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
 			return fmt.Errorf("launch: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "Preview relaunched (full restart).")

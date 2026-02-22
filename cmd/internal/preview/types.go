@@ -3,7 +3,6 @@ package preview
 import (
 	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -181,7 +180,7 @@ const maxSunPathLen = 104
 // The Unix domain socket is placed directly under Root (not under Session)
 // because macOS limits sun_path to 104 bytes. The full Session path with a
 // UUID device identifier easily exceeds that limit.
-func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
+func newPreviewDirs(projectPath string, deviceUDID string) (previewDirs, error) {
 	abs, _ := filepath.Abs(projectPath)
 	h := sha256.Sum256([]byte(abs))
 	short := fmt.Sprintf("%x", h[:8])
@@ -200,8 +199,10 @@ func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 	socketPath := filepath.Join(root, fmt.Sprintf("%x.sock", uh[:8]))
 
 	if len(socketPath) >= maxSunPathLen {
-		slog.Warn("Socket path may exceed Unix domain socket limit",
-			"path", socketPath, "len", len(socketPath), "limit", maxSunPathLen)
+		return previewDirs{}, fmt.Errorf(
+			"socket path exceeds Unix domain socket limit (%d >= %d): %s. "+
+				"Consider using a shorter cache directory path",
+			len(socketPath), maxSunPathLen, socketPath)
 	}
 
 	return previewDirs{
@@ -212,5 +213,5 @@ func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 		Loader:  filepath.Join(session, "loader"),
 		Staging: filepath.Join(session, "staging"),
 		Socket:  socketPath,
-	}
+	}, nil
 }
