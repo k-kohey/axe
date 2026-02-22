@@ -13,6 +13,7 @@ import {
 	isStreamStatus,
 	isStreamStopped,
 	parseEvent,
+	supportedProtocolVersion,
 } from "./protocol";
 import { type DeviceSelection, selectDevice } from "./simulatorPicker";
 import { SimulatorWebviewPanel } from "./simulatorWebview";
@@ -47,9 +48,6 @@ export function activate(context: vscode.ExtensionContext): void {
 				"utf-8",
 			),
 	});
-
-	// The protocol version supported by this extension.
-	const supportedProtocolVersion = 1;
 
 	previewManager = new PreviewManager(outputChannel, statusBar, {
 		resolveExecutablePath: () => resolver.resolve(),

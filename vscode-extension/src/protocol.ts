@@ -32,6 +32,9 @@ import type {
 	StreamStopped,
 } from "./generated/preview";
 
+/** The protocol version supported by this extension. */
+export const supportedProtocolVersion = 1;
+
 // --- Type guards ---
 
 export function isFrame(event: Event): event is Event & { frame: Frame } {

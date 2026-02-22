@@ -50,6 +50,15 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	var ew *EventWriter
 	if serve {
 		ew = NewEventWriter(os.Stdout)
+
+		// Advertise the protocol version to the extension.
+		if err := ew.Send(&pb.Event{
+			Payload: &pb.Event_Hello{
+				Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+			},
+		}); err != nil {
+			return fmt.Errorf("sending hello: %w", err)
+		}
 	}
 
 	// sendStatus sends a StreamStatus event in serve mode (no-op otherwise).
@@ -286,6 +295,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			deviceSetPath: deviceSetPath,
 			loaderPath:    loaderPath,
 			serve:         serve,
+			ew:            ew,
 			build:         br,
 			toolchain:     tc,
 			app:           ar,

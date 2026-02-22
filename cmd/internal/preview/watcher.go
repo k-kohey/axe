@@ -63,7 +63,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	cmdCh := make(chan stdinCommand, 1)
 	protoCmdCh := make(chan *pb.Command, 1)
 	if wctx.serve {
-		go readProtocolCommands(ctx, protoCmdCh)
+		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
 	} else {
 		go readStdinCommands(cmdCh, false)
 	}
@@ -474,8 +474,8 @@ func readStdinCommands(ch chan<- stdinCommand, serve bool) {
 
 // readProtocolCommands reads JSON Lines from stdin and parses them as Command structs.
 // Invalid JSON lines are logged and skipped. EOF causes the channel to close.
-func readProtocolCommands(ctx context.Context, ch chan<- *pb.Command) {
-	readCommands(ctx, os.Stdin, nil, func(cmd *pb.Command) {
+func readProtocolCommands(ctx context.Context, ew *EventWriter, ch chan<- *pb.Command) {
+	readCommands(ctx, os.Stdin, ew, func(cmd *pb.Command) {
 		select {
 		case ch <- cmd:
 		default:

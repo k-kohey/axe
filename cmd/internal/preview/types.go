@@ -145,6 +145,7 @@ type watchContext struct {
 	deviceSetPath string // custom device set path for simctl --set
 	loaderPath    string // path to the compiled loader binary
 	serve         bool   // true when running in serve mode (IDE integration)
+	ew            *EventWriter
 
 	// Injected runners for testability.
 	build     BuildRunner
