@@ -14,7 +14,7 @@ export interface SimulatorWebviewDeps {
   createWebviewPanel?: (
     viewType: string,
     title: string,
-    showOptions: vscode.ViewColumn,
+    showOptions: vscode.ViewColumn | { viewColumn: vscode.ViewColumn; preserveFocus?: boolean },
     options?: vscode.WebviewPanelOptions & vscode.WebviewOptions
   ) => vscode.WebviewPanel;
   getWebviewHtml?: () => string;
@@ -51,7 +51,7 @@ export class SimulatorWebviewPanel {
     this.panel = this.createPanel(
       "axe.simulatorPreview",
       "axe Preview",
-      vscode.ViewColumn.Beside,
+      { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       { enableScripts: true }
     );
     this.panel.webview.html = this.getHtml();
