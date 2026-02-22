@@ -68,8 +68,14 @@ func TestNewPreviewDirs_SessionUnderDevices(t *testing.T) {
 	if !strings.HasPrefix(dirs.Staging, dirs.Session) {
 		t.Errorf("Staging should be under Session: Staging=%s Session=%s", dirs.Staging, dirs.Session)
 	}
-	if !strings.HasPrefix(dirs.Socket, dirs.Session) {
-		t.Errorf("Socket should be under Session: Socket=%s Session=%s", dirs.Socket, dirs.Session)
+	// Socket is under Root (not Session) to keep the path within macOS
+	// sun_path limit (104 bytes).
+	if !strings.HasPrefix(dirs.Socket, dirs.Root) {
+		t.Errorf("Socket should be under Root: Socket=%s Root=%s", dirs.Socket, dirs.Root)
+	}
+	if len(dirs.Socket) >= maxSunPathLen {
+		t.Errorf("Socket path too long for Unix domain socket: len=%d limit=%d path=%s",
+			len(dirs.Socket), maxSunPathLen, dirs.Socket)
 	}
 }
 

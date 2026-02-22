@@ -3,6 +3,7 @@ package preview
 import (
 	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -167,11 +168,19 @@ type previewDirs struct {
 	Socket  string // Session/loader.sock
 }
 
+// maxSunPathLen is the maximum length of sockaddr_un.sun_path on macOS.
+// connect() returns EINVAL if the path exceeds this limit.
+const maxSunPathLen = 104
+
 // newPreviewDirs creates a previewDirs based on a hash of the project/workspace
 // path, with session-specific directories scoped by deviceUDID.
 // Uses ~/Library/Caches/axe/ instead of /tmp so that dylibs are accessible
 // from within the iOS Simulator via dlopen (separated runtimes cannot resolve
 // host /tmp paths).
+//
+// The Unix domain socket is placed directly under Root (not under Session)
+// because macOS limits sun_path to 104 bytes. The full Session path with a
+// UUID device identifier easily exceeds that limit.
 func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 	abs, _ := filepath.Abs(projectPath)
 	h := sha256.Sum256([]byte(abs))
@@ -183,6 +192,18 @@ func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 	}
 	root := filepath.Join(cacheDir, "axe", "preview-"+short)
 	session := filepath.Join(root, "devices", deviceUDID)
+
+	// Hash the UDID to keep the socket path short while guaranteeing
+	// uniqueness per device. 8 bytes (16 hex chars) gives 64-bit space,
+	// more than enough for the handful of concurrent devices we support.
+	uh := sha256.Sum256([]byte(deviceUDID))
+	socketPath := filepath.Join(root, fmt.Sprintf("%x.sock", uh[:8]))
+
+	if len(socketPath) >= maxSunPathLen {
+		slog.Warn("Socket path may exceed Unix domain socket limit",
+			"path", socketPath, "len", len(socketPath), "limit", maxSunPathLen)
+	}
+
 	return previewDirs{
 		Root:    root,
 		Build:   filepath.Join(root, "build"),
@@ -190,6 +211,6 @@ func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 		Thunk:   filepath.Join(session, "thunk"),
 		Loader:  filepath.Join(session, "loader"),
 		Staging: filepath.Join(session, "staging"),
-		Socket:  filepath.Join(session, "loader.sock"),
+		Socket:  socketPath,
 	}
 }
