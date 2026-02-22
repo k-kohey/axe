@@ -81,8 +81,8 @@ func buildSwiftParser() (string, error) {
 	binPath := filepath.Join(binDir, "axe-parser")
 
 	// Check if cached binary exists.
-	if _, err := os.Stat(binPath); err == nil { //nolint:gosec // G703: binPath is constructed internally.
-		slog.Debug("Swift parser cached", "path", binPath) //nolint:gosec // G706: slog structured logging is safe.
+	if _, err := os.Stat(binPath); err == nil {
+		slog.Debug("Swift parser cached", "path", binPath)
 		return binPath, nil
 	}
 
@@ -99,7 +99,7 @@ func buildSwiftParser() (string, error) {
 			return "", fmt.Errorf("reading embedded %s: %w", name, err)
 		}
 		dst := filepath.Join(tmpDir, name)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return "", fmt.Errorf("creating dir for %s: %w", name, err)
 		}
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
@@ -110,7 +110,7 @@ func buildSwiftParser() (string, error) {
 	// Create placeholder for the test target directory so SPM doesn't
 	// complain about the missing Tests/AxeParserTests source directory.
 	testDir := filepath.Join(tmpDir, "swift-parser", "Tests", "AxeParserTests")
-	if err := os.MkdirAll(testDir, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(testDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating test placeholder dir: %w", err)
 	}
 	if err := os.WriteFile(filepath.Join(testDir, "Placeholder.swift"), []byte("// placeholder\n"), 0o600); err != nil {
@@ -133,14 +133,14 @@ func buildSwiftParser() (string, error) {
 	}
 
 	// Copy to cache.
-	if err := os.MkdirAll(binDir, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating cache dir: %w", err)
 	}
 	data, err := os.ReadFile(srcBin)
 	if err != nil {
 		return "", fmt.Errorf("reading built binary: %w", err)
 	}
-	if err := os.WriteFile(binPath, data, 0o755); err != nil { //nolint:gosec // G306: executable binary needs 0o755.
+	if err := os.WriteFile(binPath, data, 0o755); err != nil {
 		return "", fmt.Errorf("caching binary: %w", err)
 	}
 
@@ -150,12 +150,12 @@ func buildSwiftParser() (string, error) {
 	for _, d := range dirEntries {
 		if d.IsDir() && d.Name() != cacheKey {
 			old := filepath.Join(parentDir, d.Name())
-			slog.Debug("Removing old swift-parser cache", "path", old) //nolint:gosec // G706: slog structured logging is safe.
-			_ = os.RemoveAll(old)                                      //nolint:gosec // G703: old is constructed from cache directory listing.
+			slog.Debug("Removing old swift-parser cache", "path", old)
+			_ = os.RemoveAll(old)
 		}
 	}
 
-	slog.Debug("Swift parser built and cached", "path", binPath) //nolint:gosec // G706: slog structured logging is safe.
+	slog.Debug("Swift parser built and cached", "path", binPath)
 	swiftVersion := strings.TrimSpace(string(swiftVer))
 	slog.Debug("Swift version", "version", swiftVersion)
 

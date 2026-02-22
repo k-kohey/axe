@@ -51,7 +51,7 @@ func (c *Client) ScreenSize(ctx context.Context) (width, height int, err error) 
 		return 0, 0, fmt.Errorf("no screen dimensions in target description")
 	}
 	sd := td.GetScreenDimensions()
-	return int(sd.GetWidthPoints()), int(sd.GetHeightPoints()), nil //nolint:gosec // G115: screen dimensions fit in int.
+	return int(sd.GetWidthPoints()), int(sd.GetHeightPoints()), nil
 }
 
 // VideoStream starts streaming video frames at the given FPS using RBGA (raw pixel) format.
@@ -75,7 +75,7 @@ func (c *Client) VideoStream(ctx context.Context, fps int) (<-chan []byte, error
 	err = stream.Send(&pb.VideoStreamRequest{
 		Control: &pb.VideoStreamRequest_Start_{
 			Start: &pb.VideoStreamRequest_Start{
-				Fps:         uint64(fps), //nolint:gosec // G115: fps is a small positive int.
+				Fps:         uint64(fps),
 				Format:      pb.VideoStreamRequest_RBGA,
 				ScaleFactor: 0.5,
 			},

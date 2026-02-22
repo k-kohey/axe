@@ -18,7 +18,7 @@ func fetchBuildSettings(pc ProjectConfig, dirs previewDirs) (*buildSettings, err
 	)
 	args = append(args, "-destination", "generic/platform=iOS Simulator")
 
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec // G204: args are constructed internally from xcodebuild settings.
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("xcodebuild -showBuildSettings failed: %w\n%s", err, out)
 	}
@@ -93,7 +93,7 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs) error
 		"OTHER_SWIFT_FLAGS=-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
 	)
 
-	out, err := exec.Command(args[0], args[1:]...).CombinedOutput() //nolint:gosec // G204: args are constructed internally from xcodebuild settings.
+	out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("xcodebuild build failed: %w\n%s", err, out)
 	}

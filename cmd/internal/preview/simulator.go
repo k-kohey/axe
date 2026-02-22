@@ -65,7 +65,7 @@ func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs) (s
 	// Copy the app bundle to the session-specific staging directory so we
 	// can modify Info.plist without touching the original build artifacts
 	// and without colliding with other preview sessions.
-	if err := os.MkdirAll(dirs.Staging, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(dirs.Staging, 0o755); err != nil {
 		return "", fmt.Errorf("creating staging directory: %w", err)
 	}
 	stagedAppPath := filepath.Join(dirs.Staging, filepath.Base(srcAppPath))

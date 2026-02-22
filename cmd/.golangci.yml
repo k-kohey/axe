@@ -12,12 +12,16 @@ linters:
     - unconvert
     - usestdlibvars
   settings:
+    exhaustive:
+      default-signifies-exhaustive: true
     gosec:
       excludes:
-        - G204 # Subprocess launched with variable — this is a CLI tool that executes external commands by design.
         - G115 # Integer overflow conversion — uintptr→int for Fd(), uint64→int for screen dimensions, etc. are safe.
-        - G304 # File inclusion via variable — all file paths are constructed internally, not from user input.
+        - G204 # Subprocess launched with variable — this is a CLI tool that executes external commands by design.
         - G301 # Directory permissions 0750 — 0o755 is intentional; directories need execute bit for traversal.
         - G302 # File permissions 0600 — lock/data files use 0o644 intentionally for shared access.
+        - G304 # File inclusion via variable — all file paths are constructed internally, not from user input.
         - G306 # WriteFile permissions 0600 — local CLI data files; no secrets stored.
         - G602 # Slice index out of range — false positives in loops where step size guarantees bounds.
+        - G703 # Path traversal via taint analysis — all paths are constructed internally.
+        - G706 # Log injection via taint analysis — slog structured logging escapes values safely.

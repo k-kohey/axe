@@ -160,9 +160,9 @@ func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 	frame := make([]byte, w*h*4)
 	for i := 0; i < len(frame); i += 4 {
 		frame[i] = 0xFF   // R
-		frame[i+1] = 0x00 //nolint:gosec // G  G602: step of 4 ensures i+3 < len(frame).
-		frame[i+2] = 0x00 //nolint:gosec // B
-		frame[i+3] = 0xFF //nolint:gosec // A
+		frame[i+1] = 0x00 // G
+		frame[i+2] = 0x00 // B
+		frame[i+3] = 0xFF // A
 	}
 
 	frameCh := make(chan []byte, 1)
@@ -249,9 +249,9 @@ func TestEncodeRBGAFrame(t *testing.T) {
 	data := make([]byte, w*h*4)
 	for i := 0; i < len(data); i += 4 {
 		data[i] = 0xFF   // R
-		data[i+1] = 0x00 //nolint:gosec // G  G602: step of 4 ensures i+3 < len(data).
-		data[i+2] = 0x00 //nolint:gosec // B
-		data[i+3] = 0xFF //nolint:gosec // A
+		data[i+1] = 0x00 // G
+		data[i+2] = 0x00 // B
+		data[i+3] = 0xFF // A
 	}
 
 	var buf bytes.Buffer

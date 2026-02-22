@@ -62,7 +62,7 @@ func (l *buildLock) RUnlock() {
 // polling until the lock is obtained or ctx is cancelled. The poll interval
 // avoids busy-waiting while keeping responsiveness reasonable.
 func (l *buildLock) lockWithMode(ctx context.Context, mode int) (retErr error) {
-	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
 		return fmt.Errorf("creating lock directory: %w", err)
 	}
 

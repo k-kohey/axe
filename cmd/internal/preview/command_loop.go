@@ -29,7 +29,7 @@ func readCommands(ctx context.Context, r io.Reader, handle func(*pb.Command)) {
 		}
 		cmd, err := UnmarshalCommand([]byte(line))
 		if err != nil {
-			slog.Warn("Invalid command JSON, skipping", "err", err, "line", line) //nolint:gosec // G706: slog structured logging is safe.
+			slog.Warn("Invalid command JSON, skipping", "err", err, "line", line)
 			continue
 		}
 		handle(cmd)

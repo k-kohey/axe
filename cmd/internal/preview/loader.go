@@ -39,7 +39,7 @@ func loaderCacheKey(source, sdk, deploymentTarget string) string {
 // compileLoader compiles the Obj-C loader dylib for the simulator.
 // The result is cached: recompilation is skipped if the source hash matches.
 func compileLoader(dirs previewDirs, deploymentTarget string) (string, error) {
-	if err := os.MkdirAll(dirs.Loader, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(dirs.Loader, 0o755); err != nil {
 		return "", fmt.Errorf("creating loader dir: %w", err)
 	}
 
@@ -81,7 +81,7 @@ func compileLoader(dirs previewDirs, deploymentTarget string) (string, error) {
 		srcPath,
 	}
 	slog.Debug("Compiling loader", "args", compileArgs)
-	if out, err := exec.Command(compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil { //nolint:gosec // G204: args are constructed internally.
+	if out, err := exec.Command(compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("compiling loader: %w\n%s", err, out)
 	}
 

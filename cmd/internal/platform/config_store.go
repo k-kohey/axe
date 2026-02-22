@@ -55,7 +55,7 @@ func (s *ConfigStore) Load() (axeConfig, error) {
 // It writes to a temporary file first, then renames to avoid partial writes.
 func (s *ConfigStore) Save(cfg axeConfig) error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -87,7 +87,7 @@ func (s *ConfigStore) Save(cfg axeConfig) error {
 		return fmt.Errorf("closing temp config file: %w", err)
 	}
 	closed = true
-	if err := os.Rename(tmpPath, s.path); err != nil { //nolint:gosec // G703: paths are constructed internally.
+	if err := os.Rename(tmpPath, s.path); err != nil {
 		return fmt.Errorf("renaming config file: %w", err)
 	}
 	return nil

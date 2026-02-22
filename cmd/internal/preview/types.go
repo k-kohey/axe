@@ -200,7 +200,7 @@ func newPreviewDirs(projectPath string, deviceUDID string) previewDirs {
 	socketPath := filepath.Join(root, fmt.Sprintf("%x.sock", uh[:8]))
 
 	if len(socketPath) >= maxSunPathLen {
-		slog.Warn("Socket path may exceed Unix domain socket limit", //nolint:gosec // G706: slog structured logging is safe.
+		slog.Warn("Socket path may exceed Unix domain socket limit",
 			"path", socketPath, "len", len(socketPath), "limit", maxSunPathLen)
 	}
 

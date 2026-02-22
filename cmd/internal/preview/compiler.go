@@ -89,7 +89,7 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		compileArgs = append(compileArgs, "-swift-version", sv)
 	}
 	slog.Debug("Compiling thunk .swift -> .o", "args", compileArgs)
-	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil { //nolint:gosec // G204: args are constructed internally.
+	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
 		return fmt.Errorf("compiling thunk.swift -> .o: %w\n%s", err, out)
 	}
 
@@ -110,7 +110,7 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		"-o", dylibPath,
 	}
 	slog.Debug("Linking thunk .o -> .dylib", "args", linkArgs)
-	if out, err := exec.CommandContext(ctx, linkArgs[0], linkArgs[1:]...).CombinedOutput(); err != nil { //nolint:gosec // G204: args are constructed internally.
+	if out, err := exec.CommandContext(ctx, linkArgs[0], linkArgs[1:]...).CombinedOutput(); err != nil {
 		return fmt.Errorf("linking thunk.o -> .dylib: %w\n%s", err, out)
 	}
 

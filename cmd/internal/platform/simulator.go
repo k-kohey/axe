@@ -75,7 +75,7 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 	if err != nil {
 		return "", "", err
 	}
-	if err := os.MkdirAll(deviceSetPath, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(deviceSetPath, 0o755); err != nil {
 		return "", "", fmt.Errorf("creating axe device set directory: %w", err)
 	}
 
@@ -206,7 +206,7 @@ func findLatestIPhone() (simDevice, string, error) {
 
 // listDevicesInSet returns all devices in the given custom device set.
 func listDevicesInSet(ctx context.Context, deviceSetPath string) ([]simDevice, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", deviceSetPath, "list", "devices", "--json").Output() //nolint:gosec // G204: args are constructed internally.
+	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", deviceSetPath, "list", "devices", "--json").Output()
 	if err != nil {
 		return nil, fmt.Errorf("simctl list devices in set: %w", err)
 	}
@@ -235,7 +235,7 @@ func listDevicesInSet(ctx context.Context, deviceSetPath string) ([]simDevice, e
 // createDeviceInSet creates a new simulator device in the specified device set.
 // Returns the UDID of the newly created device.
 func createDeviceInSet(ctx context.Context, name, deviceType, runtime, setPath string) (string, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath, //nolint:gosec // G204: args are constructed internally.
+	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath,
 		"create", name, deviceType, runtime,
 	).CombinedOutput()
 	if err != nil {

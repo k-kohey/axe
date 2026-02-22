@@ -25,7 +25,7 @@ func ReadRC() map[string]string {
 		return nil
 	}
 
-	f, err := os.Open(filepath.Join(cwd, ".axerc")) //nolint:gosec // G304: path is constructed from cwd.
+	f, err := os.Open(filepath.Join(cwd, ".axerc"))
 	if err != nil {
 		return nil
 	}
@@ -143,7 +143,7 @@ func parseSimulatorProcesses(psOutput string, deviceMap map[string]string) []Sim
 
 // readBundleID reads CFBundleIdentifier from the Info.plist inside an .app bundle.
 func readBundleID(appPath string) string {
-	data, err := os.ReadFile(filepath.Join(appPath, "Info.plist")) //nolint:gosec // G304: appPath is an internal simulator path.
+	data, err := os.ReadFile(filepath.Join(appPath, "Info.plist"))
 	if err != nil {
 		return ""
 	}

@@ -169,7 +169,7 @@ func RunInteractive(appName string, device string) error {
 
 	// Key bindings for tree view
 	treeView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() { //nolint:exhaustive // Only handling specific keys; default falls through.
+		switch event.Key() {
 		case tcell.KeyEnter:
 			node := treeView.GetCurrentNode()
 			if node == nil {
@@ -220,13 +220,15 @@ func RunInteractive(appName string, device string) error {
 				})
 				return nil
 			}
+		default:
+			return event
 		}
 		return event
 	})
 
 	// Key bindings for detail view
 	detailView.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() { //nolint:exhaustive // Only handling specific keys; default falls through.
+		switch event.Key() {
 		case tcell.KeyEscape:
 			pages.SwitchToPage("tree")
 			return nil
@@ -333,11 +335,13 @@ func RunInteractive(appName string, device string) error {
 				if currentUIKit.Snapshot == "" {
 					return nil
 				}
-				if err := exec.Command("open", currentUIKit.Snapshot).Start(); err != nil { //nolint:gosec // G204: "open" is macOS system command.
+				if err := exec.Command("open", currentUIKit.Snapshot).Start(); err != nil {
 					slog.Debug("Failed to open snapshot", "path", currentUIKit.Snapshot, "err", err)
 				}
 				return nil
 			}
+		default:
+			return event
 		}
 		return event
 	})

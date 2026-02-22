@@ -332,7 +332,7 @@ func RunServe(pc ProjectConfig) error {
 	if err != nil {
 		return fmt.Errorf("resolving device set path: %w", err)
 	}
-	if err := os.MkdirAll(deviceSetPath, 0o755); err != nil { //nolint:gosec // G301: 0o755 is intentional for directories.
+	if err := os.MkdirAll(deviceSetPath, 0o755); err != nil {
 		return fmt.Errorf("creating device set directory: %w", err)
 	}
 
