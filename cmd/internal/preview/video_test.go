@@ -243,6 +243,45 @@ func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 	}
 }
 
+// errWriter always returns an error on Write, simulating a broken pipe.
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("broken pipe") }
+
+func TestRunVideoStreamLoop_SendFailureStopsLoop(t *testing.T) {
+	const w, h = 4, 4
+	frame := make([]byte, w*h*4)
+	for i := 0; i < len(frame); i += 4 {
+		frame[i], frame[i+1], frame[i+2], frame[i+3] = 0xFF, 0x00, 0x00, 0xFF
+	}
+
+	frameCh := make(chan []byte, 2)
+	frameCh <- frame
+	frameCh <- frame // second frame should never be sent
+
+	client := &delayCloseIDBClient{
+		fakeIDBClient: fakeIDBClient{screenW: w, screenH: h},
+		frameCh:       frameCh,
+	}
+
+	// EventWriter backed by an always-failing writer.
+	ew := NewEventWriter(errWriter{})
+	voc := &videoOutputConfig{
+		ew:       ew,
+		streamID: "test-stream",
+		device:   "iPhone 16 Pro",
+		file:     "HogeView.swift",
+	}
+
+	err := runVideoStreamLoop(context.Background(), client, voc)
+	if err == nil {
+		t.Fatal("expected error from Send failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "frame send") {
+		t.Errorf("expected 'frame send' in error, got: %v", err)
+	}
+}
+
 func TestEncodeRBGAFrame(t *testing.T) {
 	const w, h = 4, 4
 	// Create a small 4x4 RGBA frame (red pixels).

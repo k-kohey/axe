@@ -3,6 +3,8 @@ import {
 	type Command,
 	type Event,
 	isFrame,
+	isHello,
+	isProtocolError,
 	isStreamStarted,
 	isStreamStatus,
 	isStreamStopped,
@@ -53,6 +55,44 @@ suite("Protocol", () => {
 			assert.strictEqual(event.streamStatus.phase, "building");
 		});
 
+		test("parses ProtocolError event (no streamId)", () => {
+			const json =
+				'{"streamId":"","protocolError":{"message":"invalid command: unexpected token"}}';
+			const event = parseEvent(json);
+			assert.ok(event);
+			assert.ok(isProtocolError(event));
+			assert.strictEqual(
+				event.protocolError?.message,
+				"invalid command: unexpected token",
+			);
+		});
+
+		test("parses Hello event (no streamId)", () => {
+			const json = '{"streamId":"","hello":{"protocolVersion":1}}';
+			const event = parseEvent(json);
+			assert.ok(event);
+			assert.ok(isHello(event));
+			assert.strictEqual(event.hello?.protocolVersion, 1);
+		});
+
+		test("parses ProtocolError without streamId field", () => {
+			// CLI may emit protocolError without streamId entirely.
+			const json = '{"protocolError":{"message":"bad command"}}';
+			const event = parseEvent(json);
+			assert.ok(event);
+			assert.ok(isProtocolError(event));
+			assert.strictEqual(event.streamId, "");
+		});
+
+		test("parses Hello without streamId field", () => {
+			const json = '{"hello":{"protocolVersion":2}}';
+			const event = parseEvent(json);
+			assert.ok(event);
+			assert.ok(isHello(event));
+			assert.strictEqual(event.hello?.protocolVersion, 2);
+			assert.strictEqual(event.streamId, "");
+		});
+
 		test("returns undefined for invalid JSON", () => {
 			assert.strictEqual(parseEvent("not json"), undefined);
 			assert.strictEqual(parseEvent(""), undefined);
@@ -66,7 +106,7 @@ suite("Protocol", () => {
 			assert.strictEqual(parseEvent("null"), undefined);
 		});
 
-		test("returns undefined when streamId is missing", () => {
+		test("returns undefined when streamId is missing and not protocol-level", () => {
 			assert.strictEqual(parseEvent('{"frame":{"data":"abc"}}'), undefined);
 		});
 
@@ -194,6 +234,8 @@ suite("Protocol", () => {
 			assert.strictEqual(isStreamStarted(event), false);
 			assert.strictEqual(isStreamStopped(event), false);
 			assert.strictEqual(isStreamStatus(event), false);
+			assert.strictEqual(isProtocolError(event), false);
+			assert.strictEqual(isHello(event), false);
 		});
 
 		test("isStreamStarted returns true for StreamStarted events", () => {
@@ -223,12 +265,34 @@ suite("Protocol", () => {
 			assert.strictEqual(isFrame(event), false);
 		});
 
+		test("isProtocolError returns true for ProtocolError events", () => {
+			const event: Event = {
+				streamId: "",
+				protocolError: { message: "bad input" },
+			};
+			assert.strictEqual(isProtocolError(event), true);
+			assert.strictEqual(isFrame(event), false);
+			assert.strictEqual(isHello(event), false);
+		});
+
+		test("isHello returns true for Hello events", () => {
+			const event: Event = {
+				streamId: "",
+				hello: { protocolVersion: 1 },
+			};
+			assert.strictEqual(isHello(event), true);
+			assert.strictEqual(isFrame(event), false);
+			assert.strictEqual(isProtocolError(event), false);
+		});
+
 		test("all guards return false for empty event", () => {
 			const event: Event = { streamId: "a" };
 			assert.strictEqual(isFrame(event), false);
 			assert.strictEqual(isStreamStarted(event), false);
 			assert.strictEqual(isStreamStopped(event), false);
 			assert.strictEqual(isStreamStatus(event), false);
+			assert.strictEqual(isProtocolError(event), false);
+			assert.strictEqual(isHello(event), false);
 		});
 	});
 
@@ -262,6 +326,26 @@ suite("Protocol", () => {
 			assert.ok("file" in parsed.addStream);
 			assert.ok("deviceType" in parsed.addStream);
 			assert.ok("runtime" in parsed.addStream);
+		});
+
+		test("Go-produced Hello JSON parses correctly in TS", () => {
+			const goJSON = '{"streamId":"","hello":{"protocolVersion":1}}';
+			const event = parseEvent(goJSON);
+			assert.ok(event);
+			assert.ok(isHello(event));
+			assert.strictEqual(event.hello?.protocolVersion, 1);
+		});
+
+		test("Go-produced ProtocolError JSON parses correctly in TS", () => {
+			const goJSON =
+				'{"streamId":"","protocolError":{"message":"invalid command: proto: syntax error"}}';
+			const event = parseEvent(goJSON);
+			assert.ok(event);
+			assert.ok(isProtocolError(event));
+			assert.strictEqual(
+				event.protocolError?.message,
+				"invalid command: proto: syntax error",
+			);
 		});
 	});
 });

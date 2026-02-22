@@ -151,7 +151,7 @@ func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOut
 					StreamId: voc.streamID,
 					Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: voc.device, File: voc.file, Data: encoded}},
 				}); sendErr != nil {
-					slog.Warn("Failed to send frame event", "err", sendErr)
+					return fmt.Errorf("frame send: %w", sendErr)
 				}
 			} else {
 				fmt.Println(encoded)

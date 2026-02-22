@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -15,7 +16,7 @@ func TestReadCommands_ValidCommands(t *testing.T) {
 {"streamId":"b","removeStream":{}}
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), func(cmd *pb.Command) {
+	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -36,7 +37,7 @@ func TestReadCommands_SkipsEmptyLines(t *testing.T) {
 
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), func(cmd *pb.Command) {
+	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -51,7 +52,7 @@ func TestReadCommands_SkipsInvalidJSON(t *testing.T) {
 {bad json}
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), func(cmd *pb.Command) {
+	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -75,7 +76,7 @@ func TestReadCommands_RespectsContextCancellation(t *testing.T) {
 	// Start the reader goroutine first.
 	go func() {
 		defer close(done)
-		readCommands(ctx, pr, func(cmd *pb.Command) {
+		readCommands(ctx, pr, nil, func(cmd *pb.Command) {
 			received = append(received, cmd)
 		})
 	}()
@@ -98,5 +99,45 @@ func TestReadCommands_RespectsContextCancellation(t *testing.T) {
 
 	if len(received) != 1 {
 		t.Fatalf("expected 1 command before cancellation, got %d", len(received))
+	}
+}
+
+func TestReadCommands_SendsProtocolErrorOnInvalidJSON(t *testing.T) {
+	input := `not valid json
+{"streamId":"a","nextPreview":{}}
+{bad json}
+`
+	var buf bytes.Buffer
+	ew := NewEventWriter(&buf)
+
+	var received []*pb.Command
+	readCommands(context.Background(), strings.NewReader(input), ew, func(cmd *pb.Command) {
+		received = append(received, cmd)
+	})
+
+	// Only the valid command should be handled.
+	if len(received) != 1 {
+		t.Fatalf("expected 1 valid command, got %d", len(received))
+	}
+
+	// Two invalid lines → two ProtocolError events should be written.
+	output := strings.TrimSpace(buf.String())
+	lines := strings.Split(output, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 ProtocolError events, got %d lines: %q", len(lines), output)
+	}
+
+	for i, line := range lines {
+		event := &pb.Event{}
+		if err := jsonUnmarshalOpts.Unmarshal([]byte(line), event); err != nil {
+			t.Fatalf("line %d: invalid JSON: %v", i, err)
+		}
+		pe := event.GetProtocolError()
+		if pe == nil {
+			t.Fatalf("line %d: expected ProtocolError payload, got %v", i, event.GetPayload())
+		}
+		if !strings.Contains(pe.GetMessage(), "invalid command") {
+			t.Errorf("line %d: unexpected message: %q", i, pe.GetMessage())
+		}
 	}
 }

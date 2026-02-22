@@ -569,6 +569,8 @@ type Event struct {
 	//	*Event_StreamStarted
 	//	*Event_StreamStopped
 	//	*Event_StreamStatus
+	//	*Event_ProtocolError
+	//	*Event_Hello
 	Payload       isEvent_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -654,6 +656,24 @@ func (x *Event) GetStreamStatus() *StreamStatus {
 	return nil
 }
 
+func (x *Event) GetProtocolError() *ProtocolError {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_ProtocolError); ok {
+			return x.ProtocolError
+		}
+	}
+	return nil
+}
+
+func (x *Event) GetHello() *Hello {
+	if x != nil {
+		if x, ok := x.Payload.(*Event_Hello); ok {
+			return x.Hello
+		}
+	}
+	return nil
+}
+
 type isEvent_Payload interface {
 	isEvent_Payload()
 }
@@ -674,6 +694,14 @@ type Event_StreamStatus struct {
 	StreamStatus *StreamStatus `protobuf:"bytes,5,opt,name=stream_status,json=streamStatus,proto3,oneof"`
 }
 
+type Event_ProtocolError struct {
+	ProtocolError *ProtocolError `protobuf:"bytes,6,opt,name=protocol_error,json=protocolError,proto3,oneof"`
+}
+
+type Event_Hello struct {
+	Hello *Hello `protobuf:"bytes,7,opt,name=hello,proto3,oneof"`
+}
+
 func (*Event_Frame) isEvent_Payload() {}
 
 func (*Event_StreamStarted) isEvent_Payload() {}
@@ -681,6 +709,10 @@ func (*Event_StreamStarted) isEvent_Payload() {}
 func (*Event_StreamStopped) isEvent_Payload() {}
 
 func (*Event_StreamStatus) isEvent_Payload() {}
+
+func (*Event_ProtocolError) isEvent_Payload() {}
+
+func (*Event_Hello) isEvent_Payload() {}
 
 // Frame contains a base64-encoded JPEG preview image.
 type Frame struct {
@@ -894,6 +926,98 @@ func (x *StreamStatus) GetPhase() string {
 	return ""
 }
 
+// ProtocolError reports a protocol-level error (e.g. invalid command JSON).
+// stream_id on the parent Event may be empty since these errors are not stream-specific.
+type ProtocolError struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProtocolError) Reset() {
+	*x = ProtocolError{}
+	mi := &file_preview_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProtocolError) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProtocolError) ProtoMessage() {}
+
+func (x *ProtocolError) ProtoReflect() protoreflect.Message {
+	mi := &file_preview_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProtocolError.ProtoReflect.Descriptor instead.
+func (*ProtocolError) Descriptor() ([]byte, []int) {
+	return file_preview_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ProtocolError) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+// Hello is sent by the CLI at startup to advertise the protocol version.
+// The extension checks this to detect incompatible CLI versions.
+type Hello struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	ProtocolVersion int32                  `protobuf:"varint,1,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Hello) Reset() {
+	*x = Hello{}
+	mi := &file_preview_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Hello) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Hello) ProtoMessage() {}
+
+func (x *Hello) ProtoReflect() protoreflect.Message {
+	mi := &file_preview_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Hello.ProtoReflect.Descriptor instead.
+func (*Hello) Descriptor() ([]byte, []int) {
+	return file_preview_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *Hello) GetProtocolVersion() int32 {
+	if x != nil {
+		return x.ProtocolVersion
+	}
+	return 0
+}
+
 var File_preview_proto protoreflect.FileDescriptor
 
 const file_preview_proto_rawDesc = "" +
@@ -932,13 +1056,15 @@ const file_preview_proto_rawDesc = "" +
 	"\x01x\x18\x01 \x01(\x01R\x01x\x12\f\n" +
 	"\x01y\x18\x02 \x01(\x01R\x01y\"!\n" +
 	"\tTextEvent\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05value\"\xa7\x02\n" +
+	"\x05value\x18\x01 \x01(\tR\x05value\"\x98\x03\n" +
 	"\x05Event\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x12*\n" +
 	"\x05frame\x18\x02 \x01(\v2\x12.axe.preview.FrameH\x00R\x05frame\x12C\n" +
 	"\x0estream_started\x18\x03 \x01(\v2\x1a.axe.preview.StreamStartedH\x00R\rstreamStarted\x12C\n" +
 	"\x0estream_stopped\x18\x04 \x01(\v2\x1a.axe.preview.StreamStoppedH\x00R\rstreamStopped\x12@\n" +
-	"\rstream_status\x18\x05 \x01(\v2\x19.axe.preview.StreamStatusH\x00R\fstreamStatusB\t\n" +
+	"\rstream_status\x18\x05 \x01(\v2\x19.axe.preview.StreamStatusH\x00R\fstreamStatus\x12C\n" +
+	"\x0eprotocol_error\x18\x06 \x01(\v2\x1a.axe.preview.ProtocolErrorH\x00R\rprotocolError\x12*\n" +
+	"\x05hello\x18\a \x01(\v2\x12.axe.preview.HelloH\x00R\x05helloB\t\n" +
 	"\apayload\"G\n" +
 	"\x05Frame\x12\x16\n" +
 	"\x06device\x18\x01 \x01(\tR\x06device\x12\x12\n" +
@@ -953,7 +1079,11 @@ const file_preview_proto_rawDesc = "" +
 	"diagnostic\x18\x03 \x01(\tR\n" +
 	"diagnostic\"$\n" +
 	"\fStreamStatus\x12\x14\n" +
-	"\x05phase\x18\x01 \x01(\tR\x05phaseB6Z4github.com/k-kohey/axe/internal/preview/previewprotob\x06proto3"
+	"\x05phase\x18\x01 \x01(\tR\x05phase\")\n" +
+	"\rProtocolError\x12\x18\n" +
+	"\amessage\x18\x01 \x01(\tR\amessage\"2\n" +
+	"\x05Hello\x12)\n" +
+	"\x10protocol_version\x18\x01 \x01(\x05R\x0fprotocolVersionB6Z4github.com/k-kohey/axe/internal/preview/previewprotob\x06proto3"
 
 var (
 	file_preview_proto_rawDescOnce sync.Once
@@ -967,7 +1097,7 @@ func file_preview_proto_rawDescGZIP() []byte {
 	return file_preview_proto_rawDescData
 }
 
-var file_preview_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_preview_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_preview_proto_goTypes = []any{
 	(*Command)(nil),       // 0: axe.preview.Command
 	(*AddStream)(nil),     // 1: axe.preview.AddStream
@@ -982,6 +1112,8 @@ var file_preview_proto_goTypes = []any{
 	(*StreamStarted)(nil), // 10: axe.preview.StreamStarted
 	(*StreamStopped)(nil), // 11: axe.preview.StreamStopped
 	(*StreamStatus)(nil),  // 12: axe.preview.StreamStatus
+	(*ProtocolError)(nil), // 13: axe.preview.ProtocolError
+	(*Hello)(nil),         // 14: axe.preview.Hello
 }
 var file_preview_proto_depIdxs = []int32{
 	1,  // 0: axe.preview.Command.add_stream:type_name -> axe.preview.AddStream
@@ -997,11 +1129,13 @@ var file_preview_proto_depIdxs = []int32{
 	10, // 10: axe.preview.Event.stream_started:type_name -> axe.preview.StreamStarted
 	11, // 11: axe.preview.Event.stream_stopped:type_name -> axe.preview.StreamStopped
 	12, // 12: axe.preview.Event.stream_status:type_name -> axe.preview.StreamStatus
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	13, // 13: axe.preview.Event.protocol_error:type_name -> axe.preview.ProtocolError
+	14, // 14: axe.preview.Event.hello:type_name -> axe.preview.Hello
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_preview_proto_init() }
@@ -1027,6 +1161,8 @@ func file_preview_proto_init() {
 		(*Event_StreamStarted)(nil),
 		(*Event_StreamStopped)(nil),
 		(*Event_StreamStatus)(nil),
+		(*Event_ProtocolError)(nil),
+		(*Event_Hello)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1034,7 +1170,7 @@ func file_preview_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_preview_proto_rawDesc), len(file_preview_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

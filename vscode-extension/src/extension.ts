@@ -7,6 +7,8 @@ import { containsPreview } from "./previewDetector";
 import { PreviewManager } from "./previewManager";
 import {
 	isFrame,
+	isHello,
+	isProtocolError,
 	isStreamStarted,
 	isStreamStatus,
 	isStreamStopped,
@@ -46,15 +48,33 @@ export function activate(context: vscode.ExtensionContext): void {
 			),
 	});
 
+	// The protocol version supported by this extension.
+	const supportedProtocolVersion = 1;
+
 	previewManager = new PreviewManager(outputChannel, statusBar, {
 		resolveExecutablePath: () => resolver.resolve(),
 		onStdoutLine: (line) => {
 			const event = parseEvent(line);
 			if (!event) {
+				outputChannel.appendLine(
+					`[axe] Unrecognized output: ${line.substring(0, 200)}`,
+				);
 				return;
 			}
 
-			if (isFrame(event)) {
+			if (isHello(event)) {
+				const v = event.hello.protocolVersion;
+				outputChannel.appendLine(`[axe] CLI protocol version: ${v}`);
+				if (v !== supportedProtocolVersion) {
+					void vscode.window.showWarningMessage(
+						`axe CLI protocol version (${v}) differs from extension (${supportedProtocolVersion}). Some features may not work correctly. Please update the axe CLI or extension.`,
+					);
+				}
+			} else if (isProtocolError(event)) {
+				outputChannel.appendLine(
+					`[axe] Protocol error: ${event.protocolError.message}`,
+				);
+			} else if (isFrame(event)) {
 				webviewPanel.postFrame(event.streamId, event.frame.data);
 			} else if (isStreamStarted(event)) {
 				if (event.streamStarted.previewCount > 1) {

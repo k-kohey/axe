@@ -77,6 +77,8 @@ export interface Event {
   streamStarted?: StreamStarted | undefined;
   streamStopped?: StreamStopped | undefined;
   streamStatus?: StreamStatus | undefined;
+  protocolError?: ProtocolError | undefined;
+  hello?: Hello | undefined;
 }
 
 /** Frame contains a base64-encoded JPEG preview image. */
@@ -109,4 +111,20 @@ export interface StreamStopped {
 export interface StreamStatus {
   /** "booting", "building", "installing", "running" */
   phase: string;
+}
+
+/**
+ * ProtocolError reports a protocol-level error (e.g. invalid command JSON).
+ * stream_id on the parent Event may be empty since these errors are not stream-specific.
+ */
+export interface ProtocolError {
+  message: string;
+}
+
+/**
+ * Hello is sent by the CLI at startup to advertise the protocol version.
+ * The extension checks this to detect incompatible CLI versions.
+ */
+export interface Hello {
+  protocolVersion: number;
 }

@@ -8,8 +8,10 @@ export type {
 	Command,
 	Event,
 	Frame,
+	Hello,
 	Input,
 	NextPreview,
+	ProtocolError,
 	RemoveStream,
 	StreamStarted,
 	StreamStatus,
@@ -23,6 +25,8 @@ import type {
 	Command,
 	Event,
 	Frame,
+	Hello,
+	ProtocolError,
 	StreamStarted,
 	StreamStatus,
 	StreamStopped,
@@ -52,21 +56,41 @@ export function isStreamStatus(
 	return event.streamStatus !== undefined;
 }
 
+export function isProtocolError(
+	event: Event,
+): event is Event & { protocolError: ProtocolError } {
+	return event.protocolError !== undefined;
+}
+
+export function isHello(event: Event): event is Event & { hello: Hello } {
+	return event.hello !== undefined;
+}
+
 // --- Parsing ---
 
 /**
  * Parse a JSON line into an Event. Returns undefined if the line is not valid JSON
- * or does not contain a streamId.
+ * or does not look like a protocol Event.
+ *
+ * streamId may be empty for protocol-level events (ProtocolError, Hello).
  */
 export function parseEvent(line: string): Event | undefined {
 	try {
 		const obj = JSON.parse(line);
+		if (typeof obj !== "object" || obj === null) {
+			return undefined;
+		}
+		// Accept events with a string streamId OR protocol-level events without one.
 		if (
-			typeof obj !== "object" ||
-			obj === null ||
-			typeof obj.streamId !== "string"
+			typeof obj.streamId !== "string" &&
+			!("protocolError" in obj) &&
+			!("hello" in obj)
 		) {
 			return undefined;
+		}
+		// Ensure streamId defaults to empty string for protocol-level events.
+		if (typeof obj.streamId !== "string") {
+			obj.streamId = "";
 		}
 		return obj as Event;
 	} catch {

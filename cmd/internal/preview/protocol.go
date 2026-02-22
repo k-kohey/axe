@@ -6,6 +6,10 @@ import (
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
+// ProtocolVersion is the current version of the CLI↔Extension protocol.
+// Bump this when making breaking changes to the wire format.
+const ProtocolVersion = 1
+
 var (
 	jsonMarshalOpts   = protojson.MarshalOptions{EmitDefaultValues: true}
 	jsonUnmarshalOpts = protojson.UnmarshalOptions{DiscardUnknown: true}

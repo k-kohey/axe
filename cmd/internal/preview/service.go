@@ -347,6 +347,15 @@ func RunServe(pc ProjectConfig) error {
 
 	ew := NewEventWriter(os.Stdout)
 
+	// Advertise the protocol version to the extension.
+	if err := ew.Send(&pb.Event{
+		Payload: &pb.Event_Hello{
+			Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+		},
+	}); err != nil {
+		return fmt.Errorf("sending hello: %w", err)
+	}
+
 	deviceSetPath, err := platform.AxeDeviceSetPath()
 	if err != nil {
 		return fmt.Errorf("resolving device set path: %w", err)
@@ -374,7 +383,7 @@ func RunServe(pc ProjectConfig) error {
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.
-	runCommandLoop(ctx, os.Stdin, sm)
+	runCommandLoop(ctx, os.Stdin, ew, sm)
 
 	sm.StopAll()
 	pool.GarbageCollect(ctx)

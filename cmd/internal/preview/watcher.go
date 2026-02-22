@@ -475,7 +475,7 @@ func readStdinCommands(ch chan<- stdinCommand, serve bool) {
 // readProtocolCommands reads JSON Lines from stdin and parses them as Command structs.
 // Invalid JSON lines are logged and skipped. EOF causes the channel to close.
 func readProtocolCommands(ctx context.Context, ch chan<- *pb.Command) {
-	readCommands(ctx, os.Stdin, func(cmd *pb.Command) {
+	readCommands(ctx, os.Stdin, nil, func(cmd *pb.Command) {
 		select {
 		case ch <- cmd:
 		default:

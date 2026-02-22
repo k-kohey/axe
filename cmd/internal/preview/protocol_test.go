@@ -41,6 +41,14 @@ func TestEvent_MarshalRoundTrip(t *testing.T) {
 				Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "building"}},
 			},
 		},
+		{
+			name:  "ProtocolError",
+			event: &pb.Event{Payload: &pb.Event_ProtocolError{ProtocolError: &pb.ProtocolError{Message: "invalid command: unexpected token"}}},
+		},
+		{
+			name:  "Hello",
+			event: &pb.Event{Payload: &pb.Event_Hello{Hello: &pb.Hello{ProtocolVersion: 1}}},
+		},
 	}
 
 	for _, tt := range tests {
@@ -56,9 +64,11 @@ func TestEvent_MarshalRoundTrip(t *testing.T) {
 				t.Fatalf("protojson output is not valid JSON: %v", err)
 			}
 
-			// Verify streamId is present.
-			if raw["streamId"] != "abc-123" {
-				t.Errorf("expected streamId=abc-123, got %v", raw["streamId"])
+			// Verify streamId matches the event's value.
+			if tt.event.StreamId != "" {
+				if raw["streamId"] != tt.event.StreamId {
+					t.Errorf("expected streamId=%s, got %v", tt.event.StreamId, raw["streamId"])
+				}
 			}
 		})
 	}
@@ -362,6 +372,59 @@ func TestStreamStopped_EmptyDiagnostic(t *testing.T) {
 	}
 	if ss["reason"] != "removed" {
 		t.Errorf("reason = %v, want %q", ss["reason"], "removed")
+	}
+}
+
+func TestProtocolError_MarshalFields(t *testing.T) {
+	e := &pb.Event{
+		Payload: &pb.Event_ProtocolError{ProtocolError: &pb.ProtocolError{Message: "bad input"}},
+	}
+	data, err := MarshalEvent(e)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"protocolError"`) {
+		t.Errorf("expected protocolError key, got: %s", s)
+	}
+	if !strings.Contains(s, `"bad input"`) {
+		t.Errorf("expected message content, got: %s", s)
+	}
+}
+
+func TestHello_MarshalFields(t *testing.T) {
+	e := &pb.Event{
+		Payload: &pb.Event_Hello{Hello: &pb.Hello{ProtocolVersion: 1}},
+	}
+	data, err := MarshalEvent(e)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `"hello"`) {
+		t.Errorf("expected hello key, got: %s", s)
+	}
+	if !strings.Contains(s, `"protocolVersion"`) {
+		t.Errorf("expected protocolVersion key, got: %s", s)
+	}
+
+	// Verify round-trip via JSON.
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("JSON parse failed: %v", err)
+	}
+	hello, ok := raw["hello"].(map[string]any)
+	if !ok {
+		t.Fatal("expected hello to be present")
+	}
+	if hello["protocolVersion"] != float64(1) {
+		t.Errorf("protocolVersion = %v, want 1", hello["protocolVersion"])
+	}
+}
+
+func TestProtocolVersion_Constant(t *testing.T) {
+	if ProtocolVersion < 1 {
+		t.Errorf("ProtocolVersion = %d, want >= 1", ProtocolVersion)
 	}
 }
 

@@ -69,6 +69,8 @@ message Event {
     StreamStarted stream_started = 3;
     StreamStopped stream_stopped = 4;
     StreamStatus stream_status = 5;
+    ProtocolError protocol_error = 6;
+    Hello hello = 7;
   }
 }
 
@@ -94,4 +96,16 @@ message StreamStopped {
 // StreamStatus reports progress during stream initialization.
 message StreamStatus {
   string phase = 1;  // "booting", "building", "installing", "running"
+}
+
+// ProtocolError reports a protocol-level error (e.g. invalid command JSON).
+// stream_id on the parent Event may be empty since these errors are not stream-specific.
+message ProtocolError {
+  string message = 1;
+}
+
+// Hello is sent by the CLI at startup to advertise the protocol version.
+// The extension checks this to detect incompatible CLI versions.
+message Hello {
+  int32 protocol_version = 1;
 }

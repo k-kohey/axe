@@ -3,6 +3,7 @@ package preview
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -11,9 +12,9 @@ import (
 )
 
 // readCommands reads Command JSON Lines from r and calls handle for each.
-// Empty lines are skipped; invalid JSON lines are logged and skipped.
+// Empty lines are skipped; invalid JSON lines are logged and notified via ew.
 // Returns when the reader is exhausted (EOF) or context is cancelled.
-func readCommands(ctx context.Context, r io.Reader, handle func(*pb.Command)) {
+func readCommands(ctx context.Context, r io.Reader, ew *EventWriter, handle func(*pb.Command)) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
 	for scanner.Scan() {
@@ -30,6 +31,13 @@ func readCommands(ctx context.Context, r io.Reader, handle func(*pb.Command)) {
 		cmd, err := UnmarshalCommand([]byte(line))
 		if err != nil {
 			slog.Warn("Invalid command JSON, skipping", "err", err, "line", line)
+			if ew != nil {
+				_ = ew.Send(&pb.Event{
+					Payload: &pb.Event_ProtocolError{
+						ProtocolError: &pb.ProtocolError{Message: fmt.Sprintf("invalid command: %v", err)},
+					},
+				})
+			}
 			continue
 		}
 		handle(cmd)
@@ -41,8 +49,8 @@ func readCommands(ctx context.Context, r io.Reader, handle func(*pb.Command)) {
 
 // runCommandLoop reads Command JSON Lines from r and dispatches them to sm.
 // It returns when the reader is exhausted (EOF) or the context is cancelled.
-func runCommandLoop(ctx context.Context, r io.Reader, sm *StreamManager) {
-	readCommands(ctx, r, func(cmd *pb.Command) {
+func runCommandLoop(ctx context.Context, r io.Reader, ew *EventWriter, sm *StreamManager) {
+	readCommands(ctx, r, ew, func(cmd *pb.Command) {
 		sm.HandleCommand(ctx, cmd)
 	})
 }
