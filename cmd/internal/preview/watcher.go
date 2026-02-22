@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,7 +42,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	// Watch directories containing Swift source files.
 	// Use git to discover them (fast, respects .gitignore), falling back to WalkDir.
 	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := gitSwiftDirs(ctx, watchRoot)
+	watchDirs, err := wctx.sources.SwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
 		watchDirs, err = walkSwiftDirs(watchRoot)
@@ -207,7 +206,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, bs, dirs, selector, counter)
+	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -245,7 +244,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 1. Resolve dependencies for the new file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, newSourceFile, projectRoot)
+	depFiles, err := resolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies for new file", "err", err)
 	}
@@ -276,7 +275,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile)
+	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -284,10 +283,10 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		}
 		// 4. Retry: rebuild project then try compile again.
 		slog.Info("Thunk compile failed, attempting rebuild", "err", err)
-		if buildErr := buildProject(ctx, pc, dirs); buildErr != nil {
+		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile)
+		dylibPath, err = compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -346,7 +345,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
 
-	if err := buildProject(ctx, pc, dirs); err != nil {
+	if err := buildProject(ctx, pc, dirs, wctx.build); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
 	}
 
@@ -376,7 +375,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile)
+	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -384,13 +383,13 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("compile: %w", err)
 	}
 
-	terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath)
+	terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
 
-	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath); err != nil {
+	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath, wctx.app, wctx.copier); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 
-	if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
+	if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {
 		return fmt.Errorf("launch: %w", err)
 	}
 
@@ -483,37 +482,6 @@ func readProtocolCommands(ctx context.Context, ch chan<- *pb.Command) {
 		}
 	})
 	close(ch)
-}
-
-// gitSwiftDirs returns unique directories containing Swift files tracked by git
-// (or untracked but not ignored). This is fast and automatically respects .gitignore.
-func gitSwiftDirs(ctx context.Context, root string) ([]string, error) {
-	// --cached: tracked files, --others --exclude-standard: new files not yet gitignored
-	out, err := exec.CommandContext(ctx,
-		"git", "-C", root, "ls-files",
-		"--cached", "--others", "--exclude-standard",
-		"*.swift",
-	).Output()
-	if err != nil {
-		return nil, err
-	}
-
-	seen := make(map[string]bool)
-	var dirs []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		dir := filepath.Dir(filepath.Join(root, line))
-		if !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	if len(dirs) == 0 {
-		return nil, fmt.Errorf("no Swift files found")
-	}
-	return dirs, nil
 }
 
 // walkSwiftDirs is the fallback for non-git projects. It walks the directory tree

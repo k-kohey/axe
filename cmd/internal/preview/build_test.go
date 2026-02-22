@@ -2,10 +2,284 @@ package preview
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// --- Fake BuildRunner ---
+
+type fakeBuildRunner struct {
+	fetchOutput []byte
+	fetchErr    error
+	buildOutput []byte
+	buildErr    error
+
+	// Captured args for assertions.
+	fetchArgs []string
+	buildArgs []string
+}
+
+func (f *fakeBuildRunner) FetchBuildSettings(_ context.Context, args []string) ([]byte, error) {
+	f.fetchArgs = args
+	return f.fetchOutput, f.fetchErr
+}
+
+func (f *fakeBuildRunner) Build(_ context.Context, args []string) ([]byte, error) {
+	f.buildArgs = args
+	return f.buildOutput, f.buildErr
+}
+
+// --- fetchBuildSettings tests ---
+
+func TestFetchBuildSettings_ParsesAllFields(t *testing.T) {
+	t.Parallel()
+
+	output := `Build settings for action build and target TestModule:
+    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+    SWIFT_VERSION = 5.0
+    OTHER_SETTING = ignored
+`
+	br := &fakeBuildRunner{fetchOutput: []byte(output)}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if bs.ModuleName != "TestModule" {
+		t.Errorf("ModuleName = %q, want %q", bs.ModuleName, "TestModule")
+	}
+	if bs.OriginalBundleID != "com.example.TestModule" {
+		t.Errorf("OriginalBundleID = %q, want %q", bs.OriginalBundleID, "com.example.TestModule")
+	}
+	if bs.BundleID != "axe.com.example.TestModule" {
+		t.Errorf("BundleID = %q, want %q", bs.BundleID, "axe.com.example.TestModule")
+	}
+	if bs.DeploymentTarget != "17.0" {
+		t.Errorf("DeploymentTarget = %q, want %q", bs.DeploymentTarget, "17.0")
+	}
+	if bs.SwiftVersion != "5.0" {
+		t.Errorf("SwiftVersion = %q, want %q", bs.SwiftVersion, "5.0")
+	}
+}
+
+func TestFetchBuildSettings_BuiltProductsDir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		configuration string
+		wantSuffix    string
+	}{
+		{
+			name:          "default configuration",
+			configuration: "",
+			wantSuffix:    "Build/Products/Debug-iphonesimulator",
+		},
+		{
+			name:          "explicit configuration",
+			configuration: "Release",
+			wantSuffix:    "Build/Products/Release-iphonesimulator",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+    SWIFT_VERSION = 5.0
+`
+			br := &fakeBuildRunner{fetchOutput: []byte(output)}
+			pc := ProjectConfig{
+				Project:       "/tmp/TestProject.xcodeproj",
+				Scheme:        "TestScheme",
+				Configuration: tt.configuration,
+			}
+			dirs := previewDirs{Build: "/tmp/build"}
+
+			bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if !strings.HasSuffix(bs.BuiltProductsDir, tt.wantSuffix) {
+				t.Errorf("BuiltProductsDir = %q, want suffix %q", bs.BuiltProductsDir, tt.wantSuffix)
+			}
+		})
+	}
+}
+
+func TestFetchBuildSettings_MissingFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		output    string
+		wantError string
+	}{
+		{
+			name: "missing module name",
+			output: `    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`,
+			wantError: "PRODUCT_MODULE_NAME not found",
+		},
+		{
+			name: "missing bundle ID",
+			output: `    PRODUCT_MODULE_NAME = TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`,
+			wantError: "PRODUCT_BUNDLE_IDENTIFIER not found",
+		},
+		{
+			name: "missing deployment target",
+			output: `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+`,
+			wantError: "IPHONEOS_DEPLOYMENT_TARGET not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			br := &fakeBuildRunner{fetchOutput: []byte(tt.output)}
+			pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+			dirs := previewDirs{Build: t.TempDir()}
+
+			_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("error = %q, want to contain %q", err.Error(), tt.wantError)
+			}
+		})
+	}
+}
+
+func TestFetchBuildSettings_SwiftVersionOptional(t *testing.T) {
+	t.Parallel()
+
+	// SwiftVersion is not required; fetchBuildSettings should succeed without it.
+	output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`
+	br := &fakeBuildRunner{fetchOutput: []byte(output)}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bs.SwiftVersion != "" {
+		t.Errorf("SwiftVersion = %q, want empty", bs.SwiftVersion)
+	}
+}
+
+func TestFetchBuildSettings_RunnerError(t *testing.T) {
+	t.Parallel()
+
+	br := &fakeBuildRunner{
+		fetchOutput: []byte("error output"),
+		fetchErr:    errors.New("exit status 1"),
+	}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "xcodebuild -showBuildSettings failed") {
+		t.Errorf("error = %q, want to contain xcodebuild failure message", err.Error())
+	}
+}
+
+func TestFetchBuildSettings_PassesCorrectArgs(t *testing.T) {
+	t.Parallel()
+
+	output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`
+	br := &fakeBuildRunner{fetchOutput: []byte(output)}
+	pc := ProjectConfig{
+		Workspace: "/tmp/TestWorkspace.xcworkspace",
+		Scheme:    "TestScheme",
+	}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify args contain workspace flag.
+	args := strings.Join(br.fetchArgs, " ")
+	if !strings.Contains(args, "-workspace") {
+		t.Errorf("fetchArgs = %v, want to contain -workspace", br.fetchArgs)
+	}
+	if !strings.Contains(args, "-showBuildSettings") {
+		t.Errorf("fetchArgs = %v, want to contain -showBuildSettings", br.fetchArgs)
+	}
+}
+
+// --- buildProject tests ---
+
+func TestBuildProject_Success(t *testing.T) {
+	t.Parallel()
+
+	br := &fakeBuildRunner{buildOutput: []byte("BUILD SUCCEEDED")}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	err := buildProject(context.Background(), pc, dirs, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify args contain derivedDataPath.
+	args := strings.Join(br.buildArgs, " ")
+	if !strings.Contains(args, "-derivedDataPath") {
+		t.Errorf("buildArgs should contain -derivedDataPath, got %v", br.buildArgs)
+	}
+	if !strings.Contains(args, "OTHER_SWIFT_FLAGS") {
+		t.Errorf("buildArgs should contain OTHER_SWIFT_FLAGS, got %v", br.buildArgs)
+	}
+}
+
+func TestBuildProject_Failure(t *testing.T) {
+	t.Parallel()
+
+	br := &fakeBuildRunner{
+		buildOutput: []byte("BUILD FAILED"),
+		buildErr:    errors.New("exit status 65"),
+	}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := previewDirs{Build: t.TempDir()}
+
+	err := buildProject(context.Background(), pc, dirs, br)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "xcodebuild build failed") {
+		t.Errorf("error = %q, want to contain xcodebuild build failure message", err.Error())
+	}
+}
 
 func TestExtractCompilerPaths_IncludePaths(t *testing.T) {
 	bs, dirs := setupRespFile(t, `-I/path/to/headers

@@ -1,12 +1,54 @@
 package platform
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"howett.net/plist"
 )
+
+// configFakeSimctlRunner is a SimctlRunner fake for config tests.
+type configFakeSimctlRunner struct {
+	allDevicesJSON []byte
+}
+
+func (f *configFakeSimctlRunner) ListDevices(_ context.Context, _ string) ([]simDevice, error) {
+	return nil, nil
+}
+func (f *configFakeSimctlRunner) Clone(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *configFakeSimctlRunner) Create(_ context.Context, _, _, _, _ string) (string, error) {
+	return "", nil
+}
+func (f *configFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error { return nil }
+func (f *configFakeSimctlRunner) Delete(_ context.Context, _, _ string) error   { return nil }
+func (f *configFakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
+	if f.allDevicesJSON != nil {
+		return f.allDevicesJSON, nil
+	}
+	return []byte(`{"devices":{}}`), nil
+}
+func (f *configFakeSimctlRunner) ListRuntimes(_ context.Context) ([]byte, error) {
+	return []byte(`{"runtimes":[]}`), nil
+}
+func (f *configFakeSimctlRunner) ListDeviceTypes(_ context.Context) ([]byte, error) {
+	return []byte(`{"devicetypes":[]}`), nil
+}
+
+// fakeProcessLister returns a canned ps output.
+type fakeProcessLister struct {
+	output string
+	err    error
+}
+
+func (f *fakeProcessLister) ListProcesses() (string, error) {
+	return f.output, f.err
+}
 
 // chdir changes the working directory to dir and registers a cleanup
 // to restore the original directory when the test finishes.
@@ -267,4 +309,143 @@ func TestParseSimulatorProcesses(t *testing.T) {
 			t.Fatalf("expected BundleID com.example.fake, got %q", got[0].BundleID)
 		}
 	})
+}
+
+func TestListSimulatorProcesses_WithFakes(t *testing.T) {
+	deviceMapJSON, _ := json.Marshal(struct {
+		Devices map[string][]struct {
+			Name string `json:"name"`
+			UDID string `json:"udid"`
+		} `json:"devices"`
+	}{
+		Devices: map[string][]struct {
+			Name string `json:"name"`
+			UDID string `json:"udid"`
+		}{
+			"iOS": {
+				{Name: "iPhone 17 Pro Max", UDID: "F31DE05D-0E6E-4DC5-B949-FB5736AB5E75"},
+			},
+		},
+	})
+
+	simctl := &configFakeSimctlRunner{allDevicesJSON: deviceMapJSON}
+	pl := &fakeProcessLister{
+		output: `  PID ARGS
+56662 /Users/user/Library/Developer/CoreSimulator/Devices/F31DE05D-0E6E-4DC5-B949-FB5736AB5E75/data/Containers/Bundle/Application/ABC123/HogeApp.app/HogeApp`,
+	}
+
+	procs, err := ListSimulatorProcesses(simctl, pl)
+	if err != nil {
+		t.Fatalf("ListSimulatorProcesses: %v", err)
+	}
+	if len(procs) != 1 {
+		t.Fatalf("expected 1 process, got %d", len(procs))
+	}
+	if procs[0].App != "HogeApp" {
+		t.Errorf("expected app HogeApp, got %s", procs[0].App)
+	}
+	if procs[0].DeviceName != "iPhone 17 Pro Max" {
+		t.Errorf("expected device name 'iPhone 17 Pro Max', got %q", procs[0].DeviceName)
+	}
+}
+
+func TestListSimulatorProcesses_PSError(t *testing.T) {
+	simctl := &configFakeSimctlRunner{}
+	pl := &fakeProcessLister{err: fmt.Errorf("ps failed")}
+
+	_, err := ListSimulatorProcesses(simctl, pl)
+	if err == nil {
+		t.Fatal("expected error when ps fails, got nil")
+	}
+}
+
+func TestFindProcess_WithFakes(t *testing.T) {
+	deviceMapJSON, _ := json.Marshal(struct {
+		Devices map[string][]struct {
+			Name string `json:"name"`
+			UDID string `json:"udid"`
+		} `json:"devices"`
+	}{
+		Devices: map[string][]struct {
+			Name string `json:"name"`
+			UDID string `json:"udid"`
+		}{
+			"iOS": {
+				{Name: "iPhone 17", UDID: "AAAA-BBBB"},
+			},
+		},
+	})
+
+	simctl := &configFakeSimctlRunner{allDevicesJSON: deviceMapJSON}
+
+	t.Run("finds process", func(t *testing.T) {
+		pl := &fakeProcessLister{
+			output: `  PID ARGS
+12345 /Users/user/Library/Developer/CoreSimulator/Devices/AAAA-BBBB/data/Containers/Bundle/Application/XYZ/MyApp.app/MyApp`,
+		}
+
+		pid, err := FindProcess(simctl, pl, "MyApp", "")
+		if err != nil {
+			t.Fatalf("FindProcess: %v", err)
+		}
+		if pid != 12345 {
+			t.Errorf("expected PID 12345, got %d", pid)
+		}
+	})
+
+	t.Run("process not found", func(t *testing.T) {
+		pl := &fakeProcessLister{
+			output: "  PID ARGS\n",
+		}
+
+		_, err := FindProcess(simctl, pl, "NoSuchApp", "")
+		if err == nil {
+			t.Fatal("expected error for missing process, got nil")
+		}
+	})
+
+	t.Run("filters by device", func(t *testing.T) {
+		pl := &fakeProcessLister{
+			output: `  PID ARGS
+12345 /Users/user/Library/Developer/CoreSimulator/Devices/AAAA-BBBB/data/Containers/Bundle/Application/XYZ/MyApp.app/MyApp
+67890 /Users/user/Library/Developer/CoreSimulator/Devices/CCCC-DDDD/data/Containers/Bundle/Application/ABC/MyApp.app/MyApp`,
+		}
+
+		pid, err := FindProcess(simctl, pl, "MyApp", "AAAA-BBBB")
+		if err != nil {
+			t.Fatalf("FindProcess: %v", err)
+		}
+		if pid != 12345 {
+			t.Errorf("expected PID 12345, got %d", pid)
+		}
+	})
+}
+
+func TestBuildDeviceMap_WithFake(t *testing.T) {
+	deviceMapJSON := []byte(`{
+		"devices": {
+			"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+				{"name": "iPhone 16", "udid": "AAA"},
+				{"name": "iPhone 16 Pro", "udid": "BBB"}
+			]
+		}
+	}`)
+
+	simctl := &configFakeSimctlRunner{allDevicesJSON: deviceMapJSON}
+
+	m, err := buildDeviceMap(simctl)
+	if err != nil {
+		t.Fatalf("buildDeviceMap: %v", err)
+	}
+
+	if m["AAA"] != "iPhone 16" {
+		t.Errorf("expected 'iPhone 16' for AAA, got %q", m["AAA"])
+	}
+	if m["BBB"] != "iPhone 16 Pro" {
+		t.Errorf("expected 'iPhone 16 Pro' for BBB, got %q", m["BBB"])
+	}
+}
+
+func TestRealProcessLister_ImplementsInterface(t *testing.T) {
+	var _ ProcessLister = &RealProcessLister{}
 }

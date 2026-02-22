@@ -5,27 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"howett.net/plist"
 )
 
-// simctlCmd builds an exec.Cmd for "xcrun simctl" with optional --set for
-// custom device sets. When deviceSetPath is non-empty, "--set <path>" is
-// inserted right after "simctl".
-func simctlCmd(ctx context.Context, deviceSetPath string, args ...string) *exec.Cmd {
-	base := []string{"simctl"}
-	if deviceSetPath != "" {
-		base = append(base, "--set", deviceSetPath)
-	}
-	return exec.CommandContext(ctx, "xcrun", append(base, args...)...)
-}
-
-func terminateApp(ctx context.Context, bs *buildSettings, device, deviceSetPath string) {
-	out, err := simctlCmd(ctx, deviceSetPath, "terminate", device, bs.BundleID).CombinedOutput()
-	if err != nil {
-		slog.Debug("terminate app (may not be running)", "err", err, "out", string(out))
+func terminateApp(ctx context.Context, bs *buildSettings, device, deviceSetPath string, ar AppRunner) {
+	if err := ar.Terminate(ctx, device, bs.BundleID, deviceSetPath); err != nil {
+		slog.Debug("terminate app (may not be running)", "err", err)
 	}
 }
 
@@ -50,7 +37,7 @@ func resolveAppBundle(bs *buildSettings, dirs previewDirs) (string, error) {
 
 // stageAppBundle copies the .app bundle from dirs.Build to dirs.Staging
 // under LOCK_SH to protect against concurrent xcodebuild writes.
-func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs) (string, error) {
+func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs, fc FileCopier) (string, error) {
 	lock := newBuildLock(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		return "", fmt.Errorf("acquiring read lock: %w", err)
@@ -70,16 +57,16 @@ func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs) (s
 	}
 	stagedAppPath := filepath.Join(dirs.Staging, filepath.Base(srcAppPath))
 	_ = os.RemoveAll(stagedAppPath)
-	if out, err := exec.CommandContext(ctx, "cp", "-a", srcAppPath, stagedAppPath).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("copying app bundle to staging: %w\n%s", err, out)
+	if err := fc.CopyDir(ctx, srcAppPath, stagedAppPath); err != nil {
+		return "", fmt.Errorf("copying app bundle to staging: %w", err)
 	}
 
 	return stagedAppPath, nil
 }
 
-func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device, deviceSetPath string) (string, error) {
+func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device, deviceSetPath string, ar AppRunner, fc FileCopier) (string, error) {
 	// Stage the app bundle under shared lock (reads dirs.Build).
-	stagedAppPath, err := stageAppBundle(ctx, bs, dirs)
+	stagedAppPath, err := stageAppBundle(ctx, bs, dirs, fc)
 	if err != nil {
 		return "", err
 	}
@@ -93,8 +80,8 @@ func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device
 		"axe "+bs.ModuleName,
 	)
 
-	if out, err := simctlCmd(ctx, deviceSetPath, "install", device, stagedAppPath).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("simctl install failed: %w\n%s", err, out)
+	if err := ar.Install(ctx, device, stagedAppPath, deviceSetPath); err != nil {
+		return "", fmt.Errorf("install: %w", err)
 	}
 
 	return stagedAppPath, nil
@@ -133,22 +120,14 @@ func rewriteInfoPlist(plistPath, bundleID, displayName string) {
 
 // launchWithHotReload launches the app with both the loader dylib and the
 // initial thunk dylib injected, plus the socket path for hot-reload communication.
-func launchWithHotReload(ctx context.Context, bs *buildSettings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string) error {
-
+func launchWithHotReload(ctx context.Context, bs *buildSettings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string, ar AppRunner) error {
 	insertLibs := loaderPath + ":" + thunkPath
 
-	launchCmd := simctlCmd(ctx, deviceSetPath, "launch", device, bs.BundleID)
-	launchCmd.Env = append(os.Environ(),
-		"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES="+insertLibs,
-		"SIMCTL_CHILD_AXE_PREVIEW_SOCKET_PATH="+socketPath,
-		"SIMCTL_CHILD_SWIFTUI_VIEW_DEBUG=287",
-	)
-	launchCmd.Stdout = os.Stdout
-	launchCmd.Stderr = os.Stderr
-
-	if err := launchCmd.Run(); err != nil {
-		return fmt.Errorf("simctl launch failed: %w", err)
+	env := map[string]string{
+		"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES":   insertLibs,
+		"SIMCTL_CHILD_AXE_PREVIEW_SOCKET_PATH": socketPath,
+		"SIMCTL_CHILD_SWIFTUI_VIEW_DEBUG":      "287",
 	}
 
-	return nil
+	return ar.Launch(ctx, device, bs.BundleID, deviceSetPath, env, nil)
 }

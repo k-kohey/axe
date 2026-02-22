@@ -15,6 +15,22 @@ import (
 	"howett.net/plist"
 )
 
+// ProcessLister abstracts process listing for testability.
+type ProcessLister interface {
+	ListProcesses() (string, error)
+}
+
+// RealProcessLister executes the real ps command.
+type RealProcessLister struct{}
+
+func (r *RealProcessLister) ListProcesses() (string, error) {
+	out, err := exec.Command("ps", "-eo", "pid,args").Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to run ps: %w", err)
+	}
+	return string(out), nil
+}
+
 // ReadRC parses the .axerc file in the current directory and returns
 // all key-value pairs as a map. The file format is KEY=VALUE, one per line.
 // Lines starting with '#' are treated as comments. Returns an empty map
@@ -74,18 +90,18 @@ var appNameRe = regexp.MustCompile(`.*/([^/]+)\.app/`)
 var appPathRe = regexp.MustCompile(`(/\S+\.app)/`)
 
 // ListSimulatorProcesses returns all app processes running on iOS simulators.
-func ListSimulatorProcesses() ([]SimProcess, error) {
-	deviceMap, err := buildDeviceMap()
+func ListSimulatorProcesses(simctl SimctlRunner, pl ProcessLister) ([]SimProcess, error) {
+	deviceMap, err := buildDeviceMap(simctl)
 	if err != nil {
 		return nil, err
 	}
 
-	out, err := exec.Command("ps", "-eo", "pid,args").Output()
+	psOut, err := pl.ListProcesses()
 	if err != nil {
-		return nil, fmt.Errorf("failed to run ps: %w", err)
+		return nil, err
 	}
 
-	return parseSimulatorProcesses(string(out), deviceMap), nil
+	return parseSimulatorProcesses(psOut, deviceMap), nil
 }
 
 // parseSimulatorProcesses parses ps output and returns simulator app processes.
@@ -159,8 +175,8 @@ func readBundleID(appPath string) string {
 // FindProcess returns the PID of the named process by searching simulator processes.
 // If device is non-empty and not "booted", only processes on that device are matched.
 // When multiple processes match, the first PID is used and a warning is logged.
-func FindProcess(name string, device string) (int, error) {
-	procs, err := ListSimulatorProcesses()
+func FindProcess(simctl SimctlRunner, pl ProcessLister, name string, device string) (int, error) {
+	procs, err := ListSimulatorProcesses(simctl, pl)
 	if err != nil {
 		return 0, fmt.Errorf("process '%s' not found. Is the app running?", name)
 	}
@@ -200,10 +216,13 @@ func matchProcesses(procs []SimProcess, name string, device string) []SimProcess
 	return matched
 }
 
-func buildDeviceMap() (map[string]string, error) {
-	out, err := exec.Command("xcrun", "simctl", "list", "devices", "--json").Output()
+func buildDeviceMap(simctl SimctlRunner) (map[string]string, error) {
+	ctx, cancel := simctlContext()
+	defer cancel()
+
+	out, err := simctl.ListAllDevices(ctx, false)
 	if err != nil {
-		return nil, fmt.Errorf("failed to run simctl: %w", err)
+		return nil, fmt.Errorf("failed to list devices: %w", err)
 	}
 
 	var result struct {

@@ -98,6 +98,7 @@ func compilePipeline(
 	dirs previewDirs,
 	previewSelector string,
 	counter int,
+	tc ToolchainRunner,
 ) (string, error) {
 	files := parseTrackedFiles(sourceFile, trackedFiles)
 	if len(files) == 0 {
@@ -109,7 +110,7 @@ func compilePipeline(
 		return "", fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile)
+	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("compile: %w", err)
 	}
@@ -121,8 +122,8 @@ func compilePipeline(
 func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
 	if err := sendReloadCommand(dirs.Socket, dylibPath); err != nil {
 		slog.Warn("Hot-reload failed, falling back to full relaunch", "err", err)
-		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath)
-		if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath); err != nil {
+		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
+		if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {
 			return fmt.Errorf("launch: %w", err)
 		}
 		fmt.Fprintln(os.Stderr, "Preview relaunched (full restart).")

@@ -1,8 +1,92 @@
 package platform
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 )
+
+// managerFakeSimctlRunner is a SimctlRunner fake for testing simulator manager functions.
+type managerFakeSimctlRunner struct {
+	devices         []simDevice
+	runtimesJSON    []byte
+	deviceTypesJSON []byte
+	createErr       error
+	deleteErr       error
+	createdUDID     string
+}
+
+func (f *managerFakeSimctlRunner) ListDevices(_ context.Context, _ string) ([]simDevice, error) {
+	return f.devices, nil
+}
+
+func (f *managerFakeSimctlRunner) Clone(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (f *managerFakeSimctlRunner) Create(_ context.Context, name, deviceType, runtime, _ string) (string, error) {
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	udid := f.createdUDID
+	if udid == "" {
+		udid = "NEW-UDID-1"
+	}
+	f.devices = append(f.devices, simDevice{
+		Name:                 name,
+		UDID:                 udid,
+		State:                "Shutdown",
+		DeviceTypeIdentifier: deviceType,
+		RuntimeID:            runtime,
+	})
+	return udid, nil
+}
+
+func (f *managerFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error {
+	return nil
+}
+
+func (f *managerFakeSimctlRunner) Delete(_ context.Context, udid, _ string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	var remaining []simDevice
+	for _, d := range f.devices {
+		if d.UDID != udid {
+			remaining = append(remaining, d)
+		}
+	}
+	f.devices = remaining
+	return nil
+}
+
+func (f *managerFakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
+	result := struct {
+		Devices map[string][]simDevice `json:"devices"`
+	}{
+		Devices: make(map[string][]simDevice),
+	}
+	for _, d := range f.devices {
+		result.Devices[d.RuntimeID] = append(result.Devices[d.RuntimeID], d)
+	}
+	data, err := json.Marshal(result)
+	return data, err
+}
+
+func (f *managerFakeSimctlRunner) ListRuntimes(_ context.Context) ([]byte, error) {
+	if f.runtimesJSON != nil {
+		return f.runtimesJSON, nil
+	}
+	return []byte(`{"runtimes":[]}`), nil
+}
+
+func (f *managerFakeSimctlRunner) ListDeviceTypes(_ context.Context) ([]byte, error) {
+	if f.deviceTypesJSON != nil {
+		return f.deviceTypesJSON, nil
+	}
+	return []byte(`{"devicetypes":[]}`), nil
+}
 
 func TestNextSequenceNumber(t *testing.T) {
 	tests := []struct {
@@ -195,4 +279,182 @@ func TestParseAvailable(t *testing.T) {
 	if len(appleTV.Runtimes) != 1 || appleTV.Runtimes[0].Name != "tvOS 18.0" {
 		t.Errorf("unexpected runtimes for Apple TV: %v", appleTV.Runtimes)
 	}
+}
+
+func TestListManaged_WithFakeRunner(t *testing.T) {
+	runner := &managerFakeSimctlRunner{
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown", RuntimeID: "com.apple.CoreSimulator.SimRuntime.iOS-18-2"},
+			{Name: "axe iPad Air (1)", UDID: "BBB", State: "Booted", RuntimeID: "com.apple.CoreSimulator.SimRuntime.iOS-17-0"},
+		},
+	}
+
+	store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+	_ = store.SetDefault("AAA")
+
+	managed, err := ListManaged(runner, store)
+	if err != nil {
+		t.Fatalf("ListManaged: %v", err)
+	}
+
+	if len(managed) != 2 {
+		t.Fatalf("expected 2 managed simulators, got %d", len(managed))
+	}
+
+	// Verify runtime is human-readable.
+	byUDID := make(map[string]ManagedSimulator)
+	for _, m := range managed {
+		byUDID[m.UDID] = m
+	}
+
+	aaa := byUDID["AAA"]
+	if aaa.Runtime != "iOS 18.2" {
+		t.Errorf("expected runtime 'iOS 18.2', got %q", aaa.Runtime)
+	}
+	if !aaa.IsDefault {
+		t.Error("expected AAA to be default")
+	}
+
+	bbb := byUDID["BBB"]
+	if bbb.State != "Booted" {
+		t.Errorf("expected state 'Booted', got %q", bbb.State)
+	}
+	if bbb.IsDefault {
+		t.Error("expected BBB to not be default")
+	}
+}
+
+func TestListManaged_EmptySet(t *testing.T) {
+	runner := &managerFakeSimctlRunner{}
+	store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+
+	managed, err := ListManaged(runner, store)
+	if err != nil {
+		t.Fatalf("ListManaged: %v", err)
+	}
+	if managed != nil {
+		t.Errorf("expected nil for empty set, got %v", managed)
+	}
+}
+
+func TestListAvailable_WithFakeRunner(t *testing.T) {
+	runner := &managerFakeSimctlRunner{
+		runtimesJSON: []byte(`{
+			"runtimes": [{
+				"identifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+				"name": "iOS 18.2",
+				"supportedDeviceTypes": [
+					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}
+				]
+			}]
+		}`),
+		deviceTypesJSON: []byte(`{
+			"devicetypes": [
+				{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro", "name": "iPhone 16 Pro"}
+			]
+		}`),
+	}
+
+	available, err := ListAvailable(runner)
+	if err != nil {
+		t.Fatalf("ListAvailable: %v", err)
+	}
+
+	if len(available) != 1 {
+		t.Fatalf("expected 1 device type, got %d", len(available))
+	}
+	if available[0].Name != "iPhone 16 Pro" {
+		t.Errorf("expected 'iPhone 16 Pro', got %q", available[0].Name)
+	}
+	if len(available[0].Runtimes) != 1 || available[0].Runtimes[0].Name != "iOS 18.2" {
+		t.Errorf("unexpected runtimes: %v", available[0].Runtimes)
+	}
+}
+
+func TestDeviceTypeBaseName_WithFakeRunner(t *testing.T) {
+	t.Run("found in devicetypes", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{
+			deviceTypesJSON: []byte(`{
+				"devicetypes": [
+					{"identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro", "name": "iPhone 16 Pro"}
+				]
+			}`),
+		}
+		got := deviceTypeBaseName(runner, "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro")
+		if got != "iPhone 16 Pro" {
+			t.Errorf("expected 'iPhone 16 Pro', got %q", got)
+		}
+	})
+
+	t.Run("fallback when not found", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{
+			deviceTypesJSON: []byte(`{"devicetypes":[]}`),
+		}
+		got := deviceTypeBaseName(runner, "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro")
+		if got != "iPhone 16 Pro" {
+			t.Errorf("expected fallback 'iPhone 16 Pro', got %q", got)
+		}
+	})
+}
+
+func TestRemove_WithFakeRunner(t *testing.T) {
+	t.Run("removes shutdown device", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{
+			devices: []simDevice{
+				{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown", RuntimeID: testRuntime},
+			},
+		}
+		store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+		_ = store.SetDefault("AAA")
+
+		err := Remove(runner, "AAA", store)
+		if err != nil {
+			t.Fatalf("Remove: %v", err)
+		}
+
+		// Default should be cleared.
+		defaultUDID, _ := store.GetDefault()
+		if defaultUDID != "" {
+			t.Errorf("expected default cleared, got %q", defaultUDID)
+		}
+	})
+
+	t.Run("rejects booted device", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{
+			devices: []simDevice{
+				{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Booted", RuntimeID: testRuntime},
+			},
+		}
+		store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+
+		err := Remove(runner, "AAA", store)
+		if err == nil {
+			t.Fatal("expected error for booted device, got nil")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{}
+		store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+
+		err := Remove(runner, "MISSING", store)
+		if err == nil {
+			t.Fatal("expected error for missing device, got nil")
+		}
+	})
+
+	t.Run("delete error propagated", func(t *testing.T) {
+		runner := &managerFakeSimctlRunner{
+			devices: []simDevice{
+				{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown", RuntimeID: testRuntime},
+			},
+			deleteErr: fmt.Errorf("simctl delete failed"),
+		}
+		store := NewConfigStoreWithPath(t.TempDir() + "/config.json")
+
+		err := Remove(runner, "AAA", store)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
 }

@@ -35,6 +35,11 @@ func (s *stepper) begin(label string) func() {
 // defaultStreamID is used for single-stream mode (before multi-stream support).
 const defaultStreamID = "default"
 
+// defaultRunners creates the production implementations of all runner interfaces.
+func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
+	return &RealBuildRunner{}, &RealToolchainRunner{}, &RealAppRunner{}, &RealFileCopier{}, &RealSourceLister{}
+}
+
 func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string, reuseBuild bool) error {
 	// Set up signal-based context early so that long-running operations
 	// (build with lock, compileThunk, etc.) can be cancelled via Ctrl+C.
@@ -65,10 +70,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 	}
 
+	br, tc, ar, fc, sl := defaultRunners()
+
 	step := &stepper{total: 9}
 
+	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
-	device, deviceSetPath, err := platform.ResolveAxeSimulator(preferredDevice)
+	device, deviceSetPath, err := platform.ResolveAxeSimulator(simctl, preferredDevice)
 	done()
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
@@ -82,7 +90,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	done = step.begin("Fetching build settings...")
-	bs, err := fetchBuildSettings(ctx, pc, dirs)
+	bs, err := fetchBuildSettings(ctx, pc, dirs, br)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -99,7 +107,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			label = "No previous build found, building project..."
 		}
 		done = step.begin(label)
-		err = buildProject(ctx, pc, dirs)
+		err = buildProject(ctx, pc, dirs, br)
 		done()
 		if err != nil {
 			sendStopped("build_error", "Build failed", err.Error())
@@ -111,7 +119,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Resolve 1-level dependencies from the target file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, sourceFile, projectRoot)
+	depFiles, err := resolveDependencies(ctx, sourceFile, projectRoot, sl)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
@@ -139,7 +147,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, 0, sourceFile)
+	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, 0, sourceFile, tc)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -176,7 +184,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
-		terminateApp(cleanupCtx, bs, device, deviceSetPath)
+		terminateApp(cleanupCtx, bs, device, deviceSetPath, ar)
 		if err := os.Remove(dirs.Socket); err != nil && !os.IsNotExist(err) {
 			slog.Debug("Failed to remove socket", "path", dirs.Socket, "err", err)
 		}
@@ -195,18 +203,18 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 	}()
 
-	terminateApp(ctx, bs, device, deviceSetPath)
+	terminateApp(ctx, bs, device, deviceSetPath, ar)
 
 	sendStatus("installing")
 	done = step.begin("Installing app on simulator...")
-	_, err = installApp(ctx, bs, dirs, device, deviceSetPath)
+	_, err = installApp(ctx, bs, dirs, device, deviceSetPath, ar, fc)
 	done()
 	if err != nil {
 		sendStopped("install_error", err.Error(), "")
 		return err
 	}
 
-	loaderPath, err := compileLoader(ctx, dirs, bs.DeploymentTarget)
+	loaderPath, err := compileLoader(ctx, dirs, bs.DeploymentTarget, tc)
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
@@ -214,7 +222,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	sendStatus("running")
 	done = step.begin("Launching app...")
-	err = launchWithHotReload(ctx, bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath)
+	err = launchWithHotReload(ctx, bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath, ar)
 	done()
 	if err != nil {
 		sendStopped("runtime_error", err.Error(), "")
@@ -278,6 +286,11 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			deviceSetPath: deviceSetPath,
 			loaderPath:    loaderPath,
 			serve:         serve,
+			build:         br,
+			toolchain:     tc,
+			app:           ar,
+			copier:        fc,
+			sources:       sl,
 		}
 
 		initialIndex := 0
@@ -348,10 +361,11 @@ func RunServe(pc ProjectConfig) error {
 		slog.Warn("Failed to clean up orphaned devices", "err", err)
 	}
 
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath)
+	br, tc, ar, fc, sl := defaultRunners()
+	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl)
 
 	// Start shared file watcher for all streams.
-	watcher, err := newSharedWatcher(ctx, pc)
+	watcher, err := newSharedWatcher(ctx, pc, sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}

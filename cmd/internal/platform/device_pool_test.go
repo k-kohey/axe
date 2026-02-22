@@ -114,6 +114,29 @@ func (f *fakeSimctlRunner) Delete(_ context.Context, udid, _ string) error {
 	return nil
 }
 
+func (f *fakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	result := struct {
+		Devices map[string][]simDevice `json:"devices"`
+	}{
+		Devices: make(map[string][]simDevice),
+	}
+	for _, d := range f.devices {
+		result.Devices[d.RuntimeID] = append(result.Devices[d.RuntimeID], d)
+	}
+	data, err := json.Marshal(result)
+	return data, err
+}
+
+func (f *fakeSimctlRunner) ListRuntimes(_ context.Context) ([]byte, error) {
+	return []byte(`{"runtimes":[]}`), nil
+}
+
+func (f *fakeSimctlRunner) ListDeviceTypes(_ context.Context) ([]byte, error) {
+	return []byte(`{"devicetypes":[]}`), nil
+}
+
 // addDevice adds a simulated device to the fake runner.
 func (f *fakeSimctlRunner) addDevice(udid, name, deviceType, runtime, state string) {
 	f.mu.Lock()

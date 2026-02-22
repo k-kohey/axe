@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -39,7 +38,7 @@ func loaderCacheKey(source, sdk, deploymentTarget string) string {
 
 // compileLoader compiles the Obj-C loader dylib for the simulator.
 // The result is cached: recompilation is skipped if the source hash matches.
-func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget string) (string, error) {
+func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget string, tc ToolchainRunner) (string, error) {
 	if err := os.MkdirAll(dirs.Loader, 0o755); err != nil {
 		return "", fmt.Errorf("creating loader dir: %w", err)
 	}
@@ -48,11 +47,10 @@ func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget strin
 	hashPath := filepath.Join(dirs.Loader, "loader.sha256")
 
 	// SDK path is needed both for cache key and compilation
-	sdkPathOut, err := exec.CommandContext(ctx, "xcrun", "--sdk", "iphonesimulator", "--show-sdk-path").Output()
+	sdk, err := tc.SDKPath(ctx, "iphonesimulator")
 	if err != nil {
 		return "", fmt.Errorf("getting simulator SDK path: %w", err)
 	}
-	sdk := strings.TrimSpace(string(sdkPathOut))
 
 	// Check if source hash matches the cached build
 	currentHash := loaderCacheKey(loaderSource, sdk, deploymentTarget)
@@ -82,13 +80,12 @@ func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget strin
 		srcPath,
 	}
 	slog.Debug("Compiling loader", "args", compileArgs)
-	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
+	if out, err := tc.CompileC(ctx, compileArgs); err != nil {
 		return "", fmt.Errorf("compiling loader: %w\n%s", err, out)
 	}
 
-	// Ad-hoc codesign
-	if out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("codesigning loader: %w\n%s", err, out)
+	if err := tc.Codesign(ctx, dylibPath); err != nil {
+		return "", fmt.Errorf("codesigning loader: %w", err)
 	}
 
 	// Save source hash for cache invalidation

@@ -14,7 +14,9 @@ var psCmd = &cobra.Command{
 	Short: "List running app processes on iOS simulators",
 	Long:  `Lists app processes running on booted iOS simulators with their PID, app name, device UDID, and device name.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		procs, err := platform.ListSimulatorProcesses()
+		simctl := &platform.RealSimctlRunner{}
+		pl := &platform.RealProcessLister{}
+		procs, err := platform.ListSimulatorProcesses(simctl, pl)
 		if err != nil {
 			return err
 		}

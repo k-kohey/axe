@@ -23,6 +23,11 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 		deviceSetPath: sm.deviceSetPath,
 		loaderPath:    s.loaderPath,
 		serve:         true,
+		build:         sm.build,
+		toolchain:     sm.toolchain,
+		app:           sm.app,
+		copier:        sm.copier,
+		sources:       sm.sources,
 	}
 
 	sourceFile := s.file

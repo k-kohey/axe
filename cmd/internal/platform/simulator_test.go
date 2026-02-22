@@ -1,12 +1,68 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// simFakeSimctlRunner is a SimctlRunner fake for testing ResolveAxeSimulator.
+type simFakeSimctlRunner struct {
+	devices        []simDevice
+	allDevicesJSON []byte
+	createErr      error
+	createdUDID    string
+}
+
+func (f *simFakeSimctlRunner) ListDevices(_ context.Context, _ string) ([]simDevice, error) {
+	return f.devices, nil
+}
+
+func (f *simFakeSimctlRunner) Clone(_ context.Context, _, _, _ string) (string, error) {
+	return "", nil
+}
+
+func (f *simFakeSimctlRunner) Create(_ context.Context, name, deviceType, runtime, _ string) (string, error) {
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	udid := f.createdUDID
+	if udid == "" {
+		udid = "CREATED-1"
+	}
+	return udid, nil
+}
+
+func (f *simFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error { return nil }
+func (f *simFakeSimctlRunner) Delete(_ context.Context, _, _ string) error   { return nil }
+
+func (f *simFakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
+	if f.allDevicesJSON != nil {
+		return f.allDevicesJSON, nil
+	}
+	result := struct {
+		Devices map[string][]simDevice `json:"devices"`
+	}{
+		Devices: make(map[string][]simDevice),
+	}
+	for _, d := range f.devices {
+		result.Devices[d.RuntimeID] = append(result.Devices[d.RuntimeID], d)
+	}
+	data, _ := json.Marshal(result)
+	return data, nil
+}
+
+func (f *simFakeSimctlRunner) ListRuntimes(_ context.Context) ([]byte, error) {
+	return []byte(`{"runtimes":[]}`), nil
+}
+
+func (f *simFakeSimctlRunner) ListDeviceTypes(_ context.Context) ([]byte, error) {
+	return []byte(`{"devicetypes":[]}`), nil
+}
 
 func TestResolveSimulator(t *testing.T) {
 	t.Run("returns flag value when provided", func(t *testing.T) {
@@ -45,10 +101,8 @@ func TestAxeDeviceSetPath(t *testing.T) {
 	}
 }
 
-func TestFindLatestIPhone(t *testing.T) {
-	// Test the selection logic by constructing the same JSON structure
-	// that simctl returns and checking the parsing.
-	simctlJSON := `{
+func TestSelectLatestIPhone(t *testing.T) {
+	simctlJSON := []byte(`{
 		"devices": {
 			"com.apple.CoreSimulator.SimRuntime.iOS-17-0": [
 				{"name": "iPhone 15", "udid": "AAA", "state": "Shutdown", "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-15"},
@@ -62,34 +116,11 @@ func TestFindLatestIPhone(t *testing.T) {
 				{"name": "Apple TV", "udid": "EEE", "state": "Shutdown", "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.Apple-TV"}
 			]
 		}
-	}`
+	}`)
 
-	var result struct {
-		Devices map[string][]simDevice `json:"devices"`
-	}
-	if err := json.Unmarshal([]byte(simctlJSON), &result); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-
-	// Replicate the selection logic from findLatestIPhone.
-	var best simDevice
-	var bestVersion [2]int
-	for runtime, devices := range result.Devices {
-		major, minor := parseIOSVersion(runtime)
-		if major < 0 {
-			continue
-		}
-		for _, d := range devices {
-			if !strings.Contains(d.Name, "iPhone") {
-				continue
-			}
-			v := [2]int{major, minor}
-			if v[0] > bestVersion[0] || (v[0] == bestVersion[0] && v[1] > bestVersion[1]) ||
-				(v == bestVersion && d.Name > best.Name) {
-				best = d
-				bestVersion = v
-			}
-		}
+	best, runtime, err := selectLatestIPhone(simctlJSON)
+	if err != nil {
+		t.Fatalf("selectLatestIPhone: %v", err)
 	}
 
 	// Expect iPhone 16 Pro (iOS 18.2, lexicographically largest on same version).
@@ -98,6 +129,31 @@ func TestFindLatestIPhone(t *testing.T) {
 	}
 	if best.Name != "iPhone 16 Pro" {
 		t.Errorf("expected name iPhone 16 Pro, got %s", best.Name)
+	}
+	if runtime != "com.apple.CoreSimulator.SimRuntime.iOS-18-2" {
+		t.Errorf("expected iOS 18.2 runtime, got %s", runtime)
+	}
+}
+
+func TestSelectLatestIPhone_NoIPhone(t *testing.T) {
+	simctlJSON := []byte(`{
+		"devices": {
+			"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+				{"name": "iPad Air", "udid": "AAA", "state": "Shutdown", "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Air"}
+			]
+		}
+	}`)
+
+	_, _, err := selectLatestIPhone(simctlJSON)
+	if err == nil {
+		t.Fatal("expected error when no iPhone found, got nil")
+	}
+}
+
+func TestSelectLatestIPhone_MalformedJSON(t *testing.T) {
+	_, _, err := selectLatestIPhone([]byte(`{not json`))
+	if err == nil {
+		t.Fatal("expected error on malformed JSON, got nil")
 	}
 }
 
@@ -199,5 +255,137 @@ func TestParseIOSVersion(t *testing.T) {
 					tt.runtime, major, minor, tt.wantMajor, tt.wantMinor)
 			}
 		})
+	}
+}
+
+func TestResolveAxeSimulator_PreferredUDID(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown"},
+			{Name: "axe iPhone 16 Pro (2)", UDID: "BBB", State: "Booted"},
+		},
+	}
+
+	udid, _, err := ResolveAxeSimulator(runner, "BBB")
+	if err != nil {
+		t.Fatalf("ResolveAxeSimulator: %v", err)
+	}
+	if udid != "BBB" {
+		t.Errorf("expected BBB, got %s", udid)
+	}
+}
+
+func TestResolveAxeSimulator_PreferredUDID_NotFound(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown"},
+		},
+	}
+
+	_, _, err := ResolveAxeSimulator(runner, "MISSING")
+	if err == nil {
+		t.Fatal("expected error for missing UDID, got nil")
+	}
+}
+
+func TestResolveAxeSimulator_AutoSelectShutdown(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Booted"},
+			{Name: "axe iPhone 16 Pro (2)", UDID: "BBB", State: "Shutdown"},
+		},
+	}
+
+	udid, _, err := ResolveAxeSimulator(runner, "")
+	if err != nil {
+		t.Fatalf("ResolveAxeSimulator: %v", err)
+	}
+	if udid != "BBB" {
+		t.Errorf("expected BBB (shutdown), got %s", udid)
+	}
+}
+
+func TestResolveAxeSimulator_AutoCreate(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{},
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPhone 16 Pro", "udid": "SRC-1", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}
+				]
+			}
+		}`),
+		createdUDID: "NEW-1",
+	}
+
+	udid, _, err := ResolveAxeSimulator(runner, "")
+	if err != nil {
+		t.Fatalf("ResolveAxeSimulator: %v", err)
+	}
+	if udid != "NEW-1" {
+		t.Errorf("expected NEW-1, got %s", udid)
+	}
+}
+
+func TestResolveAxeSimulator_CreateError(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{},
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPhone 16 Pro", "udid": "SRC-1", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}
+				]
+			}
+		}`),
+		createErr: fmt.Errorf("simctl create failed"),
+	}
+
+	_, _, err := ResolveAxeSimulator(runner, "")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestParseDevicesJSON(t *testing.T) {
+	data := []byte(`{
+		"devices": {
+			"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+				{"name": "iPhone 16", "udid": "AAA", "state": "Shutdown"},
+				{"name": "iPhone 16 Pro", "udid": "BBB", "state": "Booted"}
+			],
+			"com.apple.CoreSimulator.SimRuntime.iOS-17-0": [
+				{"name": "iPhone 15", "udid": "CCC", "state": "Shutdown"}
+			]
+		}
+	}`)
+
+	devices, err := parseDevicesJSON(data)
+	if err != nil {
+		t.Fatalf("parseDevicesJSON: %v", err)
+	}
+
+	if len(devices) != 3 {
+		t.Fatalf("expected 3 devices, got %d", len(devices))
+	}
+
+	// Should be sorted by name.
+	if devices[0].Name != "iPhone 15" {
+		t.Errorf("expected first device iPhone 15, got %s", devices[0].Name)
+	}
+
+	// RuntimeID should be populated.
+	for _, d := range devices {
+		if d.RuntimeID == "" {
+			t.Errorf("RuntimeID not populated for %s", d.Name)
+		}
+	}
+}
+
+func TestParseDevicesJSON_MalformedJSON(t *testing.T) {
+	_, err := parseDevicesJSON([]byte(`{not json`))
+	if err == nil {
+		t.Fatal("expected error on malformed JSON, got nil")
 	}
 }

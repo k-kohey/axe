@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -70,7 +69,7 @@ func AxeDeviceSetPath() (string, error) {
 //
 // Both add complexity and startup latency; the current behavior is acceptable for typical
 // usage since duplicate creation is harmless and same-device collision is unlikely in practice.
-func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err error) {
+func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, deviceSetPath string, err error) {
 	deviceSetPath, err = AxeDeviceSetPath()
 	if err != nil {
 		return "", "", err
@@ -81,7 +80,7 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 
 	listCtx, listCancel := simctlContext()
 	defer listCancel()
-	devices, err := listDevicesInSet(listCtx, deviceSetPath)
+	devices, err := simctl.ListDevices(listCtx, deviceSetPath)
 	if err != nil {
 		slog.Debug("Failed to list devices in axe set, will clone", "err", err)
 	}
@@ -110,7 +109,7 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 	}
 
 	// Priority 4: auto-create from the latest iPhone.
-	source, runtime, err := findLatestIPhone()
+	source, runtime, err := findLatestIPhone(simctl)
 	if err != nil {
 		return "", "", fmt.Errorf("finding latest iPhone: %w", err)
 	}
@@ -118,7 +117,7 @@ func ResolveAxeSimulator(preferredUDID string) (udid, deviceSetPath string, err 
 	slog.Info("Creating simulator in axe device set", "source", source.Name, "deviceType", source.DeviceTypeIdentifier, "runtime", runtime)
 	createCtx, createCancel := simctlContext()
 	defer createCancel()
-	createdUDID, err := createDeviceInSet(createCtx, "axe "+source.Name+" (1)", source.DeviceTypeIdentifier, runtime, deviceSetPath)
+	createdUDID, err := simctl.Create(createCtx, "axe "+source.Name+" (1)", source.DeviceTypeIdentifier, runtime, deviceSetPath)
 	if err != nil {
 		return "", "", fmt.Errorf("creating simulator: %w", err)
 	}
@@ -160,19 +159,25 @@ func selectAvailableSimulator(devices []simDevice, defaultUDID string) (string, 
 // without booting it. The selection prefers the highest iOS version and, among
 // devices on the same version, the lexicographically largest name.
 // Returns the device and its runtime key (e.g. "com.apple.CoreSimulator.SimRuntime.iOS-18-2").
-func findLatestIPhone() (simDevice, string, error) {
+func findLatestIPhone(simctl SimctlRunner) (simDevice, string, error) {
 	ctx, cancel := simctlContext()
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devices", "available", "--json").Output()
+	out, err := simctl.ListAllDevices(ctx, true)
 	if err != nil {
-		return simDevice{}, "", fmt.Errorf("simctl list devices: %w", err)
+		return simDevice{}, "", fmt.Errorf("listing available devices: %w", err)
 	}
 
+	return selectLatestIPhone(out)
+}
+
+// selectLatestIPhone parses simctl JSON output and selects the best iPhone device.
+// Exported for testing.
+func selectLatestIPhone(jsonData []byte) (simDevice, string, error) {
 	var result struct {
 		Devices map[string][]simDevice `json:"devices"`
 	}
-	if err := json.Unmarshal(out, &result); err != nil {
+	if err := json.Unmarshal(jsonData, &result); err != nil {
 		return simDevice{}, "", fmt.Errorf("parsing simctl output: %w", err)
 	}
 
@@ -204,17 +209,12 @@ func findLatestIPhone() (simDevice, string, error) {
 	return best, bestRuntime, nil
 }
 
-// listDevicesInSet returns all devices in the given custom device set.
-func listDevicesInSet(ctx context.Context, deviceSetPath string) ([]simDevice, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", deviceSetPath, "list", "devices", "--json").Output()
-	if err != nil {
-		return nil, fmt.Errorf("simctl list devices in set: %w", err)
-	}
-
+// parseDevicesJSON parses simctl "list devices --json" output into a flat slice of simDevice.
+func parseDevicesJSON(data []byte) ([]simDevice, error) {
 	var result struct {
 		Devices map[string][]simDevice `json:"devices"`
 	}
-	if err := json.Unmarshal(out, &result); err != nil {
+	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("parsing simctl output: %w", err)
 	}
 
@@ -230,19 +230,6 @@ func listDevicesInSet(ctx context.Context, deviceSetPath string) ([]simDevice, e
 		return all[i].Name < all[j].Name
 	})
 	return all, nil
-}
-
-// createDeviceInSet creates a new simulator device in the specified device set.
-// Returns the UDID of the newly created device.
-func createDeviceInSet(ctx context.Context, name, deviceType, runtime, setPath string) (string, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath,
-		"create", name, deviceType, runtime,
-	).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("simctl create: %w\n%s", err, out)
-	}
-	// simctl create prints the new UDID on stdout.
-	return strings.TrimSpace(string(out)), nil
 }
 
 // iosVersionRe extracts major and minor version from a simctl runtime key

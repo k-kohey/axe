@@ -171,6 +171,56 @@ func TestSwitchFile_NonexistentPath(t *testing.T) {
 	}
 }
 
+// errSourceLister is a SourceLister that returns the given error, respecting context cancellation.
+type errSourceLister struct{ err error }
+
+func (e *errSourceLister) SwiftFiles(ctx context.Context, _ string) ([]string, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, e.err
+}
+func (e *errSourceLister) SwiftDirs(ctx context.Context, _ string) ([]string, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, e.err
+}
+
+// errToolchainRunner is a ToolchainRunner that returns the given error, respecting context cancellation.
+type errToolchainRunner struct{ err error }
+
+func (e *errToolchainRunner) SDKPath(ctx context.Context, _ string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	return "", e.err
+}
+func (e *errToolchainRunner) CompileSwift(ctx context.Context, _ []string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, e.err
+}
+func (e *errToolchainRunner) LinkDylib(ctx context.Context, _ []string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, e.err
+}
+func (e *errToolchainRunner) CompileC(ctx context.Context, _ []string) ([]byte, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, e.err
+}
+func (e *errToolchainRunner) Codesign(ctx context.Context, _ string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return e.err
+}
+
 func TestSwitchFile_CancelledContext(t *testing.T) {
 	dir := t.TempDir()
 
@@ -192,7 +242,11 @@ struct V: View {
 	pc, _ := NewProjectConfig(filepath.Join(dir, "dummy.xcodeproj"), "", "Scheme", "")
 	bs := &buildSettings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
-	wctx := watchContext{}
+	errFake := errors.New("cancelled")
+	wctx := watchContext{
+		sources:   &errSourceLister{err: errFake},
+		toolchain: &errToolchainRunner{err: errFake},
+	}
 
 	// Cancel the context before calling switchFile.
 	ctx, cancel := context.WithCancel(context.Background())

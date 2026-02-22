@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -34,7 +33,7 @@ type AvailableRuntime struct {
 }
 
 // ListManaged returns all simulators in the axe device set.
-func ListManaged(store *ConfigStore) ([]ManagedSimulator, error) {
+func ListManaged(simctl SimctlRunner, store *ConfigStore) ([]ManagedSimulator, error) {
 	deviceSetPath, err := AxeDeviceSetPath()
 	if err != nil {
 		return nil, err
@@ -43,35 +42,25 @@ func ListManaged(store *ConfigStore) ([]ManagedSimulator, error) {
 	ctx, cancel := simctlContext()
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", deviceSetPath, "list", "devices", "--json").Output()
+	devices, err := simctl.ListDevices(ctx, deviceSetPath)
 	if err != nil {
 		// Device set may not exist yet — return empty list rather than error.
 		slog.Debug("Failed to list devices in axe set", "err", err)
 		return nil, nil
 	}
 
-	var result struct {
-		Devices map[string][]simDevice `json:"devices"`
-	}
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("parsing simctl output: %w", err)
-	}
-
 	defaultUDID, _ := store.GetDefault()
 
 	var managed []ManagedSimulator
-	for runtime, devs := range result.Devices {
-		runtimeName := humanReadableRuntime(runtime)
-		for _, d := range devs {
-			managed = append(managed, ManagedSimulator{
-				UDID:      d.UDID,
-				Name:      d.Name,
-				Runtime:   runtimeName,
-				RuntimeID: runtime,
-				State:     d.State,
-				IsDefault: d.UDID == defaultUDID,
-			})
-		}
+	for _, d := range devices {
+		managed = append(managed, ManagedSimulator{
+			UDID:      d.UDID,
+			Name:      d.Name,
+			Runtime:   humanReadableRuntime(d.RuntimeID),
+			RuntimeID: d.RuntimeID,
+			State:     d.State,
+			IsDefault: d.UDID == defaultUDID,
+		})
 	}
 	return managed, nil
 }
@@ -96,18 +85,18 @@ func humanReadableRuntime(runtime string) string {
 }
 
 // ListAvailable returns device types with their compatible runtimes.
-func ListAvailable() ([]AvailableDeviceType, error) {
+func ListAvailable(simctl SimctlRunner) ([]AvailableDeviceType, error) {
 	ctx, cancel := simctlContext()
 	defer cancel()
 
-	runtimesOut, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "runtimes", "available", "--json").Output()
+	runtimesOut, err := simctl.ListRuntimes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("simctl list runtimes: %w", err)
+		return nil, fmt.Errorf("listing runtimes: %w", err)
 	}
 
-	deviceTypesOut, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").Output()
+	deviceTypesOut, err := simctl.ListDeviceTypes(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("simctl list devicetypes: %w", err)
+		return nil, fmt.Errorf("listing devicetypes: %w", err)
 	}
 
 	return parseAvailable(runtimesOut, deviceTypesOut)
@@ -165,23 +154,23 @@ func parseAvailable(runtimesJSON, deviceTypesJSON []byte) ([]AvailableDeviceType
 
 // Add creates a new simulator in the axe device set.
 // It generates a sequential name like "axe iPhone 16 Pro (1)".
-func Add(deviceType, runtime string, setDefault bool, store *ConfigStore) (ManagedSimulator, error) {
+func Add(simctl SimctlRunner, deviceType, runtime string, setDefault bool, store *ConfigStore) (ManagedSimulator, error) {
 	deviceSetPath, err := AxeDeviceSetPath()
 	if err != nil {
 		return ManagedSimulator{}, err
 	}
 
 	// Look up the human-readable name for this device type.
-	baseName := deviceTypeBaseName(deviceType)
+	baseName := deviceTypeBaseName(simctl, deviceType)
 
 	// Determine the next sequence number.
-	existing, _ := ListManaged(store)
+	existing, _ := ListManaged(simctl, store)
 	seq := nextSequenceNumber(existing, baseName)
 	name := fmt.Sprintf("axe %s (%d)", baseName, seq)
 
 	createCtx, createCancel := simctlContext()
 	defer createCancel()
-	udid, err := createDeviceInSet(createCtx, name, deviceType, runtime, deviceSetPath)
+	udid, err := simctl.Create(createCtx, name, deviceType, runtime, deviceSetPath)
 	if err != nil {
 		return ManagedSimulator{}, fmt.Errorf("creating simulator: %w", err)
 	}
@@ -208,7 +197,7 @@ func Add(deviceType, runtime string, setDefault bool, store *ConfigStore) (Manag
 
 // Remove deletes a simulator from the axe device set.
 // Returns an error if the simulator is currently booted.
-func Remove(udid string, store *ConfigStore) error {
+func Remove(simctl SimctlRunner, udid string, store *ConfigStore) error {
 	deviceSetPath, err := AxeDeviceSetPath()
 	if err != nil {
 		return err
@@ -217,7 +206,7 @@ func Remove(udid string, store *ConfigStore) error {
 	// Check if the device exists and its state.
 	listCtx, listCancel := simctlContext()
 	defer listCancel()
-	devices, err := listDevicesInSet(listCtx, deviceSetPath)
+	devices, err := simctl.ListDevices(listCtx, deviceSetPath)
 	if err != nil {
 		return fmt.Errorf("listing devices: %w", err)
 	}
@@ -236,14 +225,10 @@ func Remove(udid string, store *ConfigStore) error {
 		return fmt.Errorf("simulator %s (%s) is currently booted; shut it down first", udid, found.Name)
 	}
 
-	ctx, cancel := simctlContext()
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", deviceSetPath,
-		"delete", udid,
-	).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("simctl delete: %w\n%s", err, out)
+	deleteCtx, deleteCancel := simctlContext()
+	defer deleteCancel()
+	if err := simctl.Delete(deleteCtx, udid, deviceSetPath); err != nil {
+		return err
 	}
 
 	// Clear default if this was the default.
@@ -297,11 +282,11 @@ func nextSequenceNumber(devices []ManagedSimulator, baseName string) int {
 // identifier like "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro".
 // It queries simctl list devicetypes --json for the name. Falls back to parsing
 // the identifier suffix if the query fails.
-func deviceTypeBaseName(identifier string) string {
+func deviceTypeBaseName(simctl SimctlRunner, identifier string) string {
 	ctx, cancel := simctlContext()
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").Output()
+	out, err := simctl.ListDeviceTypes(ctx)
 	if err == nil {
 		var result struct {
 			DeviceTypes []struct {

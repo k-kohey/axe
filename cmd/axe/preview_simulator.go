@@ -43,7 +43,8 @@ func runSimulatorListManaged() error {
 		return err
 	}
 
-	managed, err := platform.ListManaged(store)
+	simctl := &platform.RealSimctlRunner{}
+	managed, err := platform.ListManaged(simctl, store)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,8 @@ func runSimulatorListManaged() error {
 }
 
 func runSimulatorListAvailable() error {
-	available, err := platform.ListAvailable()
+	simctl := &platform.RealSimctlRunner{}
+	available, err := platform.ListAvailable(simctl)
 	if err != nil {
 		return err
 	}
@@ -158,7 +160,8 @@ func runSimulatorAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	sim, err := platform.Add(simulatorAddDeviceType, simulatorAddRuntime, simulatorAddSetDefault, store)
+	simctl := &platform.RealSimctlRunner{}
+	sim, err := platform.Add(simctl, simulatorAddDeviceType, simulatorAddRuntime, simulatorAddSetDefault, store)
 	if err != nil {
 		return err
 	}
@@ -191,8 +194,9 @@ func runSimulatorRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	simctl := &platform.RealSimctlRunner{}
 	udid := args[0]
-	if err := platform.Remove(udid, store); err != nil {
+	if err := platform.Remove(simctl, udid, store); err != nil {
 		return err
 	}
 
@@ -222,6 +226,7 @@ func runSimulatorDefault(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	simctl := &platform.RealSimctlRunner{}
 
 	if simulatorDefaultClear {
 		if err := store.ClearDefault(); err != nil {
@@ -236,7 +241,7 @@ func runSimulatorDefault(cmd *cobra.Command, args []string) error {
 		udid := args[0]
 
 		// Verify the UDID exists in the axe device set.
-		managed, err := platform.ListManaged(store)
+		managed, err := platform.ListManaged(simctl, store)
 		if err != nil {
 			return err
 		}
@@ -271,7 +276,7 @@ func runSimulatorDefault(cmd *cobra.Command, args []string) error {
 	}
 
 	if simulatorDefaultJSON {
-		managed, _ := platform.ListManaged(store)
+		managed, _ := platform.ListManaged(simctl, store)
 		for _, s := range managed {
 			if s.UDID == defaultUDID {
 				enc := json.NewEncoder(os.Stdout)
@@ -284,7 +289,7 @@ func runSimulatorDefault(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to find the name.
-	managed, _ := platform.ListManaged(store)
+	managed, _ := platform.ListManaged(simctl, store)
 	for _, s := range managed {
 		if s.UDID == defaultUDID {
 			fmt.Printf("%s (%s)\n", s.Name, s.UDID)

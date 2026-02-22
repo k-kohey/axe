@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -16,12 +15,11 @@ func replacementModuleName(moduleName, sourceFileName string, counter int) strin
 	return fmt.Sprintf("%s_PreviewReplacement_%s_%d", moduleName, base, counter)
 }
 
-func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs previewDirs, reloadCounter int, sourceFileName string) (string, error) {
-	sdkPath, err := exec.CommandContext(ctx, "xcrun", "--sdk", "iphonesimulator", "--show-sdk-path").Output()
+func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs previewDirs, reloadCounter int, sourceFileName string, tc ToolchainRunner) (string, error) {
+	sdk, err := tc.SDKPath(ctx, "iphonesimulator")
 	if err != nil {
 		return "", fmt.Errorf("getting simulator SDK path: %w", err)
 	}
-	sdk := strings.TrimSpace(string(sdkPath))
 	target := fmt.Sprintf("arm64-apple-ios%s-simulator", bs.DeploymentTarget)
 
 	replacementModule := replacementModuleName(bs.ModuleName, sourceFileName, reloadCounter)
@@ -30,13 +28,13 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 	dylibPath := filepath.Join(dirs.Thunk, fmt.Sprintf("thunk_%d.dylib", reloadCounter))
 
 	// Compile and link under shared lock (reads BuiltProductsDir).
-	if err := compileAndLink(ctx, bs, dirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath); err != nil {
+	if err := compileAndLink(ctx, bs, dirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath, tc); err != nil {
 		return "", err
 	}
 
 	// codesign only touches dirs.Thunk — no lock needed.
-	if out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", dylibPath).CombinedOutput(); err != nil {
-		return "", fmt.Errorf("codesigning dylib: %w\n%s", err, out)
+	if err := tc.Codesign(ctx, dylibPath); err != nil {
+		return "", fmt.Errorf("codesigning dylib: %w", err)
 	}
 
 	slog.Debug("Thunk dylib ready", "path", dylibPath)
@@ -45,7 +43,7 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 
 // compileAndLink runs swiftc compile (.swift → .o) and link (.o → .dylib)
 // under LOCK_SH to protect against concurrent xcodebuild writes to dirs.Build.
-func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath string) error {
+func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath string, tc ToolchainRunner) error {
 	lock := newBuildLock(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		return fmt.Errorf("acquiring read lock: %w", err)
@@ -89,7 +87,7 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		compileArgs = append(compileArgs, "-swift-version", sv)
 	}
 	slog.Debug("Compiling thunk .swift -> .o", "args", compileArgs)
-	if out, err := exec.CommandContext(ctx, compileArgs[0], compileArgs[1:]...).CombinedOutput(); err != nil {
+	if out, err := tc.CompileSwift(ctx, compileArgs); err != nil {
 		return fmt.Errorf("compiling thunk.swift -> .o: %w\n%s", err, out)
 	}
 
@@ -110,7 +108,7 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		"-o", dylibPath,
 	}
 	slog.Debug("Linking thunk .o -> .dylib", "args", linkArgs)
-	if out, err := exec.CommandContext(ctx, linkArgs[0], linkArgs[1:]...).CombinedOutput(); err != nil {
+	if out, err := tc.LinkDylib(ctx, linkArgs); err != nil {
 		return fmt.Errorf("linking thunk.o -> .dylib: %w\n%s", err, out)
 	}
 

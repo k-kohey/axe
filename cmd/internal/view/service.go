@@ -12,6 +12,16 @@ import (
 	"github.com/k-kohey/axe/internal/platform"
 )
 
+// defaultSimctl returns a SimctlRunner for the view package.
+func defaultSimctl() platform.SimctlRunner {
+	return &platform.RealSimctlRunner{}
+}
+
+// defaultProcessLister returns a ProcessLister for the view package.
+func defaultProcessLister() platform.ProcessLister {
+	return &platform.RealProcessLister{}
+}
+
 // fetchHierarchy runs LLDB to fetch the view hierarchy bplist and parses it.
 func fetchHierarchy(appName string, device string) (*rawBplistData, error) {
 	pythonDir, cleanup, err := platform.ExtractScripts()
@@ -27,7 +37,7 @@ func fetchHierarchy(appName string, device string) (*rawBplistData, error) {
 		return nil, err
 	}
 
-	pid, err := platform.FindProcess(name, device)
+	pid, err := platform.FindProcess(defaultSimctl(), defaultProcessLister(), name, device)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +87,7 @@ func runSwiftUITreeLLDB(appName string, address string, swiftuiJSONPath string, 
 		return err
 	}
 
-	pid, err := platform.FindProcess(name, device)
+	pid, err := platform.FindProcess(defaultSimctl(), defaultProcessLister(), name, device)
 	if err != nil {
 		return err
 	}
@@ -160,7 +170,7 @@ func RunTree(appName string, maxDepth int, frontmost bool, device string) (TreeO
 			return TreeOutput{}, err
 		}
 
-		pid, err := platform.FindProcess(name, device)
+		pid, err := platform.FindProcess(defaultSimctl(), defaultProcessLister(), name, device)
 		if err != nil {
 			return TreeOutput{}, err
 		}
@@ -241,7 +251,7 @@ func RunDetail(appName string, address string, swiftUI string, device string) (D
 			return DetailOutput{}, err
 		}
 
-		pid, err := platform.FindProcess(name, device)
+		pid, err := platform.FindProcess(defaultSimctl(), defaultProcessLister(), name, device)
 		if err != nil {
 			return DetailOutput{}, err
 		}

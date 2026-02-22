@@ -24,14 +24,14 @@ type sharedWatcher struct {
 // newSharedWatcher creates a sharedWatcher that monitors directories containing
 // .swift files under the project root. It uses git ls-files for fast discovery,
 // falling back to WalkDir for non-git projects.
-func newSharedWatcher(ctx context.Context, pc ProjectConfig) (*sharedWatcher, error) {
+func newSharedWatcher(ctx context.Context, pc ProjectConfig, sl SourceLister) (*sharedWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
 	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := gitSwiftDirs(ctx, watchRoot)
+	watchDirs, err := sl.SwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
 		watchDirs, err = walkSwiftDirs(watchRoot)

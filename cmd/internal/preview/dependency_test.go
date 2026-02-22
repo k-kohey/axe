@@ -51,7 +51,7 @@ class AppDelegate: NSObject {
 	gitInit(t, dir)
 	resetParseCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir)
+	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ struct SimpleView: View {
 	gitInit(t, dir)
 	resetParseCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir)
+	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ struct CombinedView: View {
 	gitInit(t, dir)
 	resetParseCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir)
+	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}

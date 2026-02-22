@@ -6,19 +6,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs) (*buildSettings, error) {
+func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) (*buildSettings, error) {
 	args := append(
 		[]string{"xcodebuild", "-showBuildSettings"},
 		pc.xcodebuildArgs()...,
 	)
 	args = append(args, "-destination", "generic/platform=iOS Simulator")
 
-	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	out, err := br.FetchBuildSettings(ctx, args)
 	if err != nil {
 		return nil, fmt.Errorf("xcodebuild -showBuildSettings failed: %w\n%s", err, out)
 	}
@@ -76,7 +75,7 @@ func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs)
 	return bs, nil
 }
 
-func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs) error {
+func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) error {
 	lock := newBuildLock(dirs.Build)
 	if err := lock.Lock(ctx); err != nil {
 		return fmt.Errorf("acquiring build lock: %w", err)
@@ -93,7 +92,7 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs) error
 		"OTHER_SWIFT_FLAGS=-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
 	)
 
-	out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	out, err := br.Build(ctx, args)
 	if err != nil {
 		return fmt.Errorf("xcodebuild build failed: %w\n%s", err, out)
 	}

@@ -96,6 +96,13 @@ type StreamManager struct {
 	// Shared file watcher (set by RunServe before starting command loop).
 	watcher *sharedWatcher
 
+	// Injected runners for testability.
+	build     BuildRunner
+	toolchain ToolchainRunner
+	app       AppRunner
+	copier    FileCopier
+	sources   SourceLister
+
 	// StreamLauncher is called per-stream in a goroutine.
 	// It should block until the stream ends (context cancelled or error).
 	// The default implementation performs the full preview lifecycle
@@ -104,13 +111,19 @@ type StreamManager struct {
 }
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
-func NewStreamManager(pool DevicePoolInterface, ew *EventWriter, pc ProjectConfig, deviceSetPath string) *StreamManager {
+func NewStreamManager(pool DevicePoolInterface, ew *EventWriter, pc ProjectConfig, deviceSetPath string,
+	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
 		pool:          pool,
 		ew:            ew,
 		pc:            pc,
 		deviceSetPath: deviceSetPath,
+		build:         br,
+		toolchain:     tc,
+		app:           ar,
+		copier:        fc,
+		sources:       sl,
 	}
 	sm.StreamLauncher = sm.defaultStreamLauncher
 	return sm
@@ -269,7 +282,7 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 		sm.bsMu.RUnlock()
 		if bs != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			terminateApp(cleanupCtx, bs, s.deviceUDID, sm.deviceSetPath)
+			terminateApp(cleanupCtx, bs, s.deviceUDID, sm.deviceSetPath, sm.app)
 			cleanupCancel()
 		}
 	}
@@ -329,7 +342,7 @@ func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDi
 		return sm.bs, nil
 	}
 
-	bs, err := fetchBuildSettings(ctx, sm.pc, dirs)
+	bs, err := fetchBuildSettings(ctx, sm.pc, dirs, sm.build)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +414,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 6. Build the project.
 	sendStatus("building")
-	if err := buildProject(ctx, sm.pc, s.dirs); err != nil {
+	if err := buildProject(ctx, sm.pc, s.dirs, sm.build); err != nil {
 		s.sendStopped(sm.ew, "build_error", "Build failed", err.Error())
 		return
 	}
@@ -411,7 +424,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 8. Resolve dependencies and parse source.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, s.file, projectRoot)
+	depFiles, err := resolveDependencies(ctx, s.file, projectRoot, sm.sources)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
@@ -431,7 +444,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		return
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, s.dirs, 0, s.file)
+	dylibPath, err := compileThunk(ctx, thunkPath, bs, s.dirs, 0, s.file, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -439,14 +452,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 10. Install app and compile loader.
 	sendStatus("installing")
-	terminateApp(ctx, bs, udid, sm.deviceSetPath)
+	terminateApp(ctx, bs, udid, sm.deviceSetPath, sm.app)
 
-	if _, err := installApp(ctx, bs, s.dirs, udid, sm.deviceSetPath); err != nil {
+	if _, err := installApp(ctx, bs, s.dirs, udid, sm.deviceSetPath, sm.app, sm.copier); err != nil {
 		s.sendStopped(sm.ew, "install_error", err.Error(), "")
 		return
 	}
 
-	loaderPath, err := compileLoader(ctx, s.dirs, bs.DeploymentTarget)
+	loaderPath, err := compileLoader(ctx, s.dirs, bs.DeploymentTarget, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -455,7 +468,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 11. Launch app with hot-reload.
 	sendStatus("running")
-	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath); err != nil {
+	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath, sm.app); err != nil {
 		s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
 		return
 	}
