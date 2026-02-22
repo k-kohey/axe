@@ -279,7 +279,8 @@ struct Model {
 	bs := &buildSettings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
 
-	_, err := compilePipeline(context.Background(), sourcePath, []string{sourcePath}, bs, dirs, "0", 0, nil)
+	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}
+	_, err := compilePipeline(context.Background(), sourcePath, []string{sourcePath}, bs, dirs, "0", 0, tc)
 	if err == nil {
 		t.Fatal("expected error for empty parse result, got nil")
 	}

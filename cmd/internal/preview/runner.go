@@ -42,6 +42,15 @@ type SourceLister interface {
 	SwiftDirs(ctx context.Context, root string) ([]string, error)
 }
 
+// Compile-time interface compliance checks.
+var (
+	_ BuildRunner     = (*RealBuildRunner)(nil)
+	_ ToolchainRunner = (*RealToolchainRunner)(nil)
+	_ AppRunner       = (*RealAppRunner)(nil)
+	_ FileCopier      = (*RealFileCopier)(nil)
+	_ SourceLister    = (*RealSourceLister)(nil)
+)
+
 // --- Helpers ---
 
 // simctlCmd builds an exec.Cmd for "xcrun simctl" with optional --set for
@@ -74,7 +83,7 @@ type RealToolchainRunner struct{}
 func (r *RealToolchainRunner) SDKPath(ctx context.Context, sdk string) (string, error) {
 	out, err := exec.CommandContext(ctx, "xcrun", "--sdk", sdk, "--show-sdk-path").Output()
 	if err != nil {
-		return "", fmt.Errorf("getting %s SDK path: %w", sdk, err)
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -94,7 +103,7 @@ func (r *RealToolchainRunner) CompileC(ctx context.Context, args []string) ([]by
 func (r *RealToolchainRunner) Codesign(ctx context.Context, path string) error {
 	out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", path).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("codesigning: %w\n%s", err, out)
+		return fmt.Errorf("%w\n%s", err, out)
 	}
 	return nil
 }
@@ -103,12 +112,11 @@ func (r *RealToolchainRunner) Codesign(ctx context.Context, path string) error {
 type RealAppRunner struct{}
 
 func (r *RealAppRunner) Terminate(ctx context.Context, device, bundleID, deviceSetPath string) error {
-	cmd := simctlCmd(ctx, deviceSetPath, "terminate", device, bundleID)
-	out, err := cmd.CombinedOutput()
+	out, err := simctlCmd(ctx, deviceSetPath, "terminate", device, bundleID).CombinedOutput()
 	if err != nil {
 		// terminate may fail if app is not running — this is acceptable.
-		_ = out
-		return err
+		// Include output for diagnostic purposes (callers log, not propagate).
+		return fmt.Errorf("%w\n%s", err, out)
 	}
 	return nil
 }
@@ -116,7 +124,7 @@ func (r *RealAppRunner) Terminate(ctx context.Context, device, bundleID, deviceS
 func (r *RealAppRunner) Install(ctx context.Context, device, appPath, deviceSetPath string) error {
 	out, err := simctlCmd(ctx, deviceSetPath, "install", device, appPath).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("simctl install failed: %w\n%s", err, out)
+		return fmt.Errorf("%w\n%s", err, out)
 	}
 	return nil
 }

@@ -117,10 +117,27 @@ func filterEvents(events []parsedEvent, streamID string) []parsedEvent {
 	return filtered
 }
 
+// nopRunners returns no-op fakes for all runner interfaces.
+// Tests that override StreamLauncher don't call these, but providing non-nil
+// values prevents panics if cleanupStreamResources or other code paths are
+// reached unexpectedly.
+func nopRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
+	return &fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}
+}
+
+// newTestStreamManagerWithRunners creates a StreamManager with nop runners and
+// the default stream launcher. Tests that need a custom launcher should set
+// sm.StreamLauncher after calling this.
+func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *EventWriter) *StreamManager {
+	br, tc, ar, fc, sl := nopRunners()
+	return NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
+}
+
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
 // a device, sends a "booting" status event, and blocks until ctx is cancelled.
 func newTestStreamManager(pool DevicePoolInterface, ew *EventWriter) *StreamManager {
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	br, tc, ar, fc, sl := nopRunners()
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -385,7 +402,7 @@ func TestStreamManager_FullLifecycle(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
 		if err != nil {
@@ -459,7 +476,7 @@ func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
 		s.deviceUDID = udid
@@ -507,7 +524,7 @@ func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 
 	launcherDone := make(chan struct{})
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -563,7 +580,7 @@ func TestStreamManager_SwitchFileRouting(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 
 	receivedFile := make(chan string, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -615,7 +632,7 @@ func TestStreamManager_InputRouting(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 
 	receivedInput := make(chan *pb.Input, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -667,7 +684,7 @@ func TestStreamManager_CleanupOnError(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 
 	launcherDone := make(chan struct{})
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -718,7 +735,7 @@ func TestStreamManager_NextPreviewRouting(t *testing.T) {
 	var buf syncBuffer
 	ew := NewEventWriter(&buf)
 
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", nil, nil, nil, nil, nil)
+	sm := newTestStreamManagerWithRunners(pool, ew)
 
 	received := make(chan struct{}, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
