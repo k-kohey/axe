@@ -1,4 +1,6 @@
 import * as assert from "assert";
+import * as fs from "fs";
+import * as path from "path";
 import { SimulatorWebviewPanel, SimulatorWebviewDeps, InputMessage, WebViewMessage } from "../simulatorWebview";
 
 interface FakeWebviewPanel {
@@ -56,6 +58,8 @@ function createFakePanel(): FakeWebviewPanel {
   };
 }
 
+const htmlPath = path.resolve(__dirname, "..", "..", "media", "simulator.html");
+
 function createDeps(panel: FakeWebviewPanel): SimulatorWebviewDeps {
   return {
     createWebviewPanel: (viewType, title, showOptions, options) => {
@@ -65,6 +69,7 @@ function createDeps(panel: FakeWebviewPanel): SimulatorWebviewDeps {
       panel.options = options;
       return panel as unknown as import("vscode").WebviewPanel;
     },
+    getWebviewHtml: () => fs.readFileSync(htmlPath, "utf-8"),
   };
 }
 
@@ -93,6 +98,7 @@ suite("SimulatorWebviewPanel", () => {
         fakePanel.options = options;
         return fakePanel as unknown as import("vscode").WebviewPanel;
       },
+      getWebviewHtml: () => fs.readFileSync(htmlPath, "utf-8"),
     };
     const webview = new SimulatorWebviewPanel(deps);
 
@@ -170,7 +176,10 @@ suite("SimulatorWebviewPanel", () => {
   });
 
   test("dispose is safe when no panel exists", () => {
-    const webview = new SimulatorWebviewPanel({ createWebviewPanel: () => createFakePanel() as unknown as import("vscode").WebviewPanel });
+    const webview = new SimulatorWebviewPanel({
+      createWebviewPanel: () => createFakePanel() as unknown as import("vscode").WebviewPanel,
+      getWebviewHtml: () => fs.readFileSync(htmlPath, "utf-8"),
+    });
 
     webview.dispose();
     assert.strictEqual(webview.visible, false);
@@ -199,6 +208,7 @@ suite("SimulatorWebviewPanel", () => {
         panels.push(p);
         return p as unknown as import("vscode").WebviewPanel;
       },
+      getWebviewHtml: () => fs.readFileSync(htmlPath, "utf-8"),
     };
     const webview = new SimulatorWebviewPanel(deps);
 
@@ -220,6 +230,7 @@ suite("SimulatorWebviewPanel", () => {
         panels.push(p);
         return p as unknown as import("vscode").WebviewPanel;
       },
+      getWebviewHtml: () => fs.readFileSync(htmlPath, "utf-8"),
     };
     const webview = new SimulatorWebviewPanel(deps);
 

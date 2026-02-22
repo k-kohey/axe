@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as crypto from "crypto";
+import * as fs from "fs";
 import * as path from "path";
 import { PreviewManager } from "./previewManager";
 import { StatusBar } from "./statusBar";
@@ -29,7 +30,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
   resolver = new BinaryResolver();
 
-  webviewPanel = new SimulatorWebviewPanel();
+  webviewPanel = new SimulatorWebviewPanel({
+    getWebviewHtml: () =>
+      fs.readFileSync(
+        path.join(context.extensionPath, "media", "simulator.html"),
+        "utf-8"
+      ),
+  });
 
   previewManager = new PreviewManager(outputChannel, statusBar, {
     resolveExecutablePath: () => resolver.resolve(),
