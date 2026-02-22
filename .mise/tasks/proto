@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #MISE description="Generate Go/TS code from proto files (idb + preview)"
 #MISE depends=["vscode-deps"]
-#MISE sources=["cmd/internal/idb/proto/idb.proto", "cmd/internal/preview/proto/preview.proto"]
-#MISE outputs=["cmd/internal/idb/idbproto/idb.pb.go", "cmd/internal/idb/idbproto/idb_grpc.pb.go", "cmd/internal/preview/previewproto/preview.pb.go", "vscode-extension/src/generated/preview.ts"]
+# NOTE: sources/outputs caching is intentionally omitted.
+# idb.proto is fetched from a remote URL (not tracked in git),
+# so mise cannot detect changes correctly.
+# On CI, the generated files do not exist and caching would skip generation.
 
 set -euo pipefail
 
