@@ -17,6 +17,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
+	"github.com/k-kohey/axe/internal/preview/runner"
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
@@ -41,7 +42,7 @@ const defaultStreamID = "default"
 
 // defaultRunners creates the production implementations of all runner interfaces.
 func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
-	return &RealBuildRunner{}, &RealToolchainRunner{}, &RealAppRunner{}, &RealFileCopier{}, &RealSourceLister{}
+	return &runner.Build{}, &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
 }
 
 func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string, reuseBuild bool) error {
