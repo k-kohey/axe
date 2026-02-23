@@ -4,6 +4,7 @@
   "description": "Automatically run axe preview for SwiftUI #Preview files",
   "version": "0.0.0",
   "publisher": "k-kohey",
+  "icon": "icon.png",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",

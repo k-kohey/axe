@@ -1,14 +1,36 @@
-# axe
+<p align="center">
+  <img src="docs/icon.png" alt="axe" width="128">
+</p>
 
-**Alternative Xcode Environment** — SwiftUI live preview with hot-reload, and view hierarchy inspection, all from the command line.
+<h1 align="center">axe</h1>
 
-![demo](docs/demo.gif)
+<p align="center"><strong>Alternative Xcode Environment</strong> — SwiftUI live preview with hot-reload, and view hierarchy inspection, all from the command line.</p>
+
+<p align="center">
+  <img src="docs/demo.gif" alt="demo">
+</p>
 
 ## Features
 
 - **SwiftUI Live Preview** — `@_dynamicReplacement` based hot-reload. Only the changed view is recompiled into a dylib and injected at runtime — no full rebuild required.
 - **View Hierarchy Inspection** — UIKit/SwiftUI view tree dump via LLDB, with an interactive TUI browser and per-view PNG snapshots.
 - **VS Code / Cursor Extension** — Open a Swift file with `#Preview` and the preview starts automatically. See [vscode-extension/README.md](vscode-extension/README.md).
+
+## Motivation
+
+axe aims to provide a great development experience for iOS, watchOS, macOS and other Apple platforms without depending on the Xcode editor application. It is built around three core concepts:
+
+### CLI-First
+
+axe works as a standalone command-line tool. The VS Code extension simply calls it under the hood. This brings three benefits: AI agents can freely run SwiftUI previews and view inspections, enabling more autonomous and efficient development; your production code stays clean because no debug-only code is required; and axe can be integrated into CI pipelines and other automated workflows.
+
+### Beyond Xcode
+
+Xcode has an excellent build system and a wealth of knowledge around it, but it does not allow users to add custom functionality. As an open-source project, axe plans to offer a plugin system that lets users extend its capabilities — for example, injecting network-stubbing code alongside a SwiftUI Preview so that mock implementations become unnecessary.
+
+### High Parallelism
+
+Multiple axe processes can run simultaneously. This means you can launch several AI agents at once, each running its own SwiftUI Preview session. It speeds up the implement-and-debug iteration loop and even allows parallel development of multiple views.
 
 ## Requirements
 
