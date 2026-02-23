@@ -1,4 +1,4 @@
-package preview
+package watch
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// sharedWatcher runs a single fsnotify.Watcher and fans out .swift file
+// SharedWatcher runs a single fsnotify.Watcher and fans out .swift file
 // change events to all registered stream listeners.
 // Debounce is the stream's responsibility; the watcher delivers raw events.
-type sharedWatcher struct {
+type SharedWatcher struct {
 	mu        sync.Mutex
 	watcher   *fsnotify.Watcher
 	listeners map[string]chan<- string // streamID → fileChangeCh
@@ -21,20 +21,19 @@ type sharedWatcher struct {
 	done      chan struct{} // closed when the event loop exits
 }
 
-// newSharedWatcher creates a sharedWatcher that monitors directories containing
-// .swift files under the project root. It uses git ls-files for fast discovery,
-// falling back to WalkDir for non-git projects.
-func newSharedWatcher(ctx context.Context, pc ProjectConfig, sl SourceLister) (*sharedWatcher, error) {
+// NewSharedWatcher creates a SharedWatcher that monitors directories containing
+// .swift files under watchRoot. It uses dl for fast discovery,
+// falling back to WalkSwiftDirs for non-git projects.
+func NewSharedWatcher(ctx context.Context, watchRoot string, dl DirLister) (*SharedWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
 	}
 
-	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := sl.SwiftDirs(ctx, watchRoot)
+	watchDirs, err := dl.SwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
-		watchDirs, err = walkSwiftDirs(watchRoot)
+		watchDirs, err = WalkSwiftDirs(watchRoot)
 		if err != nil {
 			_ = watcher.Close()
 			return nil, err
@@ -47,7 +46,7 @@ func newSharedWatcher(ctx context.Context, pc ProjectConfig, sl SourceLister) (*
 	}
 
 	loopCtx, cancel := context.WithCancel(ctx)
-	sw := &sharedWatcher{
+	sw := &SharedWatcher{
 		watcher:   watcher,
 		listeners: make(map[string]chan<- string),
 		cancel:    cancel,
@@ -57,22 +56,22 @@ func newSharedWatcher(ctx context.Context, pc ProjectConfig, sl SourceLister) (*
 	return sw, nil
 }
 
-// addListener registers a stream to receive file change paths.
-func (sw *sharedWatcher) addListener(streamID string, ch chan<- string) {
+// AddListener registers a stream to receive file change paths.
+func (sw *SharedWatcher) AddListener(streamID string, ch chan<- string) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 	sw.listeners[streamID] = ch
 }
 
-// removeListener unregisters a stream.
-func (sw *sharedWatcher) removeListener(streamID string) {
+// RemoveListener unregisters a stream.
+func (sw *SharedWatcher) RemoveListener(streamID string) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 	delete(sw.listeners, streamID)
 }
 
-// close stops the event loop and releases the underlying fsnotify.Watcher.
-func (sw *sharedWatcher) close() {
+// Close stops the event loop and releases the underlying fsnotify.Watcher.
+func (sw *SharedWatcher) Close() {
 	sw.cancel()
 	<-sw.done
 	_ = sw.watcher.Close()
@@ -80,7 +79,7 @@ func (sw *sharedWatcher) close() {
 
 // loop reads fsnotify events, filters for .swift Write/Create, and broadcasts
 // the cleaned file path to all listeners with non-blocking sends.
-func (sw *sharedWatcher) loop(ctx context.Context) {
+func (sw *SharedWatcher) loop(ctx context.Context) {
 	defer close(sw.done)
 	for {
 		select {
@@ -110,7 +109,7 @@ func (sw *sharedWatcher) loop(ctx context.Context) {
 // broadcast sends a file path to all registered listeners.
 // Non-blocking: if a listener's channel is full, the event is dropped
 // (the stream will pick up the change on the next event).
-func (sw *sharedWatcher) broadcast(path string) {
+func (sw *SharedWatcher) broadcast(path string) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
 	for _, ch := range sw.listeners {

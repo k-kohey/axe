@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	"path/filepath"
 	"strconv"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // runStreamLoop is the per-stream event loop. It blocks until the context is
@@ -39,8 +41,8 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	trackedSet := buildTrackedSet(s.ws.trackedFiles)
 	s.ws.mu.Unlock()
 
-	db := newDebouncer()
-	defer db.stop()
+	db := watch.NewDebouncer()
+	defer db.Stop()
 
 	// Safely handle nil channels: a receive on nil channel blocks forever,
 	// effectively disabling that select case.
@@ -55,7 +57,7 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 			return nil
 
 		case path := <-s.fileChangeCh:
-			db.handleFileChange(path, trackedSet)
+			db.HandleFileChange(path, trackedSet)
 
 		case changedFile := <-db.TrackedCh:
 			s.ws.mu.Lock()
@@ -87,7 +89,7 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 			}
 
 		case <-db.DepCh:
-			db.clearDepTimer()
+			db.ClearDepTimer()
 			if err := rebuildAndRelaunch(ctx, sourceFile, sm.pc, bs, s.dirs, wctx, s.ws); err != nil {
 				slog.Warn("Dependency rebuild error", "streamId", s.id, "err", err)
 			}

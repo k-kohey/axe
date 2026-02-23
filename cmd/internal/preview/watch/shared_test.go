@@ -1,4 +1,4 @@
-package preview
+package watch
 
 import (
 	"os"
@@ -10,10 +10,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-// newTestSharedWatcher creates a sharedWatcher that watches a single directory.
-// It bypasses the ProjectConfig-based discovery used in production.
+// newTestSharedWatcher creates a SharedWatcher that watches a single directory.
+// It bypasses the DirLister-based discovery used in production.
 // Cleanup is registered via t.Cleanup.
-func newTestSharedWatcher(t *testing.T, dir string) *sharedWatcher {
+func newTestSharedWatcher(t *testing.T, dir string) *SharedWatcher {
 	t.Helper()
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -28,7 +28,7 @@ func newTestSharedWatcher(t *testing.T, dir string) *sharedWatcher {
 	loopDone := make(chan struct{})
 
 	var closeOnce sync.Once
-	sw := &sharedWatcher{
+	sw := &SharedWatcher{
 		watcher:   watcher,
 		listeners: make(map[string]chan<- string),
 		cancel:    func() { closeOnce.Do(func() { close(stopCh) }) },
@@ -61,7 +61,7 @@ func newTestSharedWatcher(t *testing.T, dir string) *sharedWatcher {
 	}()
 
 	t.Cleanup(func() {
-		sw.close()
+		sw.Close()
 	})
 	return sw
 }
@@ -73,8 +73,8 @@ func TestSharedWatcher_Broadcast(t *testing.T) {
 
 	chA := make(chan string, 4)
 	chB := make(chan string, 4)
-	sw.addListener("a", chA)
-	sw.addListener("b", chB)
+	sw.AddListener("a", chA)
+	sw.AddListener("b", chB)
 
 	// Create a .swift file to trigger an event.
 	path := filepath.Join(dir, "TestView.swift")
@@ -111,11 +111,11 @@ func TestSharedWatcher_RemoveListener(t *testing.T) {
 
 	chA := make(chan string, 4)
 	chB := make(chan string, 4)
-	sw.addListener("a", chA)
-	sw.addListener("b", chB)
+	sw.AddListener("a", chA)
+	sw.AddListener("b", chB)
 
 	// Remove listener B.
-	sw.removeListener("b")
+	sw.RemoveListener("b")
 
 	// Trigger a file change.
 	path := filepath.Join(dir, "AnotherView.swift")
@@ -146,7 +146,7 @@ func TestSharedWatcher_NonSwiftIgnored(t *testing.T) {
 	sw := newTestSharedWatcher(t, dir)
 
 	ch := make(chan string, 4)
-	sw.addListener("a", ch)
+	sw.AddListener("a", ch)
 
 	// Write a non-swift file.
 	path := filepath.Join(dir, "README.md")

@@ -1,4 +1,4 @@
-package preview
+package watch
 
 import (
 	"testing"
@@ -6,11 +6,11 @@ import (
 )
 
 func TestDebouncer_TrackedFileTriggersTrackedCh(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
-	db.handleFileChange("/src/HogeView.swift", trackedSet)
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
 
 	select {
 	case got := <-db.TrackedCh:
@@ -23,11 +23,11 @@ func TestDebouncer_TrackedFileTriggersTrackedCh(t *testing.T) {
 }
 
 func TestDebouncer_UntrackedFileTriggersDepCh(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
-	db.handleFileChange("/src/Other.swift", trackedSet)
+	db.HandleFileChange("/src/Other.swift", trackedSet)
 
 	select {
 	case <-db.DepCh:
@@ -38,16 +38,16 @@ func TestDebouncer_UntrackedFileTriggersDepCh(t *testing.T) {
 }
 
 func TestDebouncer_DepChangeCancelsPendingTracked(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
 
 	// Start a tracked timer.
-	db.handleFileChange("/src/HogeView.swift", trackedSet)
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
 
 	// Immediately follow with a dep change — should cancel the tracked timer.
-	db.handleFileChange("/src/Other.swift", trackedSet)
+	db.HandleFileChange("/src/Other.swift", trackedSet)
 
 	select {
 	case <-db.DepCh:
@@ -60,17 +60,17 @@ func TestDebouncer_DepChangeCancelsPendingTracked(t *testing.T) {
 }
 
 func TestDebouncer_PendingDepBlocksTrackedFastPath(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
 
 	// Start a dep timer.
-	db.handleFileChange("/src/Other.swift", trackedSet)
+	db.HandleFileChange("/src/Other.swift", trackedSet)
 
 	// While dep is pending, tracked change should be skipped (dep rebuild
 	// will include it).
-	db.handleFileChange("/src/HogeView.swift", trackedSet)
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
 
 	select {
 	case <-db.DepCh:
@@ -83,22 +83,22 @@ func TestDebouncer_PendingDepBlocksTrackedFastPath(t *testing.T) {
 }
 
 func TestDebouncer_ClearDepTimerReEnablesFastPath(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
 
 	// Trigger dep change and consume it.
-	db.handleFileChange("/src/Other.swift", trackedSet)
+	db.HandleFileChange("/src/Other.swift", trackedSet)
 	select {
 	case <-db.DepCh:
-		db.clearDepTimer()
+		db.ClearDepTimer()
 	case <-time.After(1 * time.Second):
 		t.Fatal("DepCh did not fire")
 	}
 
 	// Now tracked changes should use the fast path again.
-	db.handleFileChange("/src/HogeView.swift", trackedSet)
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
 
 	select {
 	case got := <-db.TrackedCh:
@@ -106,13 +106,13 @@ func TestDebouncer_ClearDepTimerReEnablesFastPath(t *testing.T) {
 			t.Errorf("expected /src/HogeView.swift, got %s", got)
 		}
 	case <-time.After(1 * time.Second):
-		t.Fatal("TrackedCh did not fire after clearDepTimer")
+		t.Fatal("TrackedCh did not fire after ClearDepTimer")
 	}
 }
 
 func TestDebouncer_TrackedDebounceResetsOnRapidChanges(t *testing.T) {
-	db := newDebouncer()
-	defer db.stop()
+	db := NewDebouncer()
+	defer db.Stop()
 
 	trackedSet := map[string]bool{
 		"/src/A.swift": true,
@@ -120,8 +120,8 @@ func TestDebouncer_TrackedDebounceResetsOnRapidChanges(t *testing.T) {
 	}
 
 	// Rapid changes: the timer should reset, only the last file fires.
-	db.handleFileChange("/src/A.swift", trackedSet)
-	db.handleFileChange("/src/B.swift", trackedSet)
+	db.HandleFileChange("/src/A.swift", trackedSet)
+	db.HandleFileChange("/src/B.swift", trackedSet)
 
 	select {
 	case got := <-db.TrackedCh:
@@ -134,18 +134,18 @@ func TestDebouncer_TrackedDebounceResetsOnRapidChanges(t *testing.T) {
 }
 
 func TestDebouncer_StopCancelsPendingTimers(t *testing.T) {
-	db := newDebouncer()
+	db := NewDebouncer()
 
 	trackedSet := map[string]bool{"/src/HogeView.swift": true}
-	db.handleFileChange("/src/HogeView.swift", trackedSet)
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
 
 	// Stop before the timer fires.
-	db.stop()
+	db.Stop()
 
 	// Channels should not receive anything.
 	select {
 	case <-db.TrackedCh:
-		t.Fatal("TrackedCh should not fire after stop")
+		t.Fatal("TrackedCh should not fire after Stop")
 	case <-time.After(500 * time.Millisecond):
 		// OK — timer was cancelled
 	}

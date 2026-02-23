@@ -16,6 +16,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // stepper tracks the current step number and total for progress output.
@@ -386,12 +387,12 @@ func RunServe(pc ProjectConfig) error {
 	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl)
 
 	// Start shared file watcher for all streams.
-	watcher, err := newSharedWatcher(ctx, pc, sl)
+	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.primaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}
 	sm.watcher = watcher
-	defer watcher.close()
+	defer watcher.Close()
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.

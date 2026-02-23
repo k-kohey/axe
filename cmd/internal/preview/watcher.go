@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // watchState holds mutable state for the watch loop, protected by a mutex.
@@ -47,7 +47,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	watchDirs, err := wctx.sources.SwiftDirs(ctx, watchRoot)
 	if err != nil {
 		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
-		watchDirs, err = walkSwiftDirs(watchRoot)
+		watchDirs, err = watch.WalkSwiftDirs(watchRoot)
 		if err != nil {
 			return fmt.Errorf("setting up directory watch: %w", err)
 		}
@@ -70,8 +70,8 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 		go readStdinCommands(cmdCh, false)
 	}
 
-	db := newDebouncer()
-	defer db.stop()
+	db := watch.NewDebouncer()
+	defer db.Stop()
 
 	// Build a set of tracked file paths for efficient lookup.
 	ws.mu.Lock()
@@ -100,7 +100,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				continue
 			}
 
-			db.handleFileChange(filepath.Clean(event.Name), trackedSet)
+			db.HandleFileChange(filepath.Clean(event.Name), trackedSet)
 
 		case changedFile := <-db.TrackedCh:
 			ws.mu.Lock()
@@ -132,7 +132,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 			}
 
 		case <-db.DepCh:
-			db.clearDepTimer()
+			db.ClearDepTimer()
 			if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
 				fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
 			}
@@ -494,34 +494,6 @@ func readProtocolCommands(ctx context.Context, ew *protocol.EventWriter, ch chan
 		}
 	})
 	close(ch)
-}
-
-// walkSwiftDirs is the fallback for non-git projects. It walks the directory tree
-// skipping hidden directories and common dependency/build artifact directories.
-func walkSwiftDirs(root string) ([]string, error) {
-	seen := make(map[string]bool)
-	var dirs []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "build" || name == "DerivedData" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), ".swift") {
-			dir := filepath.Dir(path)
-			if !seen[dir] {
-				seen[dir] = true
-				dirs = append(dirs, dir)
-			}
-		}
-		return nil
-	})
-	return dirs, err
 }
 
 // handleSwitchFileCmd handles a file switch command from either legacy stdin or

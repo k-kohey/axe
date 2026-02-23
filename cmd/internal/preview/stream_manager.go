@@ -13,6 +13,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // DevicePoolInterface abstracts DevicePool for testability.
@@ -96,7 +97,7 @@ type StreamManager struct {
 	bsExtracted bool // true after extractCompilerPaths has been called
 
 	// Shared file watcher (set by RunServe before starting command loop).
-	watcher *sharedWatcher
+	watcher *watch.SharedWatcher
 
 	// Injected runners for testability.
 	build     BuildRunner
@@ -274,7 +275,7 @@ func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 func (sm *StreamManager) cleanupStreamResources(s *stream) {
 	// Unregister from shared watcher.
 	if sm.watcher != nil {
-		sm.watcher.removeListener(s.id)
+		sm.watcher.RemoveListener(s.id)
 	}
 
 	// Terminate the app on the device.
@@ -534,7 +535,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 16. Register with shared watcher for file change notifications.
 	if sm.watcher != nil {
-		sm.watcher.addListener(s.id, s.fileChangeCh)
+		sm.watcher.AddListener(s.id, s.fileChangeCh)
 	}
 
 	// 17. Enter the per-stream event loop (blocks until context cancelled or crash).
