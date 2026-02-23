@@ -133,7 +133,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Resolve 1-level dependencies from the target file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, sourceFile, projectRoot, sl)
+	depFiles, err := parsing.ResolveDependencies(ctx, sourceFile, projectRoot, sl, parsing.DefaultParser())
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}

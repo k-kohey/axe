@@ -136,7 +136,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 1. Resolve dependencies for the new file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources)
+	depFiles, err := parsing.ResolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources, parsing.DefaultParser())
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies for new file", "err", err)
 	}

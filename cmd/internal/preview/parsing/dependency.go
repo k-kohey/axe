@@ -9,24 +9,24 @@ import (
 
 // ResolveDependencies finds source files that define types referenced by the target file.
 // It returns a list of absolute paths to 1-level dependency files (excluding the target itself).
-func ResolveDependencies(ctx context.Context, targetFile string, projectRoot string, sl SwiftFileLister) ([]string, error) {
-	targetResult, err := swiftParse(targetFile)
+func ResolveDependencies(ctx context.Context, targetFile string, projectRoot string, sl SwiftFileLister, parser SwiftFileParser) ([]string, error) {
+	referencedTypes, definedTypes, err := parser.ParseTypes(targetFile)
 	if err != nil {
 		return nil, fmt.Errorf("parsing target file: %w", err)
 	}
 
-	if len(targetResult.ReferencedTypes) == 0 {
+	if len(referencedTypes) == 0 {
 		slog.Debug("No referenced types in target file")
 		return nil, nil
 	}
 
-	refSet := make(map[string]bool, len(targetResult.ReferencedTypes))
-	for _, t := range targetResult.ReferencedTypes {
+	refSet := make(map[string]bool, len(referencedTypes))
+	for _, t := range referencedTypes {
 		refSet[t] = true
 	}
 
 	// Remove types defined in the target file itself.
-	for _, t := range targetResult.DefinedTypes {
+	for _, t := range definedTypes {
 		delete(refSet, t)
 	}
 
@@ -51,13 +51,13 @@ func ResolveDependencies(ctx context.Context, targetFile string, projectRoot str
 			continue
 		}
 
-		result, err := swiftParse(f)
+		_, fileDefined, err := parser.ParseTypes(f)
 		if err != nil {
 			slog.Debug("Skipping unparseable file", "path", f, "err", err)
 			continue
 		}
 
-		for _, dt := range result.DefinedTypes {
+		for _, dt := range fileDefined {
 			if refSet[dt] {
 				deps = append(deps, f)
 				slog.Debug("Found dependency file", "path", f, "type", dt)

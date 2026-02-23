@@ -428,7 +428,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 8. Resolve dependencies and parse source.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, s.file, projectRoot, sm.sources)
+	depFiles, err := parsing.ResolveDependencies(ctx, s.file, projectRoot, sm.sources, parsing.DefaultParser())
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)

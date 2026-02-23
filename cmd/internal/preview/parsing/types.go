@@ -72,3 +72,9 @@ type TransformedPreview struct {
 type SwiftFileLister interface {
 	SwiftFiles(ctx context.Context, root string) ([]string, error)
 }
+
+// SwiftFileParser extracts type definitions and references from a Swift file.
+// ResolveDependencies uses this to determine inter-file dependencies.
+type SwiftFileParser interface {
+	ParseTypes(path string) (referencedTypes []string, definedTypes []string, err error)
+}

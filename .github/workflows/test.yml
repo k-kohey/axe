@@ -9,6 +9,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - name: Enable SwiftSyntax prebuilts
-        run: defaults write com.apple.dt.Xcode IDEPackageEnablePrebuilts YES
       - run: mise test

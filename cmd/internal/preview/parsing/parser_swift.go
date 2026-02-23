@@ -168,6 +168,19 @@ func Skeleton(path string) (string, error) {
 	return result.SkeletonHash, nil
 }
 
+// DefaultParser returns a SwiftFileParser backed by the axe-parser CLI.
+func DefaultParser() SwiftFileParser { return defaultSwiftFileParser{} }
+
+type defaultSwiftFileParser struct{}
+
+func (defaultSwiftFileParser) ParseTypes(path string) ([]string, []string, error) {
+	result, err := swiftParse(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return result.ReferencedTypes, result.DefinedTypes, nil
+}
+
 // DependencyFile parses types and imports from a dependency Swift file.
 // Unlike SourceFile, it does not require a body property or View conformance.
 // It returns all types (with computed properties/methods) found in the file.

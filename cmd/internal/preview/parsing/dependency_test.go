@@ -3,84 +3,49 @@ package parsing
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-// testSourceLister implements SwiftFileLister using git ls-files.
-type testSourceLister struct{}
+// mockParser implements SwiftFileParser with predefined results per file.
+type mockParser struct {
+	results map[string]mockParseResult
+}
 
-func (t *testSourceLister) SwiftFiles(ctx context.Context, root string) ([]string, error) {
-	out, err := exec.CommandContext(ctx,
-		"git", "-C", root, "ls-files",
-		"--cached", "--others", "--exclude-standard",
-		"*.swift",
-	).Output()
-	if err != nil {
-		return nil, fmt.Errorf("git ls-files: %w", err)
-	}
+type mockParseResult struct {
+	referenced []string
+	defined    []string
+	err        error
+}
 
-	var files []string
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		abs := filepath.Join(root, line)
-		files = append(files, abs)
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no Swift files found")
-	}
-	return files, nil
+func (m *mockParser) ParseTypes(path string) ([]string, []string, error) {
+	r := m.results[path]
+	return r.referenced, r.defined, r.err
+}
+
+// mockLister implements SwiftFileLister with a fixed file list.
+type mockLister struct {
+	files []string
+	err   error
+}
+
+func (m *mockLister) SwiftFiles(_ context.Context, _ string) ([]string, error) {
+	return m.files, m.err
 }
 
 func TestResolveDependencies_Basic(t *testing.T) {
-	dir := t.TempDir()
+	target := filepath.Join("/project", "ContentView.swift")
+	dep := filepath.Join("/project", "ChildView.swift")
+	unrelated := filepath.Join("/project", "AppDelegate.swift")
 
-	target := filepath.Join(dir, "ContentView.swift")
-	dep := filepath.Join(dir, "ChildView.swift")
-	unrelated := filepath.Join(dir, "AppDelegate.swift")
+	parser := &mockParser{results: map[string]mockParseResult{
+		target:    {referenced: []string{"ChildView"}, defined: []string{"ContentView"}},
+		dep:       {referenced: nil, defined: []string{"ChildView"}},
+		unrelated: {referenced: nil, defined: []string{"AppDelegate"}},
+	}}
+	lister := &mockLister{files: []string{target, dep, unrelated}}
 
-	if err := os.WriteFile(target, []byte(`import SwiftUI
-
-struct ContentView: View {
-    var child: ChildView
-
-    var body: some View {
-        child
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(dep, []byte(`import SwiftUI
-
-struct ChildView: View {
-    var body: some View {
-        Text("Child")
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(unrelated, []byte(`import UIKit
-
-class AppDelegate: NSObject {
-    func setup() {}
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	gitInit(t, dir)
-	ResetCache()
-
-	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,24 +59,14 @@ class AppDelegate: NSObject {
 }
 
 func TestResolveDependencies_NoRefs(t *testing.T) {
-	dir := t.TempDir()
+	target := filepath.Join("/project", "Simple.swift")
 
-	target := filepath.Join(dir, "Simple.swift")
-	if err := os.WriteFile(target, []byte(`import SwiftUI
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: nil, defined: []string{"SimpleView"}},
+	}}
+	lister := &mockLister{files: []string{target}}
 
-struct SimpleView: View {
-    var body: some View {
-        Text("Hello")
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	gitInit(t, dir)
-	ResetCache()
-
-	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,29 +77,14 @@ struct SimpleView: View {
 }
 
 func TestResolveDependencies_SelfDefinedType(t *testing.T) {
-	dir := t.TempDir()
+	target := filepath.Join("/project", "Combined.swift")
 
-	target := filepath.Join(dir, "Combined.swift")
-	if err := os.WriteFile(target, []byte(`import SwiftUI
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"MyModel"}, defined: []string{"MyModel", "CombinedView"}},
+	}}
+	lister := &mockLister{files: []string{target}}
 
-struct MyModel {
-    var name: String
-}
-
-struct CombinedView: View {
-    var model: MyModel
-    var body: some View {
-        Text(model.name)
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	gitInit(t, dir)
-	ResetCache()
-
-	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,16 +94,55 @@ struct CombinedView: View {
 	}
 }
 
-// gitInit initializes a git repo and stages all files.
-func gitInit(t *testing.T, dir string) {
-	t.Helper()
-	for _, args := range [][]string{
-		{"git", "-C", dir, "init"},
-		{"git", "-C", dir, "add", "."},
-	} {
-		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
-		if err != nil {
-			t.Fatalf("cmd %v failed: %v\n%s", args, err, out)
-		}
+func TestResolveDependencies_ParserErrorOnTarget(t *testing.T) {
+	target := filepath.Join("/project", "Bad.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {err: fmt.Errorf("syntax error")},
+	}}
+	lister := &mockLister{files: []string{target}}
+
+	_, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestResolveDependencies_ListerError(t *testing.T) {
+	target := filepath.Join("/project", "View.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"Child"}, defined: []string{"View"}},
+	}}
+	lister := &mockLister{err: fmt.Errorf("git not available")}
+
+	_, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestResolveDependencies_ParserErrorOnCandidateSkips(t *testing.T) {
+	target := filepath.Join("/project", "Root.swift")
+	good := filepath.Join("/project", "Good.swift")
+	bad := filepath.Join("/project", "Bad.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"GoodType"}, defined: []string{"Root"}},
+		good:   {defined: []string{"GoodType"}},
+		bad:    {err: fmt.Errorf("parse error")},
+	}}
+	lister := &mockLister{files: []string{target, bad, good}}
+
+	deps, err := ResolveDependencies(context.Background(), target, "/project", lister, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deps) != 1 {
+		t.Fatalf("deps count = %d, want 1, got %v", len(deps), deps)
+	}
+	if filepath.Base(deps[0]) != "Good.swift" {
+		t.Errorf("deps[0] = %q, want Good.swift", deps[0])
 	}
 }
