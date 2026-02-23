@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
 // fakeDevicePool implements DevicePoolInterface for testing.

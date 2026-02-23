@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
 // runCommandLoop reads Command JSON Lines from r and dispatches them to sm.
