@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -87,6 +88,19 @@ func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
 		ExtraFrameworkPaths: bs.ExtraFrameworkPaths,
 		ExtraModuleMapFiles: bs.ExtraModuleMapFiles,
 	}
+}
+
+// watchState holds mutable state for the watch loop, protected by a mutex.
+// Immutable configuration (device, loaderPath, etc.) lives in watchContext.
+type watchState struct {
+	mu              sync.Mutex
+	reloadCounter   int
+	previewSelector string
+	previewIndex    int               // current 0-based preview index
+	previewCount    int               // total number of #Preview blocks (0 = unknown)
+	building        bool              // true while rebuildAndRelaunch is running
+	skeletonMap     map[string]string // file path → skeleton hash
+	trackedFiles    []string          // target + 1-level dependency file paths
 }
 
 // watchContext holds immutable configuration for the watch loop.
