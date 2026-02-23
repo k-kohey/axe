@@ -20,3 +20,7 @@ jobs:
       - run: gh release create "${{ github.ref_name }}" .output/* --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish VS Code extension
+        run: cd vscode-extension && npx vsce publish --packagePath ../.output/*.vsix
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
