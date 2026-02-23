@@ -1,5 +1,5 @@
 {
-  "name": "axe-swiftui-preview",
+  "name": "axe-extension",
   "displayName": "SwiftUI Preview with axe",
   "description": "Automatically run axe preview for SwiftUI #Preview files",
   "version": "0.0.0",
