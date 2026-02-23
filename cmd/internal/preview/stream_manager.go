@@ -58,6 +58,7 @@ type stream struct {
 	hid           *protocol.HIDHandler
 	ws            *watchState
 	loaderPath    string
+	compiler      codegen.ThunkCompiler
 
 	// Prevents duplicate StreamStopped events.
 	stoppedOnce sync.Once
@@ -435,20 +436,22 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 	trackedFiles := append([]string{s.file}, depFiles...)
 
-	files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles)
+	_, trackedFiles, err = parseAndFilterTrackedFiles(s.file, trackedFiles)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
 	}
 
 	// 9. Generate thunk and compile.
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, s.dirs.Thunk, "0", s.file)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
+	compiler := codegen.NewPrivateImportCompiler(bs.ModuleName, s.dirs.Thunk, s.dirs.Build, compileConfigFromBS(bs), sm.toolchain)
+	s.compiler = compiler
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+	dylibPath, err := compiler.Compile(ctx, codegen.CompileOpts{
+		SourceFile:      s.file,
+		TrackedFiles:    trackedFiles,
+		PreviewSelector: "0",
+		ReloadCounter:   0,
+	})
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return

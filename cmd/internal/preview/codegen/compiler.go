@@ -10,6 +10,20 @@ import (
 	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
+// ThunkCompiler encapsulates the parse → thunk generation → compile pipeline.
+type ThunkCompiler interface {
+	// Compile generates a thunk for the source file and compiles it into a signed dylib.
+	Compile(ctx context.Context, opts CompileOpts) (dylibPath string, err error)
+}
+
+// CompileOpts holds the parameters for a single thunk compilation.
+type CompileOpts struct {
+	SourceFile      string   // Preview target source file path.
+	TrackedFiles    []string // sourceFile + dependency file paths.
+	PreviewSelector string   // #Preview selection index or title.
+	ReloadCounter   int      // Dylib sequence number (avoids file name collisions).
+}
+
 // ReplacementModuleName generates the module name for a thunk dylib, matching
 // Xcode's convention: {Module}_PreviewReplacement_{FileName}_{N}.
 func ReplacementModuleName(moduleName, sourceFileName string, counter int) string {

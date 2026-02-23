@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 )
 
 // --- Fake ToolchainRunner (for parent tests that need nop toolchain) ---
@@ -88,7 +90,7 @@ struct ChildView: View {
 	}
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	files := codegen.ParseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
 	if len(files) != 2 {
 		t.Fatalf("files count = %d, want 2", len(files))
@@ -149,7 +151,7 @@ struct HelperView: View {
 	analysis.ResetCache()
 
 	// In lenient mode, sourceFile parse error is skipped (not fatal).
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	files := codegen.ParseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
 	// Only the dependency should be returned.
 	if len(files) != 1 {
@@ -179,7 +181,7 @@ struct MainView: View {
 	depPath := filepath.Join(dir, "NonExistent.swift")
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	files := codegen.ParseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
 	if len(files) != 1 {
 		t.Fatalf("files count = %d, want 1 (broken dep skipped)", len(files))
@@ -217,7 +219,7 @@ struct Model {
 	}
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	files := codegen.ParseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
 	// Only source should be returned; dep is skipped (no computed properties).
 	if len(files) != 1 {
@@ -234,14 +236,14 @@ func TestHasFile(t *testing.T) {
 		{AbsPath: "/a/C.swift"},
 	}
 
-	if !hasFile(files, "/a/B.swift") {
-		t.Error("hasFile should return true for existing path")
+	if !codegen.HasFile(files, "/a/B.swift") {
+		t.Error("HasFile should return true for existing path")
 	}
-	if hasFile(files, "/a/D.swift") {
-		t.Error("hasFile should return false for missing path")
+	if codegen.HasFile(files, "/a/D.swift") {
+		t.Error("HasFile should return false for missing path")
 	}
-	if hasFile(nil, "/a/B.swift") {
-		t.Error("hasFile should return false for nil slice")
+	if codegen.HasFile(nil, "/a/B.swift") {
+		t.Error("HasFile should return false for nil slice")
 	}
 }
 
@@ -313,10 +315,10 @@ private struct SharedName: View {
 	}
 }
 
-func TestCompilePipeline_EmptyParseResult(t *testing.T) {
+func TestPrivateImportCompiler_EmptyParseResult(t *testing.T) {
 	dir := t.TempDir()
 
-	// Source file without any View type → parseTrackedFiles returns empty.
+	// Source file without any View type → ParseTrackedFiles returns empty.
 	sourcePath := filepath.Join(dir, "NoView.swift")
 	if err := os.WriteFile(sourcePath, []byte(`import Foundation
 
@@ -328,17 +330,24 @@ struct Model {
 	}
 	analysis.ResetCache()
 
-	bs := &buildSettings{ModuleName: "TestModule"}
-	dirs := previewDirs{Thunk: dir}
-
 	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}
-	_, err := compilePipeline(context.Background(), sourcePath, []string{sourcePath}, bs, dirs, "0", 0, tc)
+	compiler := codegen.NewPrivateImportCompiler("TestModule", dir, dir, codegen.CompileConfig{
+		ModuleName:       "TestModule",
+		BuiltProductsDir: dir,
+		DeploymentTarget: "17.0",
+	}, tc)
+
+	_, err := compiler.Compile(context.Background(), codegen.CompileOpts{
+		SourceFile:   sourcePath,
+		TrackedFiles: []string{sourcePath},
+	})
 	if err == nil {
 		t.Fatal("expected error for empty parse result, got nil")
 	}
-	expected := "no types found in tracked files"
-	if err.Error() != expected {
-		t.Errorf("expected %q, got %q", expected, err.Error())
+	// The error should indicate no types were found. The exact message depends
+	// on whether analysis.SourceFile returns an error or empty types.
+	if !strings.Contains(err.Error(), "no types found") {
+		t.Errorf("expected error containing %q, got %q", "no types found", err.Error())
 	}
 }
 

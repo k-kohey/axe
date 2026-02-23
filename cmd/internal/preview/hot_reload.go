@@ -98,7 +98,12 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, bs, dirs, selector, counter, wctx.toolchain)
+	dylibPath, err := wctx.compiler.Compile(ctx, codegen.CompileOpts{
+		SourceFile:      sourceFile,
+		TrackedFiles:    tracked,
+		PreviewSelector: selector,
+		ReloadCounter:   counter,
+	})
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -148,7 +153,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	trackedFiles = append(trackedFiles, depFiles...)
 
 	// 2. Parse source and dependency files, filter private type collisions.
-	files, trackedFiles, err := parseAndFilterTrackedFiles(newSourceFile, trackedFiles)
+	_, trackedFiles, err = parseAndFilterTrackedFiles(newSourceFile, trackedFiles)
 	if err != nil {
 		return err
 	}
@@ -165,13 +170,13 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
-	cfg := compileConfigFromBS(bs)
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile)
-	if err != nil {
-		return fmt.Errorf("thunk: %w", err)
+	opts := codegen.CompileOpts{
+		SourceFile:      newSourceFile,
+		TrackedFiles:    trackedFiles,
+		PreviewSelector: "0",
+		ReloadCounter:   counter,
 	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+	dylibPath, err := wctx.compiler.Compile(ctx, opts)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -182,7 +187,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+		dylibPath, err = wctx.compiler.Compile(ctx, opts)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -212,10 +217,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 // rebuildAndRelaunch performs an incremental build, regenerates the thunk,
 // and restarts the app. Used when an untracked dependency .swift file changes.
-//
-// This function does NOT use compilePipeline because it has a unique fallback:
-// when parseTrackedFiles returns empty, it retries with sourceFile only.
-// It also uses terminate → install → launch (not the hot-reload deploy path).
+// It uses terminate → install → launch (not the hot-reload deploy path).
 func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState) error {
 	ws.mu.Lock()
 	if ws.building {
@@ -239,33 +241,17 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("incremental build: %w", err)
 	}
 
-	files := parseTrackedFiles(sourceFile, tracked)
-
-	// Fallback: if no tracked dependency files have types, use target only.
-	if len(files) == 0 {
-		types, imports, err := analysis.SourceFile(sourceFile)
-		if err != nil {
-			return fmt.Errorf("parse: %w", err)
-		}
-		files = append(files, analysis.FileThunkData{
-			FileName: filepath.Base(sourceFile),
-			AbsPath:  sourceFile,
-			Types:    types,
-			Imports:  imports,
-		})
-	}
-
 	ws.mu.Lock()
 	counter := ws.reloadCounter
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, selector, sourceFile)
-	if err != nil {
-		return fmt.Errorf("thunk: %w", err)
-	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := wctx.compiler.Compile(ctx, codegen.CompileOpts{
+		SourceFile:      sourceFile,
+		TrackedFiles:    tracked,
+		PreviewSelector: selector,
+		ReloadCounter:   counter,
+	})
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

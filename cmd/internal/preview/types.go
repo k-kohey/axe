@@ -114,6 +114,9 @@ type watchContext struct {
 	serve         bool   // true when running in serve mode (IDE integration)
 	ew            *protocol.EventWriter
 
+	// ThunkCompiler encapsulates the parse → thunk generation → compile pipeline.
+	compiler codegen.ThunkCompiler
+
 	// Injected runners for testability.
 	build     BuildRunner
 	toolchain ToolchainRunner

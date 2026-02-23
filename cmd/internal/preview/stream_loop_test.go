@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
@@ -20,11 +21,20 @@ func (f *fakeCompanion) Done() <-chan struct{} { return f.doneCh }
 func (f *fakeCompanion) Err() error            { return f.err }
 func (f *fakeCompanion) Stop() error           { return nil }
 
+// stubThunkCompiler is a minimal ThunkCompiler that always returns an error.
+// Used in event loop tests where compilation is not the focus.
+type stubThunkCompiler struct{}
+
+func (stubThunkCompiler) Compile(_ context.Context, _ codegen.CompileOpts) (string, error) {
+	return "", fmt.Errorf("stub compiler: not implemented")
+}
+
 // newTestStream creates a stream with initialized channels for testing the event loop.
 func newTestStream(id string) *stream {
 	return &stream{
 		id:            id,
 		file:          "/path/to/HogeView.swift",
+		compiler:      stubThunkCompiler{},
 		switchFileCh:  make(chan string, 1),
 		nextPreviewCh: make(chan struct{}, 1),
 		inputCh:       make(chan *pb.Input, 1),

@@ -5,56 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 )
-
-// parseTrackedFiles parses all tracked files and builds fileThunkData slices.
-// sourceFile is treated specially: parseSourceFile is used instead of parseDependencyFile.
-// All parse errors (including sourceFile) are skipped with a debug log (lenient mode).
-// This is intentional: hot-reload triggers while the user is editing, so syntax errors
-// in the source file are expected and should not be fatal.
-// Callers that need stricter behavior (Run, switchFile) should check the result
-// for sourceFile presence after calling this function.
-func parseTrackedFiles(sourceFile string, trackedFiles []string) []analysis.FileThunkData {
-	var files []analysis.FileThunkData
-	for _, tf := range trackedFiles {
-		var types []analysis.TypeInfo
-		var imports []string
-		var err error
-		if tf == sourceFile {
-			types, imports, err = analysis.SourceFile(tf)
-		} else {
-			types, imports, err = analysis.DependencyFile(tf)
-		}
-		if err != nil {
-			slog.Debug("Skipping tracked file", "path", tf, "err", err)
-			continue
-		}
-		if len(types) == 0 {
-			continue
-		}
-		files = append(files, analysis.FileThunkData{
-			FileName: filepath.Base(tf),
-			AbsPath:  tf,
-			Types:    types,
-			Imports:  imports,
-		})
-	}
-	return files
-}
-
-// hasFile reports whether files contains an entry for the given absolute path.
-func hasFile(files []analysis.FileThunkData, absPath string) bool {
-	for _, f := range files {
-		if f.AbsPath == absPath {
-			return true
-		}
-	}
-	return false
-}
 
 // parseAndFilterTrackedFiles parses tracked files and removes private type
 // name collisions. Used by Run() and switchFile() where collision filtering
@@ -63,8 +17,8 @@ func hasFile(files []analysis.FileThunkData, absPath string) bool {
 func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string) (
 	[]analysis.FileThunkData, []string, error,
 ) {
-	files := parseTrackedFiles(sourceFile, trackedFiles)
-	if !hasFile(files, sourceFile) {
+	files := codegen.ParseTrackedFiles(sourceFile, trackedFiles)
+	if !codegen.HasFile(files, sourceFile) {
 		return nil, nil, fmt.Errorf("no types found in %s", sourceFile)
 	}
 
@@ -83,42 +37,6 @@ func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string) (
 		trackedFiles = filtered
 	}
 	return files, trackedFiles, nil
-}
-
-// compilePipeline runs the parse → thunk → compile pipeline and returns the
-// resulting dylib path.
-//
-// Contract:
-//   - parseTrackedFiles may return empty results (nil). compilePipeline
-//     treats this as an error because thunk generation requires at least one type.
-//   - Callers that need different empty-result handling (e.g. rebuildAndRelaunch's
-//     sourceFile-only fallback) should call parseTrackedFiles directly.
-func compilePipeline(
-	ctx context.Context,
-	sourceFile string,
-	trackedFiles []string,
-	bs *buildSettings,
-	dirs previewDirs,
-	previewSelector string,
-	counter int,
-	tc ToolchainRunner,
-) (string, error) {
-	files := parseTrackedFiles(sourceFile, trackedFiles)
-	if len(files) == 0 {
-		return "", fmt.Errorf("no types found in tracked files")
-	}
-
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
-	if err != nil {
-		return "", fmt.Errorf("thunk: %w", err)
-	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, tc)
-	if err != nil {
-		return "", fmt.Errorf("compile: %w", err)
-	}
-
-	return dylibPath, nil
 }
 
 // deploy attempts hot-reload via socket, falling back to full app relaunch.

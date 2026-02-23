@@ -86,7 +86,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	br, tc, ar, fc, sl := defaultRunners()
 
-	step := &stepper{total: 9}
+	step := &stepper{total: 8}
 
 	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
@@ -131,6 +131,8 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	extractCompilerPaths(ctx, bs, dirs)
 
+	compiler := codegen.NewPrivateImportCompiler(bs.ModuleName, dirs.Thunk, dirs.Build, compileConfigFromBS(bs), tc)
+
 	// Resolve dependencies using the index store for transitive graph,
 	// falling back to 1-level resolution if the index store is unavailable.
 	projectRoot := filepath.Dir(pc.primaryPath())
@@ -145,7 +147,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	slog.Debug("Tracked files (before collision check)", "count", len(trackedFiles), "files", trackedFiles)
 
 	done = step.begin("Parsing source file...")
-	files, trackedFiles, err := parseAndFilterTrackedFiles(sourceFile, trackedFiles)
+	_, trackedFiles, err = parseAndFilterTrackedFiles(sourceFile, trackedFiles)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -153,16 +155,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 	slog.Debug("Tracked files (after collision filter)", "count", len(trackedFiles), "files", trackedFiles)
 
-	done = step.begin("Generating combined thunk...")
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
-	done()
-	if err != nil {
-		sendStopped("build_error", err.Error(), "")
-		return err
-	}
-
 	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
+	dylibPath, err := compiler.Compile(ctx, codegen.CompileOpts{
+		SourceFile:      sourceFile,
+		TrackedFiles:    trackedFiles,
+		PreviewSelector: previewSelector,
+		ReloadCounter:   0,
+	})
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -297,6 +296,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			loaderPath:    loaderPath,
 			serve:         serve,
 			ew:            ew,
+			compiler:      compiler,
 			build:         br,
 			toolchain:     tc,
 			app:           ar,
