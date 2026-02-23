@@ -59,7 +59,7 @@ export class SimulatorWebviewPanel {
 			"axe.simulatorPreview",
 			"axe Preview",
 			{ viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-			{ enableScripts: true },
+			{ enableScripts: true, retainContextWhenHidden: true },
 		);
 		this.panel.webview.html = this.getHtml();
 		this.panel.webview.onDidReceiveMessage((msg: WebViewMessage) => {
