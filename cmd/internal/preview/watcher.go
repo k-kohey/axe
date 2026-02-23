@@ -145,8 +145,18 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				sourceFile, trackedSet = handleSwitchFileCmd(ctx, cmd.Path, sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
 			case "nextPreview":
 				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
-			case "tap", "swipe", "text", "touchDown", "touchMove", "touchUp":
-				hid.Handle(ctx, cmd)
+			case "tap":
+				hid.HandleTap(ctx, cmd.X, cmd.Y)
+			case "swipe":
+				hid.HandleSwipe(ctx, cmd.StartX, cmd.StartY, cmd.EndX, cmd.EndY, cmd.Duration)
+			case "text":
+				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: cmd.Value}}})
+			case "touchDown":
+				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
+			case "touchMove":
+				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchMove{TouchMove: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
+			case "touchUp":
+				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchUp{TouchUp: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
 			}
 
 		case protoCmd, ok := <-protoCmdCh:
