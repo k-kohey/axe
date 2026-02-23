@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/analysis"
 )
 
 // thunkFuncMap provides helper functions for thunk templates.
@@ -28,7 +28,7 @@ var thunkFuncMap = template.FuncMap{
 		return s
 	},
 	// isView returns true if the typeInfo conforms to View.
-	"isView": func(t parsing.TypeInfo) bool {
+	"isView": func(t analysis.TypeInfo) bool {
 		return t.IsView()
 	},
 }
@@ -87,19 +87,19 @@ public func _axePreviewRefresh() {
 
 // ThunkTemplateData holds the data used to render the thunk template.
 type ThunkTemplateData struct {
-	Files        []parsing.FileThunkData
+	Files        []analysis.FileThunkData
 	ModuleName   string
 	ExtraImports []string
 	HasPreview   bool
-	TargetTypes  []parsing.TypeInfo
-	PreviewProps []parsing.PreviewableProperty
+	TargetTypes  []analysis.TypeInfo
+	PreviewProps []analysis.PreviewableProperty
 	PreviewBody  string
 }
 
 // GenerateCombinedThunk generates a single thunk.swift covering multiple source files.
 // The targetSourceFile is the file whose #Preview is used.
 func GenerateCombinedThunk(
-	files []parsing.FileThunkData,
+	files []analysis.FileThunkData,
 	moduleName string,
 	thunkDir string,
 	previewSelector string,
@@ -124,7 +124,7 @@ func GenerateCombinedThunk(
 	}
 
 	// Find target types for the preview wrapper import.
-	var targetTypes []parsing.TypeInfo
+	var targetTypes []analysis.TypeInfo
 	for _, f := range files {
 		if f.AbsPath == targetSourceFile {
 			targetTypes = f.Types
@@ -140,17 +140,17 @@ func GenerateCombinedThunk(
 	}
 
 	// Parse #Preview blocks from the target source file.
-	previews, err := parsing.PreviewBlocks(targetSourceFile)
+	previews, err := analysis.PreviewBlocks(targetSourceFile)
 	if err != nil {
 		slog.Warn("Failed to parse #Preview blocks", "err", err)
 	}
 
 	if len(previews) > 0 {
-		selected, err := parsing.SelectPreview(previews, previewSelector)
+		selected, err := analysis.SelectPreview(previews, previewSelector)
 		if err != nil {
 			return "", err
 		}
-		tp := parsing.TransformPreviewBlock(selected)
+		tp := analysis.TransformPreviewBlock(selected)
 		td.HasPreview = true
 		td.PreviewProps = tp.Properties
 		td.PreviewBody = tp.BodySource

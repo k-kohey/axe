@@ -13,8 +13,8 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/runner"
@@ -131,10 +131,11 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	extractCompilerPaths(ctx, bs, dirs)
 
-	// Resolve 1-level dependencies from the target file.
+	// Resolve dependencies using the index store for transitive graph,
+	// falling back to 1-level resolution if the index store is unavailable.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, sourceFile, projectRoot, sl, parsing.DefaultParser())
-	if err != nil {
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), sl, analysis.DefaultParser())
+	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
 
@@ -245,7 +246,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Count previews for StreamStarted.
 	previewCount := 0
-	if blocks, parseErr := parsing.PreviewBlocks(sourceFile); parseErr == nil {
+	if blocks, parseErr := analysis.PreviewBlocks(sourceFile); parseErr == nil {
 		previewCount = len(blocks)
 	}
 
@@ -288,12 +289,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	if watch {
 		// Compute initial skeleton hashes for all tracked files.
-		skeletonMap := make(map[string]string, len(trackedFiles))
-		for _, tf := range trackedFiles {
-			if s, err := parsing.Skeleton(tf); err == nil {
-				skeletonMap[filepath.Clean(tf)] = s
-			}
-		}
+		skeletonMap := buildSkeletonMap(trackedFiles)
 
 		wctx := watchContext{
 			device:        device,
@@ -320,6 +316,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			previewCount:    previewCount,
 			skeletonMap:     skeletonMap,
 			trackedFiles:    trackedFiles,
+			depGraph:        depGraph,
 		}
 
 		var hid *protocol.HIDHandler

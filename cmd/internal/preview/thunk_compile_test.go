@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
-	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 const (
@@ -651,21 +651,21 @@ func TestThunkCompilation(t *testing.T) {
 			targetPath := filepath.Join(parseDir, tt.target)
 			dirs := previewDirs{Thunk: filepath.Join(t.TempDir(), "thunk")}
 
-			var files []parsing.FileThunkData
+			var files []analysis.FileThunkData
 			for name := range tt.sources {
 				path := filepath.Join(parseDir, name)
-				var types []parsing.TypeInfo
+				var types []analysis.TypeInfo
 				var imports []string
 				var err error
 				if name == tt.target {
-					types, imports, err = parsing.SourceFile(path)
+					types, imports, err = analysis.SourceFile(path)
 				} else {
-					types, imports, err = parsing.DependencyFile(path)
+					types, imports, err = analysis.DependencyFile(path)
 				}
 				if err != nil {
 					t.Fatal(err)
 				}
-				files = append(files, parsing.FileThunkData{
+				files = append(files, analysis.FileThunkData{
 					FileName: name,
 					AbsPath:  path,
 					Types:    types,
@@ -706,13 +706,13 @@ func TestThunkCompilation_PathEscaping(t *testing.T) {
 	// Write the parse source to the weird directory.
 	srcPath := writeFixtureFile(t, weirdDir, `My\View.swift`, fixturePathEscaping)
 
-	types, imports, err := parsing.SourceFile(srcPath)
+	types, imports, err := analysis.SourceFile(srcPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	dirs := previewDirs{Thunk: filepath.Join(t.TempDir(), "thunk")}
-	files := []parsing.FileThunkData{
+	files := []analysis.FileThunkData{
 		{
 			FileName: filepath.Base(srcPath),
 			AbsPath:  srcPath,

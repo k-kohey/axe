@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
 	"path/filepath"
 
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
@@ -69,6 +67,15 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			return nil
 
 		case path := <-cfg.fileChangeCh:
+			// If a transitive dependency graph is available, ignore files
+			// outside it entirely — they cannot affect the current preview.
+			cfg.ws.mu.Lock()
+			graph := cfg.ws.depGraph
+			cfg.ws.mu.Unlock()
+			if graph != nil && !graph.All[filepath.Clean(path)] {
+				slog.Debug("Ignoring file change outside dependency graph", "path", path)
+				continue
+			}
 			db.HandleFileChange(path, trackedSet)
 
 		case changedFile := <-db.TrackedCh:
@@ -86,17 +93,19 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				if err := reloadMultiFile(ctx, sourceFile, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
 					slog.Warn("Hot-reload error", "err", err)
 				}
+				// NOTE: The depGraph is intentionally NOT refreshed after hot-reload.
+				// A body-only change could introduce a new type reference (e.g. NewView()),
+				// but recomputing the graph here would add latency to the fastest path.
+				// The graph is refreshed on the next structural change (rebuild) or file switch.
 			case strategyRebuild:
 				if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
 					slog.Warn("Rebuild error", "err", err)
 				}
-				// Recompute skeletons after rebuild.
+				// Recompute skeletons and trackedSet after rebuild
+				// (rebuildAndRelaunch may update trackedFiles and depGraph).
 				cfg.ws.mu.Lock()
-				for _, tf := range cfg.ws.trackedFiles {
-					if sk, _ := parsing.Skeleton(tf); sk != "" {
-						cfg.ws.skeletonMap[filepath.Clean(tf)] = sk
-					}
-				}
+				cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
+				trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
 				cfg.ws.mu.Unlock()
 			}
 

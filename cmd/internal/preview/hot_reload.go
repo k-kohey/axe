@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
@@ -134,10 +134,13 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	}
 	ws.mu.Unlock()
 
-	// 1. Resolve dependencies for the new file.
+	// 1. Resolve dependencies for the new file using index store.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources, parsing.DefaultParser())
+	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, analysis.DefaultParser())
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		slog.Warn("Failed to resolve dependencies for new file", "err", err)
 	}
 
@@ -152,7 +155,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// Determine preview count/index for the new file.
 	previewCount := 0
-	if blocks, err := parsing.PreviewBlocks(newSourceFile); err == nil {
+	if blocks, err := analysis.PreviewBlocks(newSourceFile); err == nil {
 		previewCount = len(blocks)
 	}
 
@@ -192,18 +195,12 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	}
 
 	// 6. Update watch state.
-	newSkeletonMap := make(map[string]string, len(trackedFiles))
-	for _, tf := range trackedFiles {
-		if s, err := parsing.Skeleton(tf); err == nil {
-			newSkeletonMap[filepath.Clean(tf)] = s
-		}
-	}
-
 	ws.mu.Lock()
 	ws.reloadCounter++
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.trackedFiles = trackedFiles
-	ws.skeletonMap = newSkeletonMap
+	ws.skeletonMap = buildSkeletonMap(trackedFiles)
+	ws.depGraph = newGraph
 	ws.previewIndex = 0
 	ws.previewCount = previewCount
 	ws.mu.Unlock()
@@ -246,11 +243,11 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	// Fallback: if no tracked dependency files have types, use target only.
 	if len(files) == 0 {
-		types, imports, err := parsing.SourceFile(sourceFile)
+		types, imports, err := analysis.SourceFile(sourceFile)
 		if err != nil {
 			return fmt.Errorf("parse: %w", err)
 		}
-		files = append(files, parsing.FileThunkData{
+		files = append(files, analysis.FileThunkData{
 			FileName: filepath.Base(sourceFile),
 			AbsPath:  sourceFile,
 			Types:    types,
@@ -286,8 +283,28 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("launch: %w", err)
 	}
 
+	// Recompute transitive dependency graph after rebuild.
+	// Skip if context is cancelled; the caller will handle shutdown.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	projectRoot := filepath.Dir(pc.primaryPath())
+	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, analysis.DefaultParser())
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		slog.Warn("Failed to recompute dependency graph after rebuild", "err", err)
+	}
+
+	newTracked := []string{sourceFile}
+	newTracked = append(newTracked, newDeps...)
+
 	ws.mu.Lock()
 	ws.reloadCounter++
+	ws.depGraph = newGraph
+	ws.trackedFiles = newTracked
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
@@ -309,7 +326,7 @@ const (
 // If the skeleton cannot be computed, strategyRebuild is returned with an empty
 // skeleton (the caller should recompute after rebuilding).
 func classifyChange(sourceFile string, prevSkeleton string) (reloadStrategy, string) {
-	newSkeleton, err := parsing.Skeleton(sourceFile)
+	newSkeleton, err := analysis.Skeleton(sourceFile)
 	if err != nil {
 		slog.Warn("Skeleton computation failed, falling back to rebuild", "err", err)
 		return strategyRebuild, ""

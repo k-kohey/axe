@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
@@ -426,10 +426,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	// 7. Extract compiler paths from build output (once).
 	sm.ensureCompilerPathsExtracted(ctx, bs, s.dirs)
 
-	// 8. Resolve dependencies and parse source.
+	// 8. Resolve dependencies using index store for transitive graph.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depFiles, err := parsing.ResolveDependencies(ctx, s.file, projectRoot, sm.sources, parsing.DefaultParser())
-	if err != nil {
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, projectRoot, s.dirs.IndexStorePath(), sm.sources, analysis.DefaultParser())
+	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
 	}
@@ -479,7 +479,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 12. Count previews and send StreamStarted.
 	previewCount := 0
-	if blocks, parseErr := parsing.PreviewBlocks(s.file); parseErr == nil {
+	if blocks, parseErr := analysis.PreviewBlocks(s.file); parseErr == nil {
 		previewCount = len(blocks)
 	}
 	if err := sm.ew.Send(&pb.Event{
@@ -519,19 +519,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	// 15. Initialize watch state.
-	skeletonMap := make(map[string]string, len(trackedFiles))
-	for _, tf := range trackedFiles {
-		if sk, err := parsing.Skeleton(tf); err == nil {
-			skeletonMap[filepath.Clean(tf)] = sk
-		}
-	}
 	s.ws = &watchState{
 		reloadCounter:   1, // 0 was used for the initial launch
 		previewSelector: "0",
 		previewIndex:    0,
 		previewCount:    previewCount,
-		skeletonMap:     skeletonMap,
+		skeletonMap:     buildSkeletonMap(trackedFiles),
 		trackedFiles:    trackedFiles,
+		depGraph:        depGraph,
 	}
 
 	// 16. Register with shared watcher for file change notifications.

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
@@ -96,11 +97,12 @@ type watchState struct {
 	mu              sync.Mutex
 	reloadCounter   int
 	previewSelector string
-	previewIndex    int               // current 0-based preview index
-	previewCount    int               // total number of #Preview blocks (0 = unknown)
-	building        bool              // true while rebuildAndRelaunch is running
-	skeletonMap     map[string]string // file path → skeleton hash
-	trackedFiles    []string          // target + 1-level dependency file paths
+	previewIndex    int                       // current 0-based preview index
+	previewCount    int                       // total number of #Preview blocks (0 = unknown)
+	building        bool                      // true while rebuildAndRelaunch is running
+	skeletonMap     map[string]string         // file path → skeleton hash
+	trackedFiles    []string                  // target + 1-level dependency file paths
+	depGraph        *analysis.DependencyGraph // transitive dependency graph (nil = fallback to rebuild)
 }
 
 // watchContext holds immutable configuration for the watch loop.
@@ -132,6 +134,11 @@ type previewDirs struct {
 	Loader  string // Session/loader
 	Staging string // Session/staging
 	Socket  string // Session/loader.sock
+}
+
+// IndexStorePath returns the path to the Xcode index store data directory.
+func (d previewDirs) IndexStorePath() string {
+	return filepath.Join(d.Build, "Index.noindex", "DataStore")
 }
 
 // maxSunPathLen is the maximum length of sockaddr_un.sun_path on macOS.
@@ -181,4 +188,15 @@ func newPreviewDirs(projectPath string, deviceUDID string) (previewDirs, error) 
 		Staging: filepath.Join(session, "staging"),
 		Socket:  socketPath,
 	}, nil
+}
+
+// buildSkeletonMap computes skeleton hashes for the given files.
+func buildSkeletonMap(files []string) map[string]string {
+	m := make(map[string]string, len(files))
+	for _, f := range files {
+		if sk, err := analysis.Skeleton(f); err == nil {
+			m[filepath.Clean(f)] = sk
+		}
+	}
+	return m
 }

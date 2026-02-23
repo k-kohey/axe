@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/analysis"
 )
 
 func TestClassifyChange_BodyOnly(t *testing.T) {
@@ -26,7 +26,7 @@ struct V: View {
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prevSkeleton, err := parsing.Skeleton(path)
+	prevSkeleton, err := analysis.Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ struct V: View {
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prevSkeleton, err := parsing.Skeleton(path)
+	prevSkeleton, err := analysis.Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ struct V: View {
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prevSkeleton, err := parsing.Skeleton(path)
+	prevSkeleton, err := analysis.Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ struct V: View {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	parsing.ResetCache()
+	analysis.ResetCache()
 
 	ws := &watchState{}
 	pc, _ := NewProjectConfig(filepath.Join(dir, "dummy.xcodeproj"), "", "Scheme", "")
@@ -398,7 +398,7 @@ struct V: View {
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	prevSkeleton, err := parsing.Skeleton(path)
+	prevSkeleton, err := analysis.Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}

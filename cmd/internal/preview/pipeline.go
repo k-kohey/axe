@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/codegen"
-	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 // parseTrackedFiles parses all tracked files and builds fileThunkData slices.
@@ -18,16 +18,16 @@ import (
 // in the source file are expected and should not be fatal.
 // Callers that need stricter behavior (Run, switchFile) should check the result
 // for sourceFile presence after calling this function.
-func parseTrackedFiles(sourceFile string, trackedFiles []string) []parsing.FileThunkData {
-	var files []parsing.FileThunkData
+func parseTrackedFiles(sourceFile string, trackedFiles []string) []analysis.FileThunkData {
+	var files []analysis.FileThunkData
 	for _, tf := range trackedFiles {
-		var types []parsing.TypeInfo
+		var types []analysis.TypeInfo
 		var imports []string
 		var err error
 		if tf == sourceFile {
-			types, imports, err = parsing.SourceFile(tf)
+			types, imports, err = analysis.SourceFile(tf)
 		} else {
-			types, imports, err = parsing.DependencyFile(tf)
+			types, imports, err = analysis.DependencyFile(tf)
 		}
 		if err != nil {
 			slog.Debug("Skipping tracked file", "path", tf, "err", err)
@@ -36,7 +36,7 @@ func parseTrackedFiles(sourceFile string, trackedFiles []string) []parsing.FileT
 		if len(types) == 0 {
 			continue
 		}
-		files = append(files, parsing.FileThunkData{
+		files = append(files, analysis.FileThunkData{
 			FileName: filepath.Base(tf),
 			AbsPath:  tf,
 			Types:    types,
@@ -47,7 +47,7 @@ func parseTrackedFiles(sourceFile string, trackedFiles []string) []parsing.FileT
 }
 
 // hasFile reports whether files contains an entry for the given absolute path.
-func hasFile(files []parsing.FileThunkData, absPath string) bool {
+func hasFile(files []analysis.FileThunkData, absPath string) bool {
 	for _, f := range files {
 		if f.AbsPath == absPath {
 			return true
@@ -61,14 +61,14 @@ func hasFile(files []parsing.FileThunkData, absPath string) bool {
 // is needed. Returns the filtered files, the filtered trackedFiles list, and
 // an error if the sourceFile could not be parsed.
 func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string) (
-	[]parsing.FileThunkData, []string, error,
+	[]analysis.FileThunkData, []string, error,
 ) {
 	files := parseTrackedFiles(sourceFile, trackedFiles)
 	if !hasFile(files, sourceFile) {
 		return nil, nil, fmt.Errorf("no types found in %s", sourceFile)
 	}
 
-	files, excludedPaths := parsing.FilterPrivateCollisions(files, sourceFile)
+	files, excludedPaths := analysis.FilterPrivateCollisions(files, sourceFile)
 	if len(excludedPaths) > 0 {
 		excludeSet := make(map[string]bool, len(excludedPaths))
 		for _, p := range excludedPaths {
@@ -140,7 +140,7 @@ func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSe
 // the preview count/index in ws. Called before hot-reload to detect newly
 // added or removed previews.
 func updatePreviewCount(sourceFile string, ws *watchState) {
-	blocks, err := parsing.PreviewBlocks(sourceFile)
+	blocks, err := analysis.PreviewBlocks(sourceFile)
 	if err != nil || len(blocks) == 0 {
 		return
 	}
