@@ -194,7 +194,7 @@ DEVICE=<simulator-udid>
 
 - **Stored properties cannot be hot-reloaded**: `let`, `@State`, `@Published` etc. change memory layout and automatically trigger a full rebuild. Computed properties and methods are hot-reloaded.
 - **Generic/static/class methods and initializers are not hot-reloaded**.
-- **Transitive dependency changes are not detected**: Only direct dependencies are watched. Re-save the target file to force a reload.
+- **Without the Index Store, only direct (1-level) dependencies are watched**: Transitive dependency detection relies on the Index Store that `xcodebuild` generates. If the Index Store is unavailable (e.g. before the first build or after deleting DerivedData), axe falls back to 1-level resolution — changes to indirect dependencies will not trigger hot-reload until the next build regenerates the Index Store.
 
 ### Source Parsing
 
@@ -202,7 +202,7 @@ DEVICE=<simulator-udid>
 
 ### Preview Macro
 
-- **`#Preview(traits:)` is not supported**: Display trait parameters are ignored.
+- **`#Preview(traits:)` display traits are ignored**: The preview block itself works, but trait parameters such as `.landscapeLeft` have no effect.
 
 ### Platform
 
