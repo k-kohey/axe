@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
 	"path/filepath"
 	"strconv"
 )
@@ -77,7 +79,7 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 				// Recompute skeletons after rebuild.
 				s.ws.mu.Lock()
 				for _, tf := range s.ws.trackedFiles {
-					if sk, _ := computeSkeleton(tf); sk != "" {
+					if sk, _ := parsing.Skeleton(tf); sk != "" {
 						s.ws.skeletonMap[filepath.Clean(tf)] = sk
 					}
 				}

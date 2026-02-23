@@ -1,4 +1,4 @@
-package preview
+package parsing
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 )
 
-// resolveDependencies finds source files that define types referenced by the target file.
+// ResolveDependencies finds source files that define types referenced by the target file.
 // It returns a list of absolute paths to 1-level dependency files (excluding the target itself).
-func resolveDependencies(ctx context.Context, targetFile string, projectRoot string, sl SourceLister) ([]string, error) {
+func ResolveDependencies(ctx context.Context, targetFile string, projectRoot string, sl SwiftFileLister) ([]string, error) {
 	targetResult, err := swiftParse(targetFile)
 	if err != nil {
 		return nil, fmt.Errorf("parsing target file: %w", err)

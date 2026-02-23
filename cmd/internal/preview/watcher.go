@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -122,7 +123,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 				// Recompute skeletons for all tracked files after rebuild.
 				ws.mu.Lock()
 				for _, tf := range ws.trackedFiles {
-					if s, _ := computeSkeleton(tf); s != "" {
+					if s, _ := parsing.Skeleton(tf); s != "" {
 						ws.skeletonMap[filepath.Clean(tf)] = s
 					}
 				}
@@ -244,7 +245,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 1. Resolve dependencies for the new file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources)
+	depFiles, err := parsing.ResolveDependencies(ctx, newSourceFile, projectRoot, wctx.sources)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies for new file", "err", err)
 	}
@@ -260,7 +261,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// Determine preview count/index for the new file.
 	previewCount := 0
-	if blocks, err := parsePreviewBlocks(newSourceFile); err == nil {
+	if blocks, err := parsing.PreviewBlocks(newSourceFile); err == nil {
 		previewCount = len(blocks)
 	}
 
@@ -301,7 +302,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	// 6. Update watch state.
 	newSkeletonMap := make(map[string]string, len(trackedFiles))
 	for _, tf := range trackedFiles {
-		if s, err := computeSkeleton(tf); err == nil {
+		if s, err := parsing.Skeleton(tf); err == nil {
 			newSkeletonMap[filepath.Clean(tf)] = s
 		}
 	}
@@ -353,11 +354,11 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	// Fallback: if no tracked dependency files have types, use target only.
 	if len(files) == 0 {
-		types, imports, err := parseSourceFile(sourceFile)
+		types, imports, err := parsing.SourceFile(sourceFile)
 		if err != nil {
 			return fmt.Errorf("parse: %w", err)
 		}
-		files = append(files, fileThunkData{
+		files = append(files, parsing.FileThunkData{
 			FileName: filepath.Base(sourceFile),
 			AbsPath:  sourceFile,
 			Types:    types,
@@ -416,7 +417,7 @@ const (
 // If the skeleton cannot be computed, strategyRebuild is returned with an empty
 // skeleton (the caller should recompute after rebuilding).
 func classifyChange(sourceFile string, prevSkeleton string) (reloadStrategy, string) {
-	newSkeleton, err := computeSkeleton(sourceFile)
+	newSkeleton, err := parsing.Skeleton(sourceFile)
 	if err != nil {
 		slog.Warn("Skeleton computation failed, falling back to rebuild", "err", err)
 		return strategyRebuild, ""

@@ -3,6 +3,8 @@ package preview
 import (
 	"fmt"
 	"log/slog"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,8 +28,8 @@ var thunkFuncMap = template.FuncMap{
 		return s
 	},
 	// isView returns true if the typeInfo conforms to View.
-	"isView": func(t typeInfo) bool {
-		return t.isView()
+	"isView": func(t parsing.TypeInfo) bool {
+		return t.IsView()
 	},
 }
 
@@ -84,19 +86,19 @@ public func _axePreviewRefresh() {
 `))
 
 type thunkTemplateData struct {
-	Files        []fileThunkData
+	Files        []parsing.FileThunkData
 	ModuleName   string
 	ExtraImports []string
 	HasPreview   bool
-	TargetTypes  []typeInfo
-	PreviewProps []previewableProperty
+	TargetTypes  []parsing.TypeInfo
+	PreviewProps []parsing.PreviewableProperty
 	PreviewBody  string
 }
 
 // generateCombinedThunk generates a single thunk.swift covering multiple source files.
 // The targetSourceFile is the file whose #Preview is used.
 func generateCombinedThunk(
-	files []fileThunkData,
+	files []parsing.FileThunkData,
 	moduleName string,
 	dirs previewDirs,
 	previewSelector string,
@@ -121,7 +123,7 @@ func generateCombinedThunk(
 	}
 
 	// Find target types for the preview wrapper import.
-	var targetTypes []typeInfo
+	var targetTypes []parsing.TypeInfo
 	for _, f := range files {
 		if f.AbsPath == targetSourceFile {
 			targetTypes = f.Types
@@ -137,17 +139,17 @@ func generateCombinedThunk(
 	}
 
 	// Parse #Preview blocks from the target source file.
-	previews, err := parsePreviewBlocks(targetSourceFile)
+	previews, err := parsing.PreviewBlocks(targetSourceFile)
 	if err != nil {
 		slog.Warn("Failed to parse #Preview blocks", "err", err)
 	}
 
 	if len(previews) > 0 {
-		selected, err := selectPreview(previews, previewSelector)
+		selected, err := parsing.SelectPreview(previews, previewSelector)
 		if err != nil {
 			return "", err
 		}
-		tp := transformPreviewBlock(selected)
+		tp := parsing.TransformPreviewBlock(selected)
 		td.HasPreview = true
 		td.PreviewProps = tp.Properties
 		td.PreviewBody = tp.BodySource

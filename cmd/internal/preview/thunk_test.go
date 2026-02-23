@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 func TestReplacementModuleName(t *testing.T) {
@@ -29,24 +31,24 @@ func TestReplacementModuleName(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_NoCollision(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 		{
 			FileName: "Dep.swift",
 			AbsPath:  "/path/Dep.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	if len(kept) != 2 {
 		t.Errorf("kept = %d, want 2", len(kept))
 	}
@@ -56,18 +58,18 @@ func TestFilterPrivateCollisions_NoCollision(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_CollisionBetweenDeps(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 		{
 			FileName: "DepA.swift",
 			AbsPath:  "/path/DepA.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "DepAView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "SharedHelper", Kind: "struct", AccessLevel: "private"},
 			},
@@ -75,14 +77,14 @@ func TestFilterPrivateCollisions_CollisionBetweenDeps(t *testing.T) {
 		{
 			FileName: "DepB.swift",
 			AbsPath:  "/path/DepB.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "DepBView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "SharedHelper", Kind: "struct", AccessLevel: "private"},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	if len(kept) != 1 {
 		t.Errorf("kept = %d, want 1 (target only)", len(kept))
 	}
@@ -95,11 +97,11 @@ func TestFilterPrivateCollisions_CollisionBetweenDeps(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_CollisionWithTarget(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "Helper", Kind: "struct", AccessLevel: "private"},
 			},
@@ -107,14 +109,14 @@ func TestFilterPrivateCollisions_CollisionWithTarget(t *testing.T) {
 		{
 			FileName: "Dep.swift",
 			AbsPath:  "/path/Dep.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "Helper", Kind: "struct", AccessLevel: "private"},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	// Target should be kept, Dep should be excluded
 	if len(kept) != 1 {
 		t.Errorf("kept = %d, want 1", len(kept))
@@ -128,31 +130,31 @@ func TestFilterPrivateCollisions_CollisionWithTarget(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_NoPrivateTypes(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 		{
 			FileName: "DepA.swift",
 			AbsPath:  "/path/DepA.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "ViewA", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 		{
 			FileName: "DepB.swift",
 			AbsPath:  "/path/DepB.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "ViewB", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	if len(kept) != 3 {
 		t.Errorf("kept = %d, want 3", len(kept))
 	}
@@ -162,11 +164,11 @@ func TestFilterPrivateCollisions_NoPrivateTypes(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_PrivateButNoCollision(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "TargetHelper", Kind: "struct", AccessLevel: "private"},
 			},
@@ -174,14 +176,14 @@ func TestFilterPrivateCollisions_PrivateButNoCollision(t *testing.T) {
 		{
 			FileName: "Dep.swift",
 			AbsPath:  "/path/Dep.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 				{Name: "DepHelper", Kind: "struct", AccessLevel: "private"},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	if len(kept) != 2 {
 		t.Errorf("kept = %d, want 2 (different private names → no collision)", len(kept))
 	}
@@ -191,31 +193,31 @@ func TestFilterPrivateCollisions_PrivateButNoCollision(t *testing.T) {
 }
 
 func TestFilterPrivateCollisions_FileprivateCollision(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "Target.swift",
 			AbsPath:  "/path/Target.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "MainView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
 			},
 		},
 		{
 			FileName: "DepA.swift",
 			AbsPath:  "/path/DepA.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "Label", Kind: "struct", AccessLevel: "fileprivate"},
 			},
 		},
 		{
 			FileName: "DepB.swift",
 			AbsPath:  "/path/DepB.swift",
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{Name: "Label", Kind: "struct", AccessLevel: "fileprivate"},
 			},
 		},
 	}
 
-	kept, excluded := filterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := parsing.FilterPrivateCollisions(files, "/path/Target.swift")
 	if len(kept) != 1 {
 		t.Errorf("kept = %d, want 1", len(kept))
 	}
@@ -266,16 +268,16 @@ struct FugaView: View {
 		t.Fatal(err)
 	}
 
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{
 			FileName: "HogeView.swift",
 			AbsPath:  targetPath,
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{
 					Name:           "HogeView",
 					Kind:           "struct",
 					InheritedTypes: []string{"View"},
-					Properties: []propertyInfo{
+					Properties: []parsing.PropertyInfo{
 						{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        FugaView()"},
 					},
 				},
@@ -284,12 +286,12 @@ struct FugaView: View {
 		{
 			FileName: "FugaView.swift",
 			AbsPath:  depPath,
-			Types: []typeInfo{
+			Types: []parsing.TypeInfo{
 				{
 					Name:           "FugaView",
 					Kind:           "struct",
 					InheritedTypes: []string{"View"},
-					Properties: []propertyInfo{
+					Properties: []parsing.PropertyInfo{
 						{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Text(\"Child\")"},
 					},
 				},
@@ -343,7 +345,7 @@ struct FugaView: View {
 
 func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	// helper: create dirs and generate a combined thunk from a single fileThunkData.
-	generate := func(t *testing.T, srcFileName, srcContent string, ftd fileThunkData, moduleName string) string {
+	generate := func(t *testing.T, srcFileName, srcContent string, ftd parsing.FileThunkData, moduleName string) string {
 		t.Helper()
 		dir := t.TempDir()
 		dirs := previewDirs{
@@ -363,7 +365,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 		}
 
 		ftd.AbsPath = srcPath
-		files := []fileThunkData{ftd}
+		files := []parsing.FileThunkData{ftd}
 
 		thunkPath, err := generateCombinedThunk(files, moduleName, dirs, "", srcPath)
 		if err != nil {
@@ -380,14 +382,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
 		content := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hello\") }\n}\n",
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Text(\"Hello\")\n            .padding()"},
 						},
 					},
@@ -434,16 +436,16 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		files := []fileThunkData{
+		files := []parsing.FileThunkData{
 			{
 				FileName: `My\View.swift`,
 				AbsPath:  srcPath,
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "MyView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 3, Source: "        Text(\"Hi\")"},
 						},
 					},
@@ -476,14 +478,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("MultipleProperties", func(t *testing.T) {
 		content := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hi\") }\n}\n",
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "backgroundColor", TypeExpr: "Color", BodyLine: 4, Source: "        Color.blue"},
 							{Name: "body", TypeExpr: "some View", BodyLine: 7, Source: "        Text(\"Hello\")"},
 						},
@@ -504,14 +506,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("PreviewWrapper", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n\n#Preview {\n    @Previewable @State var someModel = SomeModel()\n    HogeView()\n        .environment(someModel)\n}\n"
 		content := generate(t, "HogeView.swift", srcContent,
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Text(\"Hello\")"},
 						},
 					},
@@ -543,14 +545,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("PreviewBindingConversion", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    @Binding var isOn: Bool\n    var body: some View {\n        Toggle(\"Toggle\", isOn: $isOn)\n    }\n}\n\n#Preview {\n    @Previewable @Binding var isOn = true\n    HogeView(isOn: $isOn)\n}\n"
 		content := generate(t, "HogeView.swift", srcContent,
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 6, Source: "        Toggle(\"Toggle\", isOn: $isOn)"},
 						},
 					},
@@ -570,14 +572,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("NoPreview", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n"
 		content := generate(t, "HogeView.swift", srcContent,
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Text(\"Hello\")"},
 						},
 					},
@@ -597,17 +599,17 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("WithMethods", func(t *testing.T) {
 		content := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hi\") }\n    func greet(name: String) -> String { \"Hello\" }\n}\n",
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Text(\"Hi\")"},
 						},
-						Methods: []methodInfo{
+						Methods: []parsing.MethodInfo{
 							{
 								Name:      "greet",
 								Selector:  "greet(name:)",
@@ -639,14 +641,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("MultipleViews", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        TextField(\"\", text: .constant(\"\"))\n    }\n}\n\nstruct FugaViewView: View {\n    var body: some View {\n        SecureField(\"\", text: .constant(\"\"))\n    }\n}\n\n#Preview(\"title\") {\n    HogeView()\n}\n"
 		content := generate(t, "Views.swift", srcContent,
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "Views.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        TextField(\"\", text: .constant(\"\"))"},
 						},
 					},
@@ -654,7 +656,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 						Name:           "FugaViewView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 11, Source: "        SecureField(\"\", text: .constant(\"\"))"},
 						},
 					},
@@ -683,14 +685,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("NestedViews", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct OuterView: View {\n    struct InnerView: View {\n        var body: some View {\n            Text(\"Inner\")\n        }\n    }\n    var body: some View {\n        InnerView()\n    }\n}\n\n#Preview {\n    OuterView()\n}\n"
 		content := generate(t, "OuterView.swift", srcContent,
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "OuterView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "OuterView.InnerView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 6, Source: "            Text(\"Inner\")"},
 						},
 					},
@@ -698,7 +700,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 						Name:           "OuterView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 11, Source: "        InnerView()"},
 						},
 					},
@@ -724,14 +726,14 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	t.Run("ExtraImports", func(t *testing.T) {
 		content := generate(t, "HogeView.swift",
 			"import SwiftUI\nimport SomeFramework\nstruct HogeView: View {\n    var body: some View { Text(\"Hello\") }\n}\n",
-			fileThunkData{
+			parsing.FileThunkData{
 				FileName: "HogeView.swift",
-				Types: []typeInfo{
+				Types: []parsing.TypeInfo{
 					{
 						Name:           "HogeView",
 						Kind:           "struct",
 						InheritedTypes: []string{"View"},
-						Properties: []propertyInfo{
+						Properties: []parsing.PropertyInfo{
 							{Name: "body", TypeExpr: "some View", BodyLine: 4, Source: "        Text(\"Hello\")"},
 						},
 					},
@@ -753,19 +755,19 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 func TestTypeInfo_IsView(t *testing.T) {
 	tests := []struct {
 		name string
-		ti   typeInfo
+		ti   parsing.TypeInfo
 		want bool
 	}{
-		{"View conformance", typeInfo{InheritedTypes: []string{"View"}}, true},
-		{"SwiftUI.View conformance", typeInfo{InheritedTypes: []string{"SwiftUI.View"}}, true},
-		{"Multiple protocols with View", typeInfo{InheritedTypes: []string{"Identifiable", "View"}}, true},
-		{"No conformance", typeInfo{InheritedTypes: []string{}}, false},
-		{"Non-View protocol", typeInfo{InheritedTypes: []string{"Codable"}}, false},
-		{"Nil inherited types", typeInfo{}, false},
+		{"View conformance", parsing.TypeInfo{InheritedTypes: []string{"View"}}, true},
+		{"SwiftUI.View conformance", parsing.TypeInfo{InheritedTypes: []string{"SwiftUI.View"}}, true},
+		{"Multiple protocols with View", parsing.TypeInfo{InheritedTypes: []string{"Identifiable", "View"}}, true},
+		{"No conformance", parsing.TypeInfo{InheritedTypes: []string{}}, false},
+		{"Non-View protocol", parsing.TypeInfo{InheritedTypes: []string{"Codable"}}, false},
+		{"Nil inherited types", parsing.TypeInfo{}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ti.isView(); got != tt.want {
+			if got := tt.ti.IsView(); got != tt.want {
 				t.Errorf("isView() = %v, want %v", got, tt.want)
 			}
 		})

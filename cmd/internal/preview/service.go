@@ -13,6 +13,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -128,7 +129,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Resolve 1-level dependencies from the target file.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, sourceFile, projectRoot, sl)
+	depFiles, err := parsing.ResolveDependencies(ctx, sourceFile, projectRoot, sl)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
@@ -240,7 +241,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Count previews for StreamStarted.
 	previewCount := 0
-	if blocks, parseErr := parsePreviewBlocks(sourceFile); parseErr == nil {
+	if blocks, parseErr := parsing.PreviewBlocks(sourceFile); parseErr == nil {
 		previewCount = len(blocks)
 	}
 
@@ -285,7 +286,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		// Compute initial skeleton hashes for all tracked files.
 		skeletonMap := make(map[string]string, len(trackedFiles))
 		for _, tf := range trackedFiles {
-			if s, err := computeSkeleton(tf); err == nil {
+			if s, err := parsing.Skeleton(tf); err == nil {
 				skeletonMap[filepath.Clean(tf)] = s
 			}
 		}

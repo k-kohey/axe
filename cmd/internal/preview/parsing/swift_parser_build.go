@@ -1,4 +1,4 @@
-package preview
+package parsing
 
 import (
 	"crypto/sha256"

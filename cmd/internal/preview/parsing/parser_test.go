@@ -1,4 +1,4 @@
-package preview
+package parsing
 
 import (
 	"os"
@@ -24,7 +24,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, imports, err := parseSourceFile(path)
+	types, imports, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ struct NotAView {
 		t.Fatal(err)
 	}
 
-	_, _, err := parseSourceFile(path)
+	_, _, err := SourceFile(path)
 	if err == nil {
 		t.Fatal("expected error for file without View struct")
 	}
@@ -90,7 +90,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ struct PiyoView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ struct MyView: View {
 		t.Fatal(err)
 	}
 
-	blocks, err := parsePreviewBlocks(path)
+	blocks, err := PreviewBlocks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ struct MyView: View {
 		t.Fatal(err)
 	}
 
-	blocks, err := parsePreviewBlocks(path)
+	blocks, err := PreviewBlocks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ struct MyView: View {
 		t.Fatal(err)
 	}
 
-	blocks, err := parsePreviewBlocks(path)
+	blocks, err := PreviewBlocks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,18 +271,18 @@ struct MyView: View {
 }
 
 func TestSelectPreview_Empty(t *testing.T) {
-	_, err := selectPreview(nil, "")
+	_, err := SelectPreview(nil, "")
 	if err == nil {
 		t.Fatal("expected error for empty blocks")
 	}
 }
 
 func TestSelectPreview_DefaultFirst(t *testing.T) {
-	blocks := []previewBlock{
+	blocks := []PreviewBlock{
 		{StartLine: 1, Title: "A", Source: "ViewA()"},
 		{StartLine: 5, Title: "B", Source: "ViewB()"},
 	}
-	b, err := selectPreview(blocks, "")
+	b, err := SelectPreview(blocks, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,11 +292,11 @@ func TestSelectPreview_DefaultFirst(t *testing.T) {
 }
 
 func TestSelectPreview_ByIndex(t *testing.T) {
-	blocks := []previewBlock{
+	blocks := []PreviewBlock{
 		{StartLine: 1, Title: "A", Source: "ViewA()"},
 		{StartLine: 5, Title: "B", Source: "ViewB()"},
 	}
-	b, err := selectPreview(blocks, "1")
+	b, err := SelectPreview(blocks, "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,11 +306,11 @@ func TestSelectPreview_ByIndex(t *testing.T) {
 }
 
 func TestSelectPreview_ByTitle(t *testing.T) {
-	blocks := []previewBlock{
+	blocks := []PreviewBlock{
 		{StartLine: 1, Title: "Light", Source: "ViewA()"},
 		{StartLine: 5, Title: "Dark", Source: "ViewB()"},
 	}
-	b, err := selectPreview(blocks, "Dark")
+	b, err := SelectPreview(blocks, "Dark")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,31 +320,31 @@ func TestSelectPreview_ByTitle(t *testing.T) {
 }
 
 func TestSelectPreview_IndexOutOfRange(t *testing.T) {
-	blocks := []previewBlock{
+	blocks := []PreviewBlock{
 		{StartLine: 1, Title: "A", Source: "ViewA()"},
 	}
-	_, err := selectPreview(blocks, "5")
+	_, err := SelectPreview(blocks, "5")
 	if err == nil {
 		t.Fatal("expected error for out-of-range index")
 	}
 }
 
 func TestSelectPreview_TitleNotFound(t *testing.T) {
-	blocks := []previewBlock{
+	blocks := []PreviewBlock{
 		{StartLine: 1, Title: "A", Source: "ViewA()"},
 	}
-	_, err := selectPreview(blocks, "NonExistent")
+	_, err := SelectPreview(blocks, "NonExistent")
 	if err == nil {
 		t.Fatal("expected error for unknown title")
 	}
 }
 
 func TestTransformPreviewBlock_NoPreviewable(t *testing.T) {
-	pb := previewBlock{
+	pb := PreviewBlock{
 		StartLine: 1,
 		Source:    "    MyView()",
 	}
-	tp := transformPreviewBlock(pb)
+	tp := TransformPreviewBlock(pb)
 	if len(tp.Properties) != 0 {
 		t.Errorf("Properties count = %d, want 0", len(tp.Properties))
 	}
@@ -354,11 +354,11 @@ func TestTransformPreviewBlock_NoPreviewable(t *testing.T) {
 }
 
 func TestTransformPreviewBlock_WithState(t *testing.T) {
-	pb := previewBlock{
+	pb := PreviewBlock{
 		StartLine: 1,
 		Source:    "    @Previewable @State var count = 0\n    HogeView(count: $count)",
 	}
-	tp := transformPreviewBlock(pb)
+	tp := TransformPreviewBlock(pb)
 	if len(tp.Properties) != 1 {
 		t.Fatalf("Properties count = %d, want 1", len(tp.Properties))
 	}
@@ -371,11 +371,11 @@ func TestTransformPreviewBlock_WithState(t *testing.T) {
 }
 
 func TestTransformPreviewBlock_BindingToState(t *testing.T) {
-	pb := previewBlock{
+	pb := PreviewBlock{
 		StartLine: 1,
 		Source:    "    @Previewable @Binding var isOn: Bool\n    HogeView(isOn: $isOn)",
 	}
-	tp := transformPreviewBlock(pb)
+	tp := TransformPreviewBlock(pb)
 	if len(tp.Properties) != 1 {
 		t.Fatalf("Properties count = %d, want 1", len(tp.Properties))
 	}
@@ -385,11 +385,11 @@ func TestTransformPreviewBlock_BindingToState(t *testing.T) {
 }
 
 func TestTransformPreviewBlock_MultiplePreviewables(t *testing.T) {
-	pb := previewBlock{
+	pb := PreviewBlock{
 		StartLine: 1,
 		Source:    "    @Previewable @State var name = \"World\"\n    @Previewable @State var count = 42\n    MyView(name: name, count: count)",
 	}
-	tp := transformPreviewBlock(pb)
+	tp := TransformPreviewBlock(pb)
 	if len(tp.Properties) != 2 {
 		t.Fatalf("Properties count = %d, want 2", len(tp.Properties))
 	}
@@ -420,7 +420,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +531,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := parseSourceFile(path)
+	types, _, err := SourceFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func writeTemp(t *testing.T, dir, name, content string) string {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	ResetCache()
 	return path
 }
 
@@ -627,13 +627,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,13 +664,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,13 +702,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,13 +744,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,13 +789,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -838,13 +838,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -882,13 +882,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -926,13 +926,13 @@ struct MyView: View {
 }
 `
 	path := writeTemp(t, dir, "MyView.swift", base)
-	hash1, err := computeSkeleton(path)
+	hash1, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	writeTemp(t, dir, "MyView.swift", modified)
-	hash2, err := computeSkeleton(path)
+	hash2, err := Skeleton(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -958,9 +958,9 @@ struct HogeView: View {
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	ResetCache()
 
-	types, _, err := parseDependencyFile(path)
+	types, _, err := DependencyFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -986,9 +986,9 @@ struct NotAView {
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	ResetCache()
 
-	types, _, err := parseDependencyFile(path)
+	types, _, err := DependencyFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1018,7 +1018,7 @@ struct HogeView: View {
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	ResetCache()
 
 	result, err := swiftParse(path)
 	if err != nil {
@@ -1073,7 +1073,7 @@ enum MyState {
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	ResetCache()
 
 	result, err := swiftParse(path)
 	if err != nil {

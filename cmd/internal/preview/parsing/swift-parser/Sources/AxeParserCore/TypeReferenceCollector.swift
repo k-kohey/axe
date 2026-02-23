@@ -7,7 +7,14 @@ final class TypeReferenceCollector: SyntaxVisitor {
   /// Type names defined in this file (struct, class, enum, actor declarations).
   private(set) var definedTypes: [String] = []
 
-  /// Standard library and SwiftUI types to exclude from referencedTypes.
+  /// Types from Swift stdlib, SwiftUI, UIKit, and Foundation to exclude from referencedTypes.
+  /// These are implicitly available in every file, so filtering them out lets us collect only
+  /// user-defined type references — which is what we actually need to resolve cross-file
+  /// dependencies for preview compilation.
+  ///
+  /// Missing entries here do not cause incorrect results (no user file defines these types,
+  /// so dependency resolution simply won't find a match). The only impact is wasted work
+  /// scanning project files for a type that will never be found.
   private static let filteredTypes: Set<String> = [
     // Swift stdlib
     "String", "Int", "Int8", "Int16", "Int32", "Int64",

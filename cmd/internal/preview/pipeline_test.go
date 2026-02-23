@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 func TestParseTrackedFiles_SourceAndDependency(t *testing.T) {
@@ -34,7 +36,7 @@ struct ChildView: View {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
@@ -94,7 +96,7 @@ struct HelperView: View {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	// In lenient mode, sourceFile parse error is skipped (not fatal).
 	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
@@ -125,7 +127,7 @@ struct MainView: View {
 
 	// Dependency file that doesn't exist.
 	depPath := filepath.Join(dir, "NonExistent.swift")
-	resetParseCache()
+	parsing.ResetCache()
 
 	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
@@ -163,7 +165,7 @@ struct Model {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
 
@@ -177,7 +179,7 @@ struct Model {
 }
 
 func TestHasFile(t *testing.T) {
-	files := []fileThunkData{
+	files := []parsing.FileThunkData{
 		{AbsPath: "/a/B.swift"},
 		{AbsPath: "/a/C.swift"},
 	}
@@ -206,7 +208,7 @@ struct Model {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	_, _, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath})
 	if err == nil {
@@ -240,7 +242,7 @@ private struct SharedName: View {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath})
 	if err != nil {
@@ -274,7 +276,7 @@ struct Model {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	bs := &buildSettings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
@@ -460,7 +462,7 @@ struct HelperView: View {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	resetParseCache()
+	parsing.ResetCache()
 
 	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath})
 	if err != nil {

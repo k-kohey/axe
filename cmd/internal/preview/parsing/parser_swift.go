@@ -1,4 +1,4 @@
-package preview
+package parsing
 
 import (
 	"encoding/json"
@@ -14,22 +14,22 @@ import (
 type swiftParseResult struct {
 	Types           []swiftTypeInfo `json:"types"`
 	Imports         []string        `json:"imports"`
-	Previews        []previewBlock  `json:"previews"`
+	Previews        []PreviewBlock  `json:"previews"`
 	SkeletonHash    string          `json:"skeletonHash"`
 	ReferencedTypes []string        `json:"referencedTypes"`
 	DefinedTypes    []string        `json:"definedTypes"`
 }
 
 // swiftTypeInfo is the raw per-type JSON from axe-parser.
-// Unlike typeInfo, it includes ALL properties/methods (including stored ones).
+// Unlike TypeInfo, it includes ALL properties/methods (including stored ones).
 // convertTypes filters out types with no computed properties or methods.
 type swiftTypeInfo struct {
 	Name           string         `json:"name"`
 	Kind           string         `json:"kind"`
 	AccessLevel    string         `json:"accessLevel"`
 	InheritedTypes []string       `json:"inheritedTypes"`
-	Properties     []propertyInfo `json:"properties"`
-	Methods        []methodInfo   `json:"methods"`
+	Properties     []PropertyInfo `json:"properties"`
+	Methods        []MethodInfo   `json:"methods"`
 }
 
 // parseCacheEntry holds a cached parse result for a single file.
@@ -45,9 +45,9 @@ var parseCache struct {
 	entries map[string]*parseCacheEntry
 }
 
-// resetParseCache clears the parse cache. Used in tests where files are
+// ResetCache clears the parse cache. Used in tests where files are
 // overwritten rapidly and modTime may not change.
-func resetParseCache() {
+func ResetCache() {
 	parseCache.Lock()
 	parseCache.entries = nil
 	parseCache.Unlock()
@@ -103,19 +103,19 @@ func swiftParse(path string) (*swiftParseResult, error) {
 
 // convertTypes converts parsed Swift type info to internal types,
 // filtering out types with no computed properties or methods.
-func convertTypes(swiftTypes []swiftTypeInfo) []typeInfo {
-	var types []typeInfo
+func convertTypes(swiftTypes []swiftTypeInfo) []TypeInfo {
+	var types []TypeInfo
 	for _, st := range swiftTypes {
 		if len(st.Properties) > 0 || len(st.Methods) > 0 {
-			types = append(types, typeInfo(st))
+			types = append(types, TypeInfo(st))
 		}
 	}
 	return types
 }
 
-// parseSourceFile parses types and imports from a Swift source file.
+// SourceFile parses types and imports from a Swift source file.
 // It requires at least one View type with a body property.
-func parseSourceFile(path string) ([]typeInfo, []string, error) {
+func SourceFile(path string) ([]TypeInfo, []string, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing source file: %w", err)
@@ -126,7 +126,7 @@ func parseSourceFile(path string) ([]typeInfo, []string, error) {
 	// Require at least one View type with a body property.
 	hasBody := false
 	for _, t := range types {
-		if !t.isView() {
+		if !t.IsView() {
 			continue
 		}
 		for _, p := range t.Properties {
@@ -144,8 +144,8 @@ func parseSourceFile(path string) ([]typeInfo, []string, error) {
 	return types, result.Imports, nil
 }
 
-// parsePreviewBlocks extracts all #Preview { ... } blocks from the source file.
-func parsePreviewBlocks(path string) ([]previewBlock, error) {
+// PreviewBlocks extracts all #Preview { ... } blocks from the source file.
+func PreviewBlocks(path string) ([]PreviewBlock, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return nil, fmt.Errorf("parsing preview blocks: %w", err)
@@ -158,9 +158,9 @@ func parsePreviewBlocks(path string) ([]previewBlock, error) {
 	return result.Previews, nil
 }
 
-// computeSkeleton computes a SHA-256 hash of the source file with body regions
+// Skeleton computes a SHA-256 hash of the source file with body regions
 // stripped out. Uses the swift-syntax AST for accurate body detection.
-func computeSkeleton(path string) (string, error) {
+func Skeleton(path string) (string, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return "", fmt.Errorf("computing skeleton: %w", err)
@@ -168,10 +168,10 @@ func computeSkeleton(path string) (string, error) {
 	return result.SkeletonHash, nil
 }
 
-// parseDependencyFile parses types and imports from a dependency Swift file.
-// Unlike parseSourceFile, it does not require a body property or View conformance.
+// DependencyFile parses types and imports from a dependency Swift file.
+// Unlike SourceFile, it does not require a body property or View conformance.
 // It returns all types (with computed properties/methods) found in the file.
-func parseDependencyFile(path string) ([]typeInfo, []string, error) {
+func DependencyFile(path string) ([]TypeInfo, []string, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing dependency file: %w", err)
@@ -181,12 +181,12 @@ func parseDependencyFile(path string) ([]typeInfo, []string, error) {
 	return types, result.Imports, nil
 }
 
-// filterPrivateCollisions removes dependency files whose private type names
+// FilterPrivateCollisions removes dependency files whose private type names
 // collide with private type names in other tracked files.
 // The target file (identified by targetPath) is never removed.
 // Removed files should not be tracked for hot-reload; changes to them will
 // trigger a full rebuild via the untracked path.
-func filterPrivateCollisions(files []fileThunkData, targetPath string) (kept []fileThunkData, excludedPaths []string) {
+func FilterPrivateCollisions(files []FileThunkData, targetPath string) (kept []FileThunkData, excludedPaths []string) {
 	// Collect private view names per file.
 	type nameFile struct {
 		name string

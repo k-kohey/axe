@@ -1,12 +1,41 @@
-package preview
+package parsing
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// testSourceLister implements SwiftFileLister using git ls-files.
+type testSourceLister struct{}
+
+func (t *testSourceLister) SwiftFiles(ctx context.Context, root string) ([]string, error) {
+	out, err := exec.CommandContext(ctx,
+		"git", "-C", root, "ls-files",
+		"--cached", "--others", "--exclude-standard",
+		"*.swift",
+	).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git ls-files: %w", err)
+	}
+
+	var files []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		abs := filepath.Join(root, line)
+		files = append(files, abs)
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no Swift files found")
+	}
+	return files, nil
+}
 
 func TestResolveDependencies_Basic(t *testing.T) {
 	dir := t.TempDir()
@@ -49,9 +78,9 @@ class AppDelegate: NSObject {
 	}
 
 	gitInit(t, dir)
-	resetParseCache()
+	ResetCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,9 +109,9 @@ struct SimpleView: View {
 	}
 
 	gitInit(t, dir)
-	resetParseCache()
+	ResetCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,9 +142,9 @@ struct CombinedView: View {
 	}
 
 	gitInit(t, dir)
-	resetParseCache()
+	ResetCache()
 
-	deps, err := resolveDependencies(context.Background(), target, dir, &RealSourceLister{})
+	deps, err := ResolveDependencies(context.Background(), target, dir, &testSourceLister{})
 	if err != nil {
 		t.Fatal(err)
 	}

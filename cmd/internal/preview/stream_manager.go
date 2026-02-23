@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -424,7 +425,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 8. Resolve dependencies and parse source.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depFiles, err := resolveDependencies(ctx, s.file, projectRoot, sm.sources)
+	depFiles, err := parsing.ResolveDependencies(ctx, s.file, projectRoot, sm.sources)
 	if err != nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
@@ -475,7 +476,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 12. Count previews and send StreamStarted.
 	previewCount := 0
-	if blocks, parseErr := parsePreviewBlocks(s.file); parseErr == nil {
+	if blocks, parseErr := parsing.PreviewBlocks(s.file); parseErr == nil {
 		previewCount = len(blocks)
 	}
 	if err := sm.ew.Send(&pb.Event{
@@ -517,7 +518,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	// 15. Initialize watch state.
 	skeletonMap := make(map[string]string, len(trackedFiles))
 	for _, tf := range trackedFiles {
-		if sk, err := computeSkeleton(tf); err == nil {
+		if sk, err := parsing.Skeleton(tf); err == nil {
 			skeletonMap[filepath.Clean(tf)] = sk
 		}
 	}

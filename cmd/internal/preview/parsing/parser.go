@@ -1,4 +1,4 @@
-package preview
+package parsing
 
 import (
 	"fmt"
@@ -10,11 +10,11 @@ import (
 
 var rePreviewable = regexp.MustCompile(`^\s*@Previewable\s+(.+)$`)
 
-// selectPreview selects a preview block by name or 0-based index string.
+// SelectPreview selects a preview block by name or 0-based index string.
 // If selector is empty, returns the first block.
-func selectPreview(blocks []previewBlock, selector string) (previewBlock, error) {
+func SelectPreview(blocks []PreviewBlock, selector string) (PreviewBlock, error) {
 	if len(blocks) == 0 {
-		return previewBlock{}, fmt.Errorf("no #Preview blocks found")
+		return PreviewBlock{}, fmt.Errorf("no #Preview blocks found")
 	}
 
 	// Log available previews when multiple exist
@@ -35,7 +35,7 @@ func selectPreview(blocks []previewBlock, selector string) (previewBlock, error)
 	// Try as index first
 	if idx, err := strconv.Atoi(selector); err == nil {
 		if idx < 0 || idx >= len(blocks) {
-			return previewBlock{}, fmt.Errorf("preview index %d out of range (0-%d)", idx, len(blocks)-1)
+			return PreviewBlock{}, fmt.Errorf("preview index %d out of range (0-%d)", idx, len(blocks)-1)
 		}
 		return blocks[idx], nil
 	}
@@ -46,17 +46,17 @@ func selectPreview(blocks []previewBlock, selector string) (previewBlock, error)
 			return b, nil
 		}
 	}
-	return previewBlock{}, fmt.Errorf("no preview with title %q found", selector)
+	return PreviewBlock{}, fmt.Errorf("no preview with title %q found", selector)
 }
 
-// transformPreviewBlock splits a #Preview block into @Previewable property
+// TransformPreviewBlock splits a #Preview block into @Previewable property
 // declarations and the remaining body source.
 // - Lines matching `@Previewable <decl>` have the prefix stripped and become properties.
 // - `@Binding` in those declarations is replaced with `@State` (since $x gives Binding access).
 // - All other lines become the body source.
-func transformPreviewBlock(pb previewBlock) transformedPreview {
+func TransformPreviewBlock(pb PreviewBlock) TransformedPreview {
 	lines := strings.Split(pb.Source, "\n")
-	var props []previewableProperty
+	var props []PreviewableProperty
 	var bodyLines []string
 
 	for _, line := range lines {
@@ -64,13 +64,13 @@ func transformPreviewBlock(pb previewBlock) transformedPreview {
 			decl := m[1]
 			// @Binding → @State (in a preview wrapper, $x provides Binding)
 			decl = strings.Replace(decl, "@Binding", "@State", 1)
-			props = append(props, previewableProperty{Source: decl})
+			props = append(props, PreviewableProperty{Source: decl})
 		} else {
 			bodyLines = append(bodyLines, line)
 		}
 	}
 
-	return transformedPreview{
+	return TransformedPreview{
 		Properties: props,
 		BodySource: strings.Join(bodyLines, "\n"),
 	}

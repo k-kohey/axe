@@ -16,7 +16,7 @@ golangci-lint = "2.10"
 
 [env]
 GO_MODULE = "github.com/k-kohey/axe"
-SWIFT_PARSER = "cmd/internal/preview/swift-parser"
+SWIFT_PARSER = "cmd/internal/preview/parsing/swift-parser"
 
 [tasks]
 # Build the application
