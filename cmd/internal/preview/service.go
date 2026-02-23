@@ -13,8 +13,12 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/protocol"
+	"github.com/k-kohey/axe/internal/preview/runner"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // stepper tracks the current step number and total for progress output.
@@ -38,7 +42,7 @@ const defaultStreamID = "default"
 
 // defaultRunners creates the production implementations of all runner interfaces.
 func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
-	return &RealBuildRunner{}, &RealToolchainRunner{}, &RealAppRunner{}, &RealFileCopier{}, &RealSourceLister{}
+	return &runner.Build{}, &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
 }
 
 func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string, reuseBuild bool) error {
@@ -48,14 +52,14 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	defer stop()
 
 	// In serve mode, create an EventWriter to send JSON Lines to stdout.
-	var ew *EventWriter
+	var ew *protocol.EventWriter
 	if serve {
-		ew = NewEventWriter(os.Stdout)
+		ew = protocol.NewEventWriter(os.Stdout)
 
 		// Advertise the protocol version to the extension.
 		if err := ew.Send(&pb.Event{
 			Payload: &pb.Event_Hello{
-				Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+				Hello: &pb.Hello{ProtocolVersion: protocol.ProtocolVersion},
 			},
 		}); err != nil {
 			return fmt.Errorf("sending hello: %w", err)
@@ -149,7 +153,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	slog.Debug("Tracked files (after collision filter)", "count", len(trackedFiles), "files", trackedFiles)
 
 	done = step.begin("Generating combined thunk...")
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, previewSelector, sourceFile)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -157,7 +161,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, 0, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -224,7 +228,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return err
 	}
 
-	loaderPath, err := compileLoader(ctx, dirs, bs.DeploymentTarget, tc)
+	loaderPath, err := codegen.CompileLoader(ctx, dirs.Loader, bs.DeploymentTarget, tc)
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
@@ -273,13 +277,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		streamCtx, cancel := context.WithCancel(context.Background())
 		cancelStream = cancel
 		idbErrCh = make(chan error, 1)
-		voc := &videoOutputConfig{
-			ew:       ew,
-			streamID: defaultStreamID,
-			device:   device,
-			file:     sourceFile,
+		voc := &protocol.VideoOutputConfig{
+			EW:       ew,
+			StreamID: defaultStreamID,
+			Device:   device,
+			File:     sourceFile,
 		}
-		go relayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
+		go protocol.RelayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
 	}
 
 	if watch {
@@ -318,17 +322,15 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			trackedFiles:    trackedFiles,
 		}
 
-		var hid *hidHandler
+		var hid *protocol.HIDHandler
 		if idbClient != nil {
 			if w, h, err := idbClient.ScreenSize(context.Background()); err == nil {
-				hid = newHIDHandler(idbClient, w, h)
+				hid = protocol.NewHIDHandler(idbClient, w, h)
 			}
 		}
 
-		events := watchEvents{idbErr: idbErrCh, bootDied: bootCompanion.Done()}
-
 		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, events)
+		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
 	}
 
 	// Non-watch mode: wait for signal or boot companion crash.
@@ -356,12 +358,12 @@ func RunServe(pc ProjectConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	ew := NewEventWriter(os.Stdout)
+	ew := protocol.NewEventWriter(os.Stdout)
 
 	// Advertise the protocol version to the extension.
 	if err := ew.Send(&pb.Event{
 		Payload: &pb.Event_Hello{
-			Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+			Hello: &pb.Hello{ProtocolVersion: protocol.ProtocolVersion},
 		},
 	}); err != nil {
 		return fmt.Errorf("sending hello: %w", err)
@@ -385,12 +387,12 @@ func RunServe(pc ProjectConfig) error {
 	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl)
 
 	// Start shared file watcher for all streams.
-	watcher, err := newSharedWatcher(ctx, pc, sl)
+	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.primaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}
 	sm.watcher = watcher
-	defer watcher.close()
+	defer watcher.Close()
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.

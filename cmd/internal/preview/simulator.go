@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/k-kohey/axe/internal/preview/buildlock"
 	"howett.net/plist"
 )
 
@@ -38,7 +39,7 @@ func resolveAppBundle(bs *buildSettings, dirs previewDirs) (string, error) {
 // stageAppBundle copies the .app bundle from dirs.Build to dirs.Staging
 // under LOCK_SH to protect against concurrent xcodebuild writes.
 func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs, fc FileCopier) (string, error) {
-	lock := newBuildLock(dirs.Build)
+	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		return "", fmt.Errorf("acquiring read lock: %w", err)
 	}

@@ -10,8 +10,11 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/protocol"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
 // DevicePoolInterface abstracts DevicePool for testability.
@@ -52,7 +55,7 @@ type stream struct {
 	bootCompanion companionProcess
 	idbCompanion  companionProcess
 	idbClient     idb.IDBClient
-	hid           *hidHandler
+	hid           *protocol.HIDHandler
 	ws            *watchState
 	loaderPath    string
 
@@ -62,7 +65,7 @@ type stream struct {
 
 // sendStopped sends a StreamStopped event exactly once per stream.
 // Safe to call multiple times (from launcher error and from RemoveStream).
-func (s *stream) sendStopped(ew *EventWriter, reason, message, diagnostic string) {
+func (s *stream) sendStopped(ew *protocol.EventWriter, reason, message, diagnostic string) {
 	s.stoppedOnce.Do(func() {
 		if err := ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -83,7 +86,7 @@ type StreamManager struct {
 	mu      sync.Mutex
 	streams map[string]*stream
 	pool    DevicePoolInterface
-	ew      *EventWriter
+	ew      *protocol.EventWriter
 
 	// Shared project configuration.
 	pc            ProjectConfig
@@ -95,7 +98,7 @@ type StreamManager struct {
 	bsExtracted bool // true after extractCompilerPaths has been called
 
 	// Shared file watcher (set by RunServe before starting command loop).
-	watcher *sharedWatcher
+	watcher *watch.SharedWatcher
 
 	// Injected runners for testability.
 	build     BuildRunner
@@ -112,7 +115,7 @@ type StreamManager struct {
 }
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
-func NewStreamManager(pool DevicePoolInterface, ew *EventWriter, pc ProjectConfig, deviceSetPath string,
+func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
@@ -249,7 +252,7 @@ func (sm *StreamManager) handleInput(streamID string, input *pb.Input) {
 // and coordinated cleanup.
 func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 	defer close(s.done)
-	defer s.cancel() // Ensure launcher goroutines (e.g. relayVideoStreamEvents) stop on normal return.
+	defer s.cancel() // Ensure launcher goroutines (e.g. RelayVideoStreamEvents) stop on normal return.
 	defer sm.cleanupStreamResources(s)
 	defer func() {
 		// Self-remove from map. If handleRemoveStream already deleted us,
@@ -273,7 +276,7 @@ func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 func (sm *StreamManager) cleanupStreamResources(s *stream) {
 	// Unregister from shared watcher.
 	if sm.watcher != nil {
-		sm.watcher.removeListener(s.id)
+		sm.watcher.RemoveListener(s.id)
 	}
 
 	// Terminate the app on the device.
@@ -439,13 +442,13 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	// 9. Generate thunk and compile.
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, s.dirs, "0", s.file)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, s.dirs.Thunk, "0", s.file)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, s.dirs, 0, s.file, sm.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -460,7 +463,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		return
 	}
 
-	loaderPath, err := compileLoader(ctx, s.dirs, bs.DeploymentTarget, sm.toolchain)
+	loaderPath, err := codegen.CompileLoader(ctx, s.dirs.Loader, bs.DeploymentTarget, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -502,17 +505,17 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	s.idbClient = idbClient
 
 	idbErrCh := make(chan error, 1)
-	voc := &videoOutputConfig{
-		ew:       sm.ew,
-		streamID: s.id,
-		device:   udid,
-		file:     s.file,
+	voc := &protocol.VideoOutputConfig{
+		EW:       sm.ew,
+		StreamID: s.id,
+		Device:   udid,
+		File:     s.file,
 	}
-	go relayVideoStreamEvents(ctx, idbClient, idbErrCh, voc)
+	go protocol.RelayVideoStreamEvents(ctx, idbClient, idbErrCh, voc)
 
 	// 14. Create HID handler.
 	if w, h, err := idbClient.ScreenSize(ctx); err == nil {
-		s.hid = newHIDHandler(idbClient, w, h)
+		s.hid = protocol.NewHIDHandler(idbClient, w, h)
 	}
 
 	// 15. Initialize watch state.
@@ -533,7 +536,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 16. Register with shared watcher for file change notifications.
 	if sm.watcher != nil {
-		sm.watcher.addListener(s.id, s.fileChangeCh)
+		sm.watcher.AddListener(s.id, s.fileChangeCh)
 	}
 
 	// 17. Enter the per-stream event loop (blocks until context cancelled or crash).
@@ -557,8 +560,6 @@ func (sm *StreamManager) StopAll() {
 		s.cancel()
 	}
 	// Wait for all goroutines to finish (cleanup happens in runStream defer).
-	// Use a timeout consistent with handleRemoveStream to prevent hanging
-	// if a stream goroutine is stuck.
 	for _, s := range streams {
 		select {
 		case <-s.done:

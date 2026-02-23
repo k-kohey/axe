@@ -1,14 +1,14 @@
-package preview
+package codegen
 
 import (
 	"fmt"
 	"log/slog"
-
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 // thunkFuncMap provides helper functions for thunk templates.
@@ -33,11 +33,11 @@ var thunkFuncMap = template.FuncMap{
 	},
 }
 
-// thunkTmpl generates a combined thunk for one or more source files.
+// ThunkTmpl generates a combined thunk for one or more source files.
 // Each file gets its own @_private import to access private members used in bodies.
 // Files with private type name collisions must be excluded before calling this.
 // Only the target file's #Preview is used for the preview wrapper.
-var thunkTmpl = template.Must(template.New("thunk").Funcs(thunkFuncMap).Parse(
+var ThunkTmpl = template.Must(template.New("thunk").Funcs(thunkFuncMap).Parse(
 	`{{ range .Files }}@_private(sourceFile: "{{ .FileName | escapeSwiftString }}") import {{ $.ModuleName }}
 {{ end }}import SwiftUI
 {{ range .ExtraImports }}{{ . }}
@@ -85,7 +85,8 @@ public func _axePreviewRefresh() {
 }
 `))
 
-type thunkTemplateData struct {
+// ThunkTemplateData holds the data used to render the thunk template.
+type ThunkTemplateData struct {
 	Files        []parsing.FileThunkData
 	ModuleName   string
 	ExtraImports []string
@@ -95,18 +96,18 @@ type thunkTemplateData struct {
 	PreviewBody  string
 }
 
-// generateCombinedThunk generates a single thunk.swift covering multiple source files.
+// GenerateCombinedThunk generates a single thunk.swift covering multiple source files.
 // The targetSourceFile is the file whose #Preview is used.
-func generateCombinedThunk(
+func GenerateCombinedThunk(
 	files []parsing.FileThunkData,
 	moduleName string,
-	dirs previewDirs,
+	thunkDir string,
 	previewSelector string,
 	targetSourceFile string,
 ) (retPath string, retErr error) {
 	slog.Debug("Generating combined thunk")
 
-	if err := os.MkdirAll(dirs.Thunk, 0o755); err != nil {
+	if err := os.MkdirAll(thunkDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating thunk dir: %w", err)
 	}
 
@@ -131,7 +132,7 @@ func generateCombinedThunk(
 		}
 	}
 
-	td := thunkTemplateData{
+	td := ThunkTemplateData{
 		Files:        files,
 		ModuleName:   moduleName,
 		ExtraImports: extraImports,
@@ -155,7 +156,7 @@ func generateCombinedThunk(
 		td.PreviewBody = tp.BodySource
 	}
 
-	thunkPath := filepath.Join(dirs.Thunk, "thunk.swift")
+	thunkPath := filepath.Join(thunkDir, "thunk.swift")
 	f, err := os.Create(thunkPath)
 	if err != nil {
 		return "", fmt.Errorf("creating thunk file: %w", err)
@@ -166,7 +167,7 @@ func generateCombinedThunk(
 		}
 	}()
 
-	if err := thunkTmpl.Execute(f, td); err != nil {
+	if err := ThunkTmpl.Execute(f, td); err != nil {
 		return "", fmt.Errorf("executing thunk template: %w", err)
 	}
 

@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+
+	"github.com/k-kohey/axe/internal/preview/codegen"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
 // buildSettings holds values extracted from xcodebuild -showBuildSettings.
@@ -73,6 +77,32 @@ func (pc ProjectConfig) primaryPath() string {
 	return pc.Project
 }
 
+// compileConfigFromBS converts buildSettings to codegen.CompileConfig.
+func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
+	return codegen.CompileConfig{
+		ModuleName:          bs.ModuleName,
+		BuiltProductsDir:    bs.BuiltProductsDir,
+		DeploymentTarget:    bs.DeploymentTarget,
+		SwiftVersion:        bs.SwiftVersion,
+		ExtraIncludePaths:   bs.ExtraIncludePaths,
+		ExtraFrameworkPaths: bs.ExtraFrameworkPaths,
+		ExtraModuleMapFiles: bs.ExtraModuleMapFiles,
+	}
+}
+
+// watchState holds mutable state for the watch loop, protected by a mutex.
+// Immutable configuration (device, loaderPath, etc.) lives in watchContext.
+type watchState struct {
+	mu              sync.Mutex
+	reloadCounter   int
+	previewSelector string
+	previewIndex    int               // current 0-based preview index
+	previewCount    int               // total number of #Preview blocks (0 = unknown)
+	building        bool              // true while rebuildAndRelaunch is running
+	skeletonMap     map[string]string // file path → skeleton hash
+	trackedFiles    []string          // target + 1-level dependency file paths
+}
+
 // watchContext holds immutable configuration for the watch loop.
 // These values are set once during initialization and never modified.
 type watchContext struct {
@@ -80,7 +110,7 @@ type watchContext struct {
 	deviceSetPath string // custom device set path for simctl --set
 	loaderPath    string // path to the compiled loader binary
 	serve         bool   // true when running in serve mode (IDE integration)
-	ew            *EventWriter
+	ew            *protocol.EventWriter
 
 	// Injected runners for testability.
 	build     BuildRunner
@@ -88,12 +118,6 @@ type watchContext struct {
 	app       AppRunner
 	copier    FileCopier
 	sources   SourceLister
-}
-
-// watchEvents groups external event channels for the watch loop.
-type watchEvents struct {
-	idbErr   <-chan error    // idb_companion error channel (nil when not in serve mode)
-	bootDied <-chan struct{} // closed when boot companion process exits unexpectedly
 }
 
 // previewDirs manages temp directories scoped per project path.

@@ -1,4 +1,4 @@
-package preview
+package buildlock
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 func TestBuildLock_LockUnlock(t *testing.T) {
 	dir := t.TempDir()
-	lock := newBuildLock(dir)
+	lock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -27,8 +27,8 @@ func TestBuildLock_LockUnlock(t *testing.T) {
 func TestBuildLock_ExclusiveAccess(t *testing.T) {
 	dir := t.TempDir()
 
-	lock1 := newBuildLock(dir)
-	lock2 := newBuildLock(dir)
+	lock1 := New(dir)
+	lock2 := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -80,8 +80,8 @@ func TestBuildLock_ExclusiveAccess(t *testing.T) {
 func TestBuildLock_ContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 
-	lock1 := newBuildLock(dir)
-	lock2 := newBuildLock(dir)
+	lock1 := New(dir)
+	lock2 := New(dir)
 
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel1()
@@ -107,7 +107,7 @@ func TestBuildLock_ContextCancellation(t *testing.T) {
 
 func TestBuildLock_InvalidDirectory(t *testing.T) {
 	// Lock file under a non-existent, non-creatable path should fail.
-	lock := newBuildLock("/dev/null/impossible")
+	lock := New("/dev/null/impossible")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -131,7 +131,7 @@ func TestBuildLock_ReadOnlyLockFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lock := newBuildLock(dir)
+	lock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -148,7 +148,7 @@ func TestBuildLock_ReadOnlyLockFile(t *testing.T) {
 
 func TestBuildLock_DoubleUnlockIsSafe(t *testing.T) {
 	dir := t.TempDir()
-	lock := newBuildLock(dir)
+	lock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -163,7 +163,7 @@ func TestBuildLock_DoubleUnlockIsSafe(t *testing.T) {
 
 func TestBuildLock_RLockRUnlock(t *testing.T) {
 	dir := t.TempDir()
-	lock := newBuildLock(dir)
+	lock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -177,8 +177,8 @@ func TestBuildLock_RLockRUnlock(t *testing.T) {
 func TestBuildLock_SharedReaders(t *testing.T) {
 	dir := t.TempDir()
 
-	lock1 := newBuildLock(dir)
-	lock2 := newBuildLock(dir)
+	lock1 := New(dir)
+	lock2 := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -198,8 +198,8 @@ func TestBuildLock_SharedReaders(t *testing.T) {
 func TestBuildLock_ExclusiveBlocksShared(t *testing.T) {
 	dir := t.TempDir()
 
-	exLock := newBuildLock(dir)
-	shLock := newBuildLock(dir)
+	exLock := New(dir)
+	shLock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -250,8 +250,8 @@ func TestBuildLock_ExclusiveBlocksShared(t *testing.T) {
 func TestBuildLock_SharedBlocksExclusive(t *testing.T) {
 	dir := t.TempDir()
 
-	shLock := newBuildLock(dir)
-	exLock := newBuildLock(dir)
+	shLock := New(dir)
+	exLock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -302,8 +302,8 @@ func TestBuildLock_SharedBlocksExclusive(t *testing.T) {
 func TestBuildLock_RLockContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 
-	exLock := newBuildLock(dir)
-	shLock := newBuildLock(dir)
+	exLock := New(dir)
+	shLock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -329,7 +329,7 @@ func TestBuildLock_RLockContextCancellation(t *testing.T) {
 
 func TestBuildLock_DoubleRUnlockIsSafe(t *testing.T) {
 	dir := t.TempDir()
-	lock := newBuildLock(dir)
+	lock := New(dir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

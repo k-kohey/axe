@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"bytes"
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
-	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
 // fakeIDBClient implements idb.IDBClient for testing.
@@ -58,10 +57,10 @@ func (f *fakeIDBClient) TouchUp(_ idb.HIDStream, _, _ float64) error   { return 
 func (f *fakeIDBClient) Close() error                                  { return nil }
 
 // fastRetryConfig is used in tests to avoid slow backoff waits.
-var fastRetryConfig = streamRetryConfig{
-	maxRetries:     2,
-	initialBackoff: time.Millisecond,
-	maxBackoff:     time.Millisecond,
+var fastRetryConfig = StreamRetryConfig{
+	MaxRetries:     2,
+	InitialBackoff: time.Millisecond,
+	MaxBackoff:     time.Millisecond,
 }
 
 func TestRelayVideoStream_VideoStreamError(t *testing.T) {
@@ -75,7 +74,7 @@ func TestRelayVideoStream_VideoStreamError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go relayVideoStreamWithConfig(ctx, client, errCh, fastRetryConfig, nil)
+	go RelayVideoStreamWithConfig(ctx, client, errCh, fastRetryConfig, nil)
 
 	select {
 	case err := <-errCh:
@@ -94,7 +93,7 @@ func TestRelayVideoStream_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	relayVideoStream(ctx, client, errCh)
+	RelayVideoStream(ctx, client, errCh)
 
 	select {
 	case err := <-errCh:
@@ -104,14 +103,14 @@ func TestRelayVideoStream_ContextCancelled(t *testing.T) {
 }
 
 func TestRelayVideoStream_StreamCloses(t *testing.T) {
-	// Empty videoFrames = channel closes immediately → triggers retry then error
+	// Empty videoFrames = channel closes immediately -> triggers retry then error
 	client := &fakeIDBClient{videoFrames: nil, screenW: 420, screenH: 912}
 	errCh := make(chan error, 1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	go relayVideoStreamWithConfig(ctx, client, errCh, fastRetryConfig, nil)
+	go RelayVideoStreamWithConfig(ctx, client, errCh, fastRetryConfig, nil)
 
 	select {
 	case err := <-errCh:
@@ -131,7 +130,7 @@ func TestRunVideoStreamLoop_ScreenSizeError(t *testing.T) {
 		screenErr:   fmt.Errorf("describe: rpc error"),
 	}
 
-	err := runVideoStreamLoop(context.Background(), client, nil)
+	err := RunVideoStreamLoop(context.Background(), client, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -175,11 +174,11 @@ func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 
 	var buf bytes.Buffer
 	ew := NewEventWriter(&buf)
-	voc := &videoOutputConfig{
-		ew:       ew,
-		streamID: "test-stream",
-		device:   "iPhone 16 Pro",
-		file:     "HogeView.swift",
+	voc := &VideoOutputConfig{
+		EW:       ew,
+		StreamID: "test-stream",
+		Device:   "iPhone 16 Pro",
+		File:     "HogeView.swift",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -187,7 +186,7 @@ func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 	// Run in a goroutine; cancel context once we have output.
 	done := make(chan error, 1)
 	go func() {
-		done <- runVideoStreamLoop(ctx, client, voc)
+		done <- RunVideoStreamLoop(ctx, client, voc)
 	}()
 
 	// Wait for the frame to be processed.
@@ -207,9 +206,9 @@ func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 	output := strings.TrimSpace(buf.String())
 	lines := strings.Split(output, "\n")
 
-	// Parse as protobuf Event via protojson.
-	event := &pb.Event{}
-	if err := jsonUnmarshalOpts.Unmarshal([]byte(lines[0]), event); err != nil {
+	// Parse as protobuf Event via UnmarshalEvent.
+	event, err := UnmarshalEvent([]byte(lines[0]))
+	if err != nil {
 		t.Fatalf("invalid JSON: %v\nline: %q", err, lines[0])
 	}
 	if event.GetStreamId() != "test-stream" {
@@ -266,14 +265,14 @@ func TestRunVideoStreamLoop_SendFailureStopsLoop(t *testing.T) {
 
 	// EventWriter backed by an always-failing writer.
 	ew := NewEventWriter(errWriter{})
-	voc := &videoOutputConfig{
-		ew:       ew,
-		streamID: "test-stream",
-		device:   "iPhone 16 Pro",
-		file:     "HogeView.swift",
+	voc := &VideoOutputConfig{
+		EW:       ew,
+		StreamID: "test-stream",
+		Device:   "iPhone 16 Pro",
+		File:     "HogeView.swift",
 	}
 
-	err := runVideoStreamLoop(context.Background(), client, voc)
+	err := RunVideoStreamLoop(context.Background(), client, voc)
 	if err == nil {
 		t.Fatal("expected error from Send failure, got nil")
 	}
@@ -294,9 +293,9 @@ func TestEncodeRBGAFrame(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	encoded, err := encodeRBGAFrame(data, w, h, &buf)
+	encoded, err := EncodeRBGAFrame(data, w, h, &buf)
 	if err != nil {
-		t.Fatalf("encodeRBGAFrame failed: %v", err)
+		t.Fatalf("EncodeRBGAFrame failed: %v", err)
 	}
 
 	// Verify base64 decodes to valid JPEG.
@@ -360,9 +359,9 @@ func TestDetectFrameDimensions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w, h := detectFrameDimensions(tt.dataSize, tt.screenW, tt.screenH)
+			w, h := DetectFrameDimensions(tt.dataSize, tt.screenW, tt.screenH)
 			if w != tt.wantW || h != tt.wantH {
-				t.Errorf("detectFrameDimensions(%d, %d, %d) = (%d, %d), want (%d, %d)",
+				t.Errorf("DetectFrameDimensions(%d, %d, %d) = (%d, %d), want (%d, %d)",
 					tt.dataSize, tt.screenW, tt.screenH, w, h, tt.wantW, tt.wantH)
 			}
 		})

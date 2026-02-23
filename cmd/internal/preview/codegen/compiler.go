@@ -1,4 +1,4 @@
-package preview
+package codegen
 
 import (
 	"context"
@@ -6,33 +6,36 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
-// replacementModuleName generates the module name for a thunk dylib, matching
+// ReplacementModuleName generates the module name for a thunk dylib, matching
 // Xcode's convention: {Module}_PreviewReplacement_{FileName}_{N}.
-func replacementModuleName(moduleName, sourceFileName string, counter int) string {
+func ReplacementModuleName(moduleName, sourceFileName string, counter int) string {
 	base := strings.TrimSuffix(filepath.Base(sourceFileName), filepath.Ext(sourceFileName))
 	return fmt.Sprintf("%s_PreviewReplacement_%s_%d", moduleName, base, counter)
 }
 
-func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs previewDirs, reloadCounter int, sourceFileName string, tc ToolchainRunner) (string, error) {
+// CompileThunk compiles a thunk Swift file into a signed dylib.
+func CompileThunk(ctx context.Context, thunkPath string, cfg CompileConfig, thunkDir, buildDir string, reloadCounter int, sourceFileName string, tc ToolchainRunner) (string, error) {
 	sdk, err := tc.SDKPath(ctx, "iphonesimulator")
 	if err != nil {
 		return "", fmt.Errorf("getting simulator SDK path: %w", err)
 	}
-	target := fmt.Sprintf("arm64-apple-ios%s-simulator", bs.DeploymentTarget)
+	target := fmt.Sprintf("arm64-apple-ios%s-simulator", cfg.DeploymentTarget)
 
-	replacementModule := replacementModuleName(bs.ModuleName, sourceFileName, reloadCounter)
+	replacementModule := ReplacementModuleName(cfg.ModuleName, sourceFileName, reloadCounter)
 
-	objPath := filepath.Join(dirs.Thunk, fmt.Sprintf("thunk_%d.o", reloadCounter))
-	dylibPath := filepath.Join(dirs.Thunk, fmt.Sprintf("thunk_%d.dylib", reloadCounter))
+	objPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d.o", reloadCounter))
+	dylibPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d.dylib", reloadCounter))
 
 	// Compile and link under shared lock (reads BuiltProductsDir).
-	if err := compileAndLink(ctx, bs, dirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath, tc); err != nil {
+	if err := compileAndLink(ctx, cfg, buildDir, sdk, target, replacementModule, thunkPath, objPath, dylibPath, tc); err != nil {
 		return "", err
 	}
 
-	// codesign only touches dirs.Thunk — no lock needed.
+	// codesign only touches thunkDir — no lock needed.
 	if err := tc.Codesign(ctx, dylibPath); err != nil {
 		return "", fmt.Errorf("codesigning dylib: %w", err)
 	}
@@ -42,9 +45,9 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 }
 
 // compileAndLink runs swiftc compile (.swift → .o) and link (.o → .dylib)
-// under LOCK_SH to protect against concurrent xcodebuild writes to dirs.Build.
-func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath string, tc ToolchainRunner) error {
-	lock := newBuildLock(dirs.Build)
+// under LOCK_SH to protect against concurrent xcodebuild writes to buildDir.
+func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, target, replacementModule, thunkPath, objPath, dylibPath string, tc ToolchainRunner) error {
+	lock := buildlock.New(buildDir)
 	if err := lock.RLock(ctx); err != nil {
 		return fmt.Errorf("acquiring read lock: %w", err)
 	}
@@ -58,8 +61,8 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		"-sdk", sdk,
 		"-target", target,
 		"-enable-testing",
-		"-I", bs.BuiltProductsDir,
-		"-F", bs.BuiltProductsDir,
+		"-I", cfg.BuiltProductsDir,
+		"-F", cfg.BuiltProductsDir,
 		"-c", thunkPath,
 		"-o", objPath,
 		"-module-name", replacementModule,
@@ -69,18 +72,18 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		"-Xfrontend", "-disable-previous-implementation-calls-in-dynamic-replacements",
 		"-Xfrontend", "-disable-modules-validate-system-headers",
 	}
-	for _, p := range bs.ExtraIncludePaths {
+	for _, p := range cfg.ExtraIncludePaths {
 		compileArgs = append(compileArgs, "-I", p)
 	}
-	for _, p := range bs.ExtraFrameworkPaths {
+	for _, p := range cfg.ExtraFrameworkPaths {
 		compileArgs = append(compileArgs, "-F", p)
 	}
-	for _, p := range bs.ExtraModuleMapFiles {
+	for _, p := range cfg.ExtraModuleMapFiles {
 		compileArgs = append(compileArgs, "-Xcc", "-fmodule-map-file="+p)
 	}
-	if bs.SwiftVersion != "" {
+	if cfg.SwiftVersion != "" {
 		// SWIFT_VERSION may be "6.0" but -swift-version expects "6", "5", "4.2", etc.
-		sv := bs.SwiftVersion
+		sv := cfg.SwiftVersion
 		if strings.HasSuffix(sv, ".0") && sv != "4.0" {
 			sv = strings.TrimSuffix(sv, ".0")
 		}
@@ -97,9 +100,9 @@ func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sd
 		"-emit-library",
 		"-sdk", sdk,
 		"-target", target,
-		"-I", bs.BuiltProductsDir,
-		"-F", bs.BuiltProductsDir,
-		"-L", bs.BuiltProductsDir,
+		"-I", cfg.BuiltProductsDir,
+		"-F", cfg.BuiltProductsDir,
+		"-L", cfg.BuiltProductsDir,
 		"-Xlinker", "-undefined",
 		"-Xlinker", "suppress",
 		"-Xlinker", "-flat_namespace",

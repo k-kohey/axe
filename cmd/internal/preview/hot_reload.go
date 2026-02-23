@@ -1,188 +1,79 @@
 package preview
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"sync"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
+	"github.com/k-kohey/axe/internal/preview/protocol"
+	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
-// watchState holds mutable state for the watch loop, protected by a mutex.
-// Immutable configuration (device, loaderPath, etc.) lives in watchContext.
-type watchState struct {
-	mu              sync.Mutex
-	reloadCounter   int
-	previewSelector string
-	previewIndex    int               // current 0-based preview index
-	previewCount    int               // total number of #Preview blocks (0 = unknown)
-	building        bool              // true while rebuildAndRelaunch is running
-	skeletonMap     map[string]string // file path → skeleton hash
-	trackedFiles    []string          // target + 1-level dependency file paths
-}
-
+// runWatcher sets up file watching and command dispatching, then delegates
+// to the unified event loop. It uses SharedWatcher for file change detection
+// and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	bs *buildSettings, dirs previewDirs, wctx watchContext,
-	ws *watchState, hid *hidHandler, events watchEvents) error {
-	watcher, err := fsnotify.NewWatcher()
+	ws *watchState, hid *protocol.HIDHandler,
+	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
+
+	// Set up shared file watcher.
+	watchRoot := filepath.Dir(pc.primaryPath())
+	sw, err := watch.NewSharedWatcher(ctx, watchRoot, wctx.sources)
 	if err != nil {
 		return fmt.Errorf("creating file watcher: %w", err)
 	}
-	defer func() { _ = watcher.Close() }()
-
-	// Watch directories containing Swift source files.
-	// Use git to discover them (fast, respects .gitignore), falling back to WalkDir.
-	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := wctx.sources.SwiftDirs(ctx, watchRoot)
-	if err != nil {
-		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
-		watchDirs, err = walkSwiftDirs(watchRoot)
-		if err != nil {
-			return fmt.Errorf("setting up directory watch: %w", err)
-		}
-	}
-	for _, d := range watchDirs {
-		if err := watcher.Add(d); err != nil {
-			slog.Debug("Cannot watch directory", "path", d, "err", err)
-		}
-	}
+	defer sw.Close()
 
 	fmt.Fprintf(os.Stderr, "Watching %s for changes (Enter to cycle previews, Ctrl+C to stop)...\n", watchRoot)
 
-	// Read commands from stdin (preview cycling or file switching in serve mode).
-	// In serve mode, new Command protocol is used. In non-serve mode, legacy stdinCommand.
-	cmdCh := make(chan stdinCommand, 1)
-	protoCmdCh := make(chan *pb.Command, 1)
+	// Create typed channels for the event loop.
+	fileChangeCh := make(chan string, 1)
+	switchFileCh := make(chan string, 1)
+	nextPreviewCh := make(chan struct{}, 1)
+	inputCh := make(chan *pb.Input, 1)
+
+	// Register as a listener on the shared watcher.
+	const singleStreamID = "single"
+	sw.AddListener(singleStreamID, fileChangeCh)
+
+	// Dispatch stdin commands to typed channels.
 	if wctx.serve {
+		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
 	} else {
+		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
+		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
 	}
 
-	db := newDebouncer()
-	defer db.stop()
-
-	// Build a set of tracked file paths for efficient lookup.
-	ws.mu.Lock()
-	trackedFiles := ws.trackedFiles
-	ws.mu.Unlock()
-	trackedSet := buildTrackedSet(trackedFiles)
-
-	for {
-		select {
-		case <-ctx.Done():
+	cfg := &eventLoopConfig{
+		sourceFile:    sourceFile,
+		pc:            pc,
+		bs:            bs,
+		dirs:          dirs,
+		wctx:          wctx,
+		ws:            ws,
+		hid:           hid,
+		fileChangeCh:  fileChangeCh,
+		switchFileCh:  switchFileCh,
+		nextPreviewCh: nextPreviewCh,
+		inputCh:       inputCh,
+		idbErrCh:      idbErrCh,
+		bootDiedCh:    bootDiedCh,
+		onCancel: func() {
 			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
-			return nil // cleanup handled by defer in Run
-
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return nil
-			}
-
-			// Only react to .swift files
-			if !strings.HasSuffix(event.Name, ".swift") {
-				continue
-			}
-
-			// Accept Write and Create (atomic save = rename creates new file)
-			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
-				continue
-			}
-
-			db.handleFileChange(filepath.Clean(event.Name), trackedSet)
-
-		case changedFile := <-db.TrackedCh:
-			ws.mu.Lock()
-			prev := ws.skeletonMap[changedFile]
-			ws.mu.Unlock()
-
-			strategy, newSkeleton := classifyChange(changedFile, prev)
-
-			switch strategy {
-			case strategyHotReload:
-				ws.mu.Lock()
-				ws.skeletonMap[changedFile] = newSkeleton
-				ws.mu.Unlock()
-				if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
-				}
-			case strategyRebuild:
-				if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
-				}
-				// Recompute skeletons for all tracked files after rebuild.
-				ws.mu.Lock()
-				for _, tf := range ws.trackedFiles {
-					if s, _ := parsing.Skeleton(tf); s != "" {
-						ws.skeletonMap[filepath.Clean(tf)] = s
-					}
-				}
-				ws.mu.Unlock()
-			}
-
-		case <-db.DepCh:
-			db.clearDepTimer()
-			if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
-				fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
-			}
-
-		case cmd := <-cmdCh:
-			switch cmd.Type {
-			case "switchFile":
-				if cmd.Path == "" {
-					continue
-				}
-				sourceFile, trackedSet = handleSwitchFileCmd(ctx, cmd.Path, sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
-			case "nextPreview":
-				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
-			case "tap", "swipe", "text", "touchDown", "touchMove", "touchUp":
-				hid.Handle(ctx, cmd)
-			}
-
-		case protoCmd, ok := <-protoCmdCh:
-			if !ok {
-				protoCmdCh = nil // channel closed (EOF) → disable this case
-				continue
-			}
-			switch {
-			case protoCmd.GetSwitchFile() != nil:
-				if protoCmd.GetSwitchFile().GetFile() == "" {
-					continue
-				}
-				sourceFile, trackedSet = handleSwitchFileCmd(ctx, protoCmd.GetSwitchFile().GetFile(), sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
-			case protoCmd.GetNextPreview() != nil:
-				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
-			case protoCmd.GetInput() != nil:
-				hid.HandleInput(ctx, protoCmd.GetInput())
-			default:
-				slog.Warn("Ignoring unhandled command in single-stream mode", "streamId", protoCmd.GetStreamId())
-			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return nil
-			}
-			slog.Warn("Watcher error", "err", err)
-
-		case err, ok := <-events.idbErr:
-			if ok && err != nil {
-				return fmt.Errorf("idb_companion error: %w", err)
-			}
-
-		case <-events.bootDied:
-			return fmt.Errorf("simulator crashed unexpectedly (boot companion process exited)")
-		}
+		},
 	}
+
+	return runEventLoop(ctx, cfg)
 }
 
 // reloadMultiFile generates a combined thunk for all tracked files and hot-reloads.
@@ -271,12 +162,13 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, "0", newSourceFile)
+	cfg := compileConfigFromBS(bs)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -287,7 +179,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
+		dylibPath, err = codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -371,12 +263,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, selector, sourceFile)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, selector, sourceFile)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -429,90 +321,6 @@ func classifyChange(sourceFile string, prevSkeleton string) (reloadStrategy, str
 	return strategyRebuild, newSkeleton
 }
 
-// stdinCommand represents a command received from stdin (JSON Lines protocol).
-type stdinCommand struct {
-	Type     string  `json:"type"`
-	Path     string  `json:"path,omitempty"`
-	X        float64 `json:"x,omitempty"`
-	Y        float64 `json:"y,omitempty"`
-	StartX   float64 `json:"startX,omitempty"`
-	StartY   float64 `json:"startY,omitempty"`
-	EndX     float64 `json:"endX,omitempty"`
-	EndY     float64 `json:"endY,omitempty"`
-	Duration float64 `json:"duration,omitempty"`
-	Value    string  `json:"value,omitempty"`
-}
-
-// readStdinCommands reads JSON Lines from stdin and sends commands on ch.
-// In serve mode, JSON objects are parsed; non-JSON lines are treated as legacy
-// file path commands for backwards compatibility.
-// In non-serve mode, any input triggers a preview cycle.
-func readStdinCommands(ch chan<- stdinCommand, serve bool) {
-	scanner := bufio.NewScanner(os.Stdin)
-	// Increase buffer size for potentially large JSON lines.
-	scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		var cmd stdinCommand
-
-		if serve && line != "" {
-			// Try JSON parse first.
-			if err := json.Unmarshal([]byte(line), &cmd); err != nil {
-				// Legacy: treat non-JSON as file path.
-				cmd = stdinCommand{Type: "switchFile", Path: line}
-			}
-		} else {
-			// Empty line or any input in non-serve mode → preview cycle.
-			cmd = stdinCommand{Type: "nextPreview"}
-		}
-
-		select {
-		case ch <- cmd:
-		default: // don't block if previous command hasn't been processed
-		}
-	}
-}
-
-// readProtocolCommands reads JSON Lines from stdin and parses them as Command structs.
-// Invalid JSON lines are logged and skipped. EOF causes the channel to close.
-func readProtocolCommands(ctx context.Context, ew *EventWriter, ch chan<- *pb.Command) {
-	readCommands(ctx, os.Stdin, ew, func(cmd *pb.Command) {
-		select {
-		case ch <- cmd:
-		default:
-		}
-	})
-	close(ch)
-}
-
-// walkSwiftDirs is the fallback for non-git projects. It walks the directory tree
-// skipping hidden directories and common dependency/build artifact directories.
-func walkSwiftDirs(root string) ([]string, error) {
-	seen := make(map[string]bool)
-	var dirs []string
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || name == "build" || name == "DerivedData" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(d.Name(), ".swift") {
-			dir := filepath.Dir(path)
-			if !seen[dir] {
-				seen[dir] = true
-				dirs = append(dirs, dir)
-			}
-		}
-		return nil
-	})
-	return dirs, err
-}
-
 // handleSwitchFileCmd handles a file switch command from either legacy stdin or
 // the protocol. On success it returns the new sourceFile and updated trackedSet.
 // On error it logs and returns the original values unchanged.
@@ -520,6 +328,9 @@ func handleSwitchFileCmd(
 	ctx context.Context, newFile, sourceFile string, trackedSet map[string]bool,
 	pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
 ) (string, map[string]bool) {
+	if newFile == "" {
+		return sourceFile, trackedSet
+	}
 	fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", newFile)
 	if err := switchFile(ctx, newFile, pc, bs, dirs, wctx, ws); err != nil {
 		fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)

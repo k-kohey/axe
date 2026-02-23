@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
 func TestEnsureBuildSettings_LazyInit(t *testing.T) {
@@ -16,7 +18,7 @@ func TestEnsureBuildSettings_LazyInit(t *testing.T) {
     IPHONEOS_DEPLOYMENT_TARGET = 17.0
 `
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 
@@ -44,7 +46,7 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 		output:    []byte(output),
 		callCount: &callCount,
 	}
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 
@@ -82,7 +84,7 @@ func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
 		output:    []byte(output),
 		callCount: &callCount,
 	}
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 
@@ -129,7 +131,7 @@ func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
 	br := &fakeBuildRunner{
 		fetchErr: errors.New("xcodebuild not found"),
 	}
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 
@@ -146,7 +148,7 @@ func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
 func TestEnsureCompilerPathsExtracted_OnlyOnce(t *testing.T) {
 	t.Parallel()
 
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 
@@ -170,7 +172,7 @@ func TestEnsureCompilerPathsExtracted_OnlyOnce(t *testing.T) {
 func TestEnsureCompilerPathsExtracted_ConcurrentSafety(t *testing.T) {
 	t.Parallel()
 
-	sm := NewStreamManager(newFakeDevicePool(), NewEventWriter(&syncBuffer{}),
+	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
 

@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ func TestReadCommands_ValidCommands(t *testing.T) {
 {"streamId":"b","removeStream":{}}
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
+	ReadCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -37,7 +37,7 @@ func TestReadCommands_SkipsEmptyLines(t *testing.T) {
 
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
+	ReadCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -52,7 +52,7 @@ func TestReadCommands_SkipsInvalidJSON(t *testing.T) {
 {bad json}
 `
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
+	ReadCommands(context.Background(), strings.NewReader(input), nil, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -76,7 +76,7 @@ func TestReadCommands_RespectsContextCancellation(t *testing.T) {
 	// Start the reader goroutine first.
 	go func() {
 		defer close(done)
-		readCommands(ctx, pr, nil, func(cmd *pb.Command) {
+		ReadCommands(ctx, pr, nil, func(cmd *pb.Command) {
 			received = append(received, cmd)
 		})
 	}()
@@ -94,7 +94,7 @@ func TestReadCommands_RespectsContextCancellation(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("readCommands did not return after context cancellation")
+		t.Fatal("ReadCommands did not return after context cancellation")
 	}
 
 	if len(received) != 1 {
@@ -111,7 +111,7 @@ func TestReadCommands_SendsProtocolErrorOnInvalidJSON(t *testing.T) {
 	ew := NewEventWriter(&buf)
 
 	var received []*pb.Command
-	readCommands(context.Background(), strings.NewReader(input), ew, func(cmd *pb.Command) {
+	ReadCommands(context.Background(), strings.NewReader(input), ew, func(cmd *pb.Command) {
 		received = append(received, cmd)
 	})
 
@@ -120,7 +120,7 @@ func TestReadCommands_SendsProtocolErrorOnInvalidJSON(t *testing.T) {
 		t.Fatalf("expected 1 valid command, got %d", len(received))
 	}
 
-	// Two invalid lines → two ProtocolError events should be written.
+	// Two invalid lines -> two ProtocolError events should be written.
 	output := strings.TrimSpace(buf.String())
 	lines := strings.Split(output, "\n")
 	if len(lines) != 2 {
@@ -128,8 +128,8 @@ func TestReadCommands_SendsProtocolErrorOnInvalidJSON(t *testing.T) {
 	}
 
 	for i, line := range lines {
-		event := &pb.Event{}
-		if err := jsonUnmarshalOpts.Unmarshal([]byte(line), event); err != nil {
+		event, err := UnmarshalEvent([]byte(line))
+		if err != nil {
 			t.Fatalf("line %d: invalid JSON: %v", i, err)
 		}
 		pe := event.GetProtocolError()
