@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { runInstallScript } from "./installScript";
 
 /** Minimum CLI version this extension supports. Replaced by CI at release time. */
-export const MIN_CLI_VERSION = "0.0.0";
+export const MIN_CLI_VERSION: string = "0.0.0";
 
 const VERSION_QUERY_TIMEOUT_MS = 5_000;
 
