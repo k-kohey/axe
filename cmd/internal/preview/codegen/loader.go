@@ -1,4 +1,4 @@
-package preview
+package codegen
 
 import (
 	"bufio"
@@ -28,23 +28,23 @@ import (
 //go:embed loader_source/loader.m
 var loaderSource string
 
-// loaderCacheKey computes a SHA256 cache key from the loader source,
+// LoaderCacheKey computes a SHA256 cache key from the loader source,
 // SDK path, and deployment target. This ensures the cached dylib is
 // invalidated when any of these change (e.g. Xcode update).
-func loaderCacheKey(source, sdk, deploymentTarget string) string {
+func LoaderCacheKey(source, sdk, deploymentTarget string) string {
 	hashInput := source + "\x00" + sdk + "\x00" + deploymentTarget
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
 }
 
-// compileLoader compiles the Obj-C loader dylib for the simulator.
+// CompileLoader compiles the Obj-C loader dylib for the simulator.
 // The result is cached: recompilation is skipped if the source hash matches.
-func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget string, tc ToolchainRunner) (string, error) {
-	if err := os.MkdirAll(dirs.Loader, 0o755); err != nil {
+func CompileLoader(ctx context.Context, loaderDir, deploymentTarget string, tc ToolchainRunner) (string, error) {
+	if err := os.MkdirAll(loaderDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating loader dir: %w", err)
 	}
 
-	dylibPath := filepath.Join(dirs.Loader, "axe-preview-loader.dylib")
-	hashPath := filepath.Join(dirs.Loader, "loader.sha256")
+	dylibPath := filepath.Join(loaderDir, "axe-preview-loader.dylib")
+	hashPath := filepath.Join(loaderDir, "loader.sha256")
 
 	// SDK path is needed both for cache key and compilation
 	sdk, err := tc.SDKPath(ctx, "iphonesimulator")
@@ -53,7 +53,7 @@ func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget strin
 	}
 
 	// Check if source hash matches the cached build
-	currentHash := loaderCacheKey(loaderSource, sdk, deploymentTarget)
+	currentHash := LoaderCacheKey(loaderSource, sdk, deploymentTarget)
 	if _, err := os.Stat(dylibPath); err == nil {
 		if cached, err := os.ReadFile(hashPath); err == nil && string(cached) == currentHash {
 			slog.Debug("Loader dylib cached, skipping compile", "path", dylibPath)
@@ -61,7 +61,7 @@ func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget strin
 		}
 	}
 
-	srcPath := filepath.Join(dirs.Loader, "loader.m")
+	srcPath := filepath.Join(loaderDir, "loader.m")
 	if err := os.WriteFile(srcPath, []byte(loaderSource), 0o600); err != nil {
 		return "", fmt.Errorf("writing loader source: %w", err)
 	}
@@ -97,10 +97,10 @@ func compileLoader(ctx context.Context, dirs previewDirs, deploymentTarget strin
 	return dylibPath, nil
 }
 
-// sendReloadCommand connects to the loader's Unix domain socket and sends
+// SendReloadCommand connects to the loader's Unix domain socket and sends
 // a dylib path for hot-reload. It retries with exponential backoff if the
 // socket is not yet ready.
-func sendReloadCommand(socketPath, dylibPath string) error {
+func SendReloadCommand(socketPath, dylibPath string) error {
 	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
 
 	var conn net.Conn

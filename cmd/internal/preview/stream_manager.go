@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
@@ -441,13 +442,13 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	// 9. Generate thunk and compile.
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, s.dirs, "0", s.file)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, s.dirs.Thunk, "0", s.file)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, s.dirs, 0, s.file, sm.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
@@ -462,7 +463,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		return
 	}
 
-	loaderPath, err := compileLoader(ctx, s.dirs, bs.DeploymentTarget, sm.toolchain)
+	loaderPath, err := codegen.CompileLoader(ctx, s.dirs.Loader, bs.DeploymentTarget, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return

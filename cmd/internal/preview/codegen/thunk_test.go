@@ -1,4 +1,4 @@
-package preview
+package codegen
 
 import (
 	"os"
@@ -22,9 +22,9 @@ func TestReplacementModuleName(t *testing.T) {
 		{"App", "Views/HogeView.swift", 1, "App_PreviewReplacement_HogeView_1"},
 	}
 	for _, tt := range tests {
-		got := replacementModuleName(tt.moduleName, tt.sourceFileName, tt.counter)
+		got := ReplacementModuleName(tt.moduleName, tt.sourceFileName, tt.counter)
 		if got != tt.want {
-			t.Errorf("replacementModuleName(%q, %q, %d) = %q, want %q",
+			t.Errorf("ReplacementModuleName(%q, %q, %d) = %q, want %q",
 				tt.moduleName, tt.sourceFileName, tt.counter, got, tt.want)
 		}
 	}
@@ -228,13 +228,7 @@ func TestFilterPrivateCollisions_FileprivateCollision(t *testing.T) {
 
 func TestGenerateCombinedThunk_MultiFile(t *testing.T) {
 	dir := t.TempDir()
-	dirs := previewDirs{
-		Root:   dir,
-		Build:  filepath.Join(dir, "build"),
-		Thunk:  filepath.Join(dir, "thunk"),
-		Loader: filepath.Join(dir, "loader"),
-		Socket: filepath.Join(dir, "loader.sock"),
-	}
+	thunkDir := filepath.Join(dir, "thunk")
 
 	// Create target source file with #Preview
 	targetContent := `import SwiftUI
@@ -299,7 +293,7 @@ struct FugaView: View {
 		},
 	}
 
-	thunkPath, err := generateCombinedThunk(files, "MyApp", dirs, "", targetPath)
+	thunkPath, err := GenerateCombinedThunk(files, "MyApp", thunkDir, "", targetPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,13 +342,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	generate := func(t *testing.T, srcFileName, srcContent string, ftd parsing.FileThunkData, moduleName string) string {
 		t.Helper()
 		dir := t.TempDir()
-		dirs := previewDirs{
-			Root:   dir,
-			Build:  filepath.Join(dir, "build"),
-			Thunk:  filepath.Join(dir, "thunk"),
-			Loader: filepath.Join(dir, "loader"),
-			Socket: filepath.Join(dir, "loader.sock"),
-		}
+		thunkDir := filepath.Join(dir, "thunk")
 
 		srcPath := filepath.Join(dir, srcFileName)
 		if err := os.MkdirAll(filepath.Dir(srcPath), 0o755); err != nil {
@@ -367,7 +355,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 		ftd.AbsPath = srcPath
 		files := []parsing.FileThunkData{ftd}
 
-		thunkPath, err := generateCombinedThunk(files, moduleName, dirs, "", srcPath)
+		thunkPath, err := GenerateCombinedThunk(files, moduleName, thunkDir, "", srcPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -419,13 +407,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 
 	t.Run("PathEscaping", func(t *testing.T) {
 		dir := t.TempDir()
-		dirs := previewDirs{
-			Root:   dir,
-			Build:  filepath.Join(dir, "build"),
-			Thunk:  filepath.Join(dir, "thunk"),
-			Loader: filepath.Join(dir, "loader"),
-			Socket: filepath.Join(dir, "loader.sock"),
-		}
+		thunkDir := filepath.Join(dir, "thunk")
 
 		weirdDir := filepath.Join(dir, `path with "quotes"`)
 		if err := os.MkdirAll(weirdDir, 0o755); err != nil {
@@ -453,7 +435,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			},
 		}
 
-		thunkPath, err := generateCombinedThunk(files, "MyApp", dirs, "", srcPath)
+		thunkPath, err := GenerateCombinedThunk(files, "MyApp", thunkDir, "", srcPath)
 		if err != nil {
 			t.Fatal(err)
 		}

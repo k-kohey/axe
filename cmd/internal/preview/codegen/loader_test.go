@@ -1,4 +1,4 @@
-package preview
+package codegen
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 )
 
 func TestLoaderCacheKey_IncludesAllInputs(t *testing.T) {
-	base := loaderCacheKey("source", "/sdk/path", "17.0")
+	base := LoaderCacheKey("source", "/sdk/path", "17.0")
 
 	// Same inputs must produce the same key
-	if got := loaderCacheKey("source", "/sdk/path", "17.0"); got != base {
+	if got := LoaderCacheKey("source", "/sdk/path", "17.0"); got != base {
 		t.Errorf("same inputs produced different keys: %s vs %s", got, base)
 	}
 
@@ -29,7 +29,7 @@ func TestLoaderCacheKey_IncludesAllInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := loaderCacheKey(tt.source, tt.sdk, tt.dep); got == base {
+			if got := LoaderCacheKey(tt.source, tt.sdk, tt.dep); got == base {
 				t.Errorf("expected different key for %s, got same: %s", tt.name, got)
 			}
 		})
@@ -39,15 +39,15 @@ func TestLoaderCacheKey_IncludesAllInputs(t *testing.T) {
 func TestLoaderCacheKey_NoDelimiterCollision(t *testing.T) {
 	// Fields that share a boundary must not collide.
 	// e.g. shifting content across the delimiter boundary must produce a different key.
-	a := loaderCacheKey("src", "/sdk/path", "17.0")
-	b := loaderCacheKey("src\x00/sdk", "path", "17.0")
+	a := LoaderCacheKey("src", "/sdk/path", "17.0")
+	b := LoaderCacheKey("src\x00/sdk", "path", "17.0")
 	if a == b {
 		t.Error("delimiter collision: different field boundaries produced the same key")
 	}
 }
 
 func TestLoaderCacheKey_Format(t *testing.T) {
-	key := loaderCacheKey("src", "/sdk", "17.0")
+	key := LoaderCacheKey("src", "/sdk", "17.0")
 	// SHA256 hex digest is 64 characters
 	if len(key) != 64 {
 		t.Errorf("expected 64-char hex digest, got %d chars: %s", len(key), key)
@@ -80,9 +80,9 @@ func TestSendReloadCommand_OK(t *testing.T) {
 		_, _ = conn.Write([]byte("OK\n"))
 	}()
 
-	err = sendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err = SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
 	if err != nil {
-		t.Fatalf("sendReloadCommand returned error: %v", err)
+		t.Fatalf("SendReloadCommand returned error: %v", err)
 	}
 
 	<-done
@@ -112,7 +112,7 @@ func TestSendReloadCommand_Error(t *testing.T) {
 		_, _ = conn.Write([]byte("ERR:dlopen failed: symbol not found\n"))
 	}()
 
-	err = sendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err = SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
 	if err == nil {
 		t.Fatal("expected error for ERR response")
 	}
@@ -128,17 +128,15 @@ func TestSendReloadCommand_NoSocket(t *testing.T) {
 	// Remove socket file to make sure it doesn't exist
 	_ = os.Remove(sockPath)
 
-	err := sendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err := SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
 	if err == nil {
 		t.Fatal("expected error when socket does not exist")
 	}
 }
 
-// --- compileLoader DI tests ---
+// --- CompileLoader DI tests ---
 
-// fakeToolchainRunnerForLoader is a minimal fake for loader tests.
-// It reuses fakeToolchainRunner from compiler_test.go via the same
-// interface, but we define a separate helper to keep loader tests self-contained.
+// fakeLoaderToolchain is a minimal fake for loader tests.
 type fakeLoaderToolchain struct {
 	sdkPathResult string
 	sdkPathErr    error
@@ -176,10 +174,9 @@ func TestCompileLoader_Success(t *testing.T) {
 	t.Parallel()
 
 	loaderDir := filepath.Join(t.TempDir(), "loader")
-	dirs := previewDirs{Loader: loaderDir}
 	tc := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator"}
 
-	dylibPath, err := compileLoader(context.Background(), dirs, "17.0", tc)
+	dylibPath, err := CompileLoader(context.Background(), loaderDir, "17.0", tc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,11 +214,10 @@ func TestCompileLoader_CacheHit(t *testing.T) {
 	t.Parallel()
 
 	loaderDir := filepath.Join(t.TempDir(), "loader")
-	dirs := previewDirs{Loader: loaderDir}
 	tc := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator"}
 
 	// First call: compiles.
-	dylibPath1, err := compileLoader(context.Background(), dirs, "17.0", tc)
+	dylibPath1, err := CompileLoader(context.Background(), loaderDir, "17.0", tc)
 	if err != nil {
 		t.Fatalf("first compile error: %v", err)
 	}
@@ -233,7 +229,7 @@ func TestCompileLoader_CacheHit(t *testing.T) {
 
 	// Second call with a fresh toolchain: should skip compilation due to cache.
 	tc2 := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator"}
-	dylibPath2, err := compileLoader(context.Background(), dirs, "17.0", tc2)
+	dylibPath2, err := CompileLoader(context.Background(), loaderDir, "17.0", tc2)
 	if err != nil {
 		t.Fatalf("second compile error: %v", err)
 	}
@@ -252,11 +248,10 @@ func TestCompileLoader_CacheMiss_DifferentTarget(t *testing.T) {
 	t.Parallel()
 
 	loaderDir := filepath.Join(t.TempDir(), "loader")
-	dirs := previewDirs{Loader: loaderDir}
 	tc := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator"}
 
 	// First compile with deployment target 17.0.
-	dylibPath, err := compileLoader(context.Background(), dirs, "17.0", tc)
+	dylibPath, err := CompileLoader(context.Background(), loaderDir, "17.0", tc)
 	if err != nil {
 		t.Fatalf("first compile error: %v", err)
 	}
@@ -268,7 +263,7 @@ func TestCompileLoader_CacheMiss_DifferentTarget(t *testing.T) {
 
 	// Second compile with different deployment target should recompile.
 	tc2 := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator"}
-	_, err = compileLoader(context.Background(), dirs, "18.0", tc2)
+	_, err = CompileLoader(context.Background(), loaderDir, "18.0", tc2)
 	if err != nil {
 		t.Fatalf("second compile error: %v", err)
 	}
@@ -284,11 +279,10 @@ func TestCompileLoader_CacheMiss_DifferentSDK(t *testing.T) {
 	t.Parallel()
 
 	loaderDir := filepath.Join(t.TempDir(), "loader")
-	dirs := previewDirs{Loader: loaderDir}
 	tc := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator15"}
 
 	// First compile.
-	dylibPath, err := compileLoader(context.Background(), dirs, "17.0", tc)
+	dylibPath, err := CompileLoader(context.Background(), loaderDir, "17.0", tc)
 	if err != nil {
 		t.Fatalf("first compile error: %v", err)
 	}
@@ -300,7 +294,7 @@ func TestCompileLoader_CacheMiss_DifferentSDK(t *testing.T) {
 
 	// Second compile with different SDK path should recompile.
 	tc2 := &fakeLoaderToolchain{sdkPathResult: "/sdk/iphonesimulator16"}
-	_, err = compileLoader(context.Background(), dirs, "17.0", tc2)
+	_, err = CompileLoader(context.Background(), loaderDir, "17.0", tc2)
 	if err != nil {
 		t.Fatalf("second compile error: %v", err)
 	}
@@ -349,9 +343,8 @@ func TestCompileLoader_ErrorPropagation(t *testing.T) {
 			t.Parallel()
 
 			loaderDir := filepath.Join(t.TempDir(), "loader")
-			dirs := previewDirs{Loader: loaderDir}
 
-			_, err := compileLoader(context.Background(), dirs, "17.0", tt.tc)
+			_, err := CompileLoader(context.Background(), loaderDir, "17.0", tt.tc)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}

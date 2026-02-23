@@ -9,6 +9,56 @@ import (
 	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
+// --- Fake ToolchainRunner (for parent tests that need nop toolchain) ---
+
+type fakeToolchainRunner struct {
+	sdkPathResult string
+	sdkPathErr    error
+
+	compileSwiftErr error
+	linkDylibErr    error
+	compileCErr     error
+	codesignErr     error
+
+	compileSwiftArgs []string
+	linkDylibArgs    []string
+	compileCArgs     []string
+	codesignPath     string
+	callOrder        []string
+}
+
+func (f *fakeToolchainRunner) SDKPath(_ context.Context, _ string) (string, error) {
+	f.callOrder = append(f.callOrder, "SDKPath")
+	if f.sdkPathErr != nil {
+		return "", f.sdkPathErr
+	}
+	return f.sdkPathResult, nil
+}
+
+func (f *fakeToolchainRunner) CompileSwift(_ context.Context, args []string) ([]byte, error) {
+	f.callOrder = append(f.callOrder, "CompileSwift")
+	f.compileSwiftArgs = args
+	return nil, f.compileSwiftErr
+}
+
+func (f *fakeToolchainRunner) LinkDylib(_ context.Context, args []string) ([]byte, error) {
+	f.callOrder = append(f.callOrder, "LinkDylib")
+	f.linkDylibArgs = args
+	return nil, f.linkDylibErr
+}
+
+func (f *fakeToolchainRunner) CompileC(_ context.Context, args []string) ([]byte, error) {
+	f.callOrder = append(f.callOrder, "CompileC")
+	f.compileCArgs = args
+	return nil, f.compileCErr
+}
+
+func (f *fakeToolchainRunner) Codesign(_ context.Context, path string) error {
+	f.callOrder = append(f.callOrder, "Codesign")
+	f.codesignPath = path
+	return f.codesignErr
+}
+
 func TestParseTrackedFiles_SourceAndDependency(t *testing.T) {
 	dir := t.TempDir()
 

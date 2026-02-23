@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
@@ -73,6 +74,19 @@ func (pc ProjectConfig) primaryPath() string {
 		return pc.Workspace
 	}
 	return pc.Project
+}
+
+// compileConfigFromBS converts buildSettings to codegen.CompileConfig.
+func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
+	return codegen.CompileConfig{
+		ModuleName:          bs.ModuleName,
+		BuiltProductsDir:    bs.BuiltProductsDir,
+		DeploymentTarget:    bs.DeploymentTarget,
+		SwiftVersion:        bs.SwiftVersion,
+		ExtraIncludePaths:   bs.ExtraIncludePaths,
+		ExtraFrameworkPaths: bs.ExtraFrameworkPaths,
+		ExtraModuleMapFiles: bs.ExtraModuleMapFiles,
+	}
 }
 
 // watchContext holds immutable configuration for the watch loop.

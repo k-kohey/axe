@@ -1,4 +1,4 @@
-package preview
+package codegen
 
 import (
 	"context"
@@ -61,28 +61,26 @@ func (f *fakeToolchainRunner) Codesign(_ context.Context, path string) error {
 	return f.codesignErr
 }
 
-// --- compileThunk tests ---
+// --- CompileThunk tests ---
 
 func TestCompileThunk_FullFlow(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
 	tc := &fakeToolchainRunner{sdkPathResult: "/sdk/iphonesimulator"}
-	bs := &buildSettings{
+	cfg := CompileConfig{
 		ModuleName:       "TestModule",
 		BuiltProductsDir: filepath.Join(tmpDir, "products"),
 		DeploymentTarget: "17.0",
 		SwiftVersion:     "5.0",
 	}
-	dirs := previewDirs{
-		Build: tmpDir,
-		Thunk: filepath.Join(tmpDir, "thunk"),
-	}
+	thunkDir := filepath.Join(tmpDir, "thunk")
+	buildDir := tmpDir
 
-	dylibPath, err := compileThunk(
+	dylibPath, err := CompileThunk(
 		context.Background(),
 		filepath.Join(tmpDir, "thunk.swift"),
-		bs, dirs, 0, "HogeView.swift",
+		cfg, thunkDir, buildDir, 0, "HogeView.swift",
 		tc,
 	)
 	if err != nil {
@@ -116,7 +114,7 @@ func TestCompileThunk_CompileSwiftArgs(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	tc := &fakeToolchainRunner{sdkPathResult: "/sdk/iphonesimulator"}
-	bs := &buildSettings{
+	cfg := CompileConfig{
 		ModuleName:          "TestModule",
 		BuiltProductsDir:    filepath.Join(tmpDir, "products"),
 		DeploymentTarget:    "17.0",
@@ -125,15 +123,13 @@ func TestCompileThunk_CompileSwiftArgs(t *testing.T) {
 		ExtraFrameworkPaths: []string{"/extra/framework"},
 		ExtraModuleMapFiles: []string{"/extra/module.modulemap"},
 	}
-	dirs := previewDirs{
-		Build: tmpDir,
-		Thunk: filepath.Join(tmpDir, "thunk"),
-	}
+	thunkDir := filepath.Join(tmpDir, "thunk")
+	buildDir := tmpDir
 
-	_, err := compileThunk(
+	_, err := CompileThunk(
 		context.Background(),
 		filepath.Join(tmpDir, "thunk.swift"),
-		bs, dirs, 3, "HogeView.swift",
+		cfg, thunkDir, buildDir, 3, "HogeView.swift",
 		tc,
 	)
 	if err != nil {
@@ -195,21 +191,19 @@ func TestCompileThunk_SwiftVersionTrimming(t *testing.T) {
 
 			tmpDir := t.TempDir()
 			tc := &fakeToolchainRunner{sdkPathResult: "/sdk/iphonesimulator"}
-			bs := &buildSettings{
+			cfg := CompileConfig{
 				ModuleName:       "TestModule",
 				BuiltProductsDir: filepath.Join(tmpDir, "products"),
 				DeploymentTarget: "17.0",
 				SwiftVersion:     tt.swiftVer,
 			}
-			dirs := previewDirs{
-				Build: tmpDir,
-				Thunk: filepath.Join(tmpDir, "thunk"),
-			}
+			thunkDir := filepath.Join(tmpDir, "thunk")
+			buildDir := tmpDir
 
-			_, err := compileThunk(
+			_, err := CompileThunk(
 				context.Background(),
 				filepath.Join(tmpDir, "thunk.swift"),
-				bs, dirs, 0, "HogeView.swift",
+				cfg, thunkDir, buildDir, 0, "HogeView.swift",
 				tc,
 			)
 			if err != nil {
@@ -282,20 +276,18 @@ func TestCompileThunk_ErrorPropagation(t *testing.T) {
 			t.Parallel()
 
 			tmpDir := t.TempDir()
-			bs := &buildSettings{
+			cfg := CompileConfig{
 				ModuleName:       "TestModule",
 				BuiltProductsDir: filepath.Join(tmpDir, "products"),
 				DeploymentTarget: "17.0",
 			}
-			dirs := previewDirs{
-				Build: tmpDir,
-				Thunk: filepath.Join(tmpDir, "thunk"),
-			}
+			thunkDir := filepath.Join(tmpDir, "thunk")
+			buildDir := tmpDir
 
-			_, err := compileThunk(
+			_, err := CompileThunk(
 				context.Background(),
 				filepath.Join(tmpDir, "thunk.swift"),
-				bs, dirs, 0, "HogeView.swift",
+				cfg, thunkDir, buildDir, 0, "HogeView.swift",
 				tt.tc,
 			)
 			if err == nil {
@@ -317,20 +309,18 @@ func TestCompileThunk_LinkArgs(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	tc := &fakeToolchainRunner{sdkPathResult: "/sdk/iphonesimulator"}
-	bs := &buildSettings{
+	cfg := CompileConfig{
 		ModuleName:       "TestModule",
 		BuiltProductsDir: filepath.Join(tmpDir, "products"),
 		DeploymentTarget: "17.0",
 	}
-	dirs := previewDirs{
-		Build: tmpDir,
-		Thunk: filepath.Join(tmpDir, "thunk"),
-	}
+	thunkDir := filepath.Join(tmpDir, "thunk")
+	buildDir := tmpDir
 
-	_, err := compileThunk(
+	_, err := CompileThunk(
 		context.Background(),
 		filepath.Join(tmpDir, "thunk.swift"),
-		bs, dirs, 2, "HogeView.swift",
+		cfg, thunkDir, buildDir, 2, "HogeView.swift",
 		tc,
 	)
 	if err != nil {

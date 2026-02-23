@@ -13,6 +13,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
@@ -151,7 +152,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	slog.Debug("Tracked files (after collision filter)", "count", len(trackedFiles), "files", trackedFiles)
 
 	done = step.begin("Generating combined thunk...")
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, previewSelector, sourceFile)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -159,7 +160,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, 0, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -226,7 +227,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return err
 	}
 
-	loaderPath, err := compileLoader(ctx, dirs, bs.DeploymentTarget, tc)
+	loaderPath, err := codegen.CompileLoader(ctx, dirs.Loader, bs.DeploymentTarget, tc)
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err

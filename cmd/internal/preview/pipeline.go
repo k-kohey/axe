@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/k-kohey/axe/internal/preview/parsing"
 	"os"
 	"path/filepath"
+
+	"github.com/k-kohey/axe/internal/preview/codegen"
+	"github.com/k-kohey/axe/internal/preview/parsing"
 )
 
 // parseTrackedFiles parses all tracked files and builds fileThunkData slices.
@@ -107,12 +108,12 @@ func compilePipeline(
 		return "", fmt.Errorf("no types found in tracked files")
 	}
 
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, previewSelector, sourceFile)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
 	if err != nil {
 		return "", fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("compile: %w", err)
 	}
@@ -122,7 +123,7 @@ func compilePipeline(
 
 // deploy attempts hot-reload via socket, falling back to full app relaunch.
 func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
-	if err := sendReloadCommand(dirs.Socket, dylibPath); err != nil {
+	if err := codegen.SendReloadCommand(dirs.Socket, dylibPath); err != nil {
 		slog.Warn("Hot-reload failed, falling back to full relaunch", "err", err)
 		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
 		if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {

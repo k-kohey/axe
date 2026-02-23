@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/k-kohey/axe/internal/preview/codegen"
+
 	"github.com/fsnotify/fsnotify"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -282,12 +284,13 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, "0", newSourceFile)
+	cfg := compileConfigFromBS(bs)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -298,7 +301,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = compileThunk(ctx, thunkPath, bs, dirs, counter, newSourceFile, wctx.toolchain)
+		dylibPath, err = codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -382,12 +385,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	thunkPath, err := generateCombinedThunk(files, bs.ModuleName, dirs, selector, sourceFile)
+	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, selector, sourceFile)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := compileThunk(ctx, thunkPath, bs, dirs, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
