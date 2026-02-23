@@ -27,7 +27,8 @@ let resolver: BinaryResolver;
 // Track active streams: file → streamId.
 const activeStreams = new Map<string, string>();
 let lastDevice: DeviceSelection | null = null;
-let handleEditorBusy = false;
+let dialogShowing = false;
+let pendingFile: string | null = null;
 
 function generateStreamId(): string {
 	return crypto.randomUUID();
@@ -252,46 +253,76 @@ async function handleEditor(editor: vscode.TextEditor): Promise<void> {
 		return;
 	}
 
-	// Guard all async operations to prevent duplicate calls during rapid editor switch.
-	if (handleEditorBusy) {
+	// If a dialog is already showing, queue this file so the loop picks it up.
+	if (dialogShowing) {
+		pendingFile = file;
 		return;
 	}
-	handleEditorBusy = true;
-	try {
-		// No device selected yet → prompt the user to pick one.
-		if (!lastDevice) {
-			const fileName = path.basename(file);
-			const choice = await vscode.window.showInformationMessage(
-				`"${fileName}" contains #Preview. Select a simulator to start?`,
-				"Select Simulator",
-			);
-			if (choice !== "Select Simulator") {
-				return;
-			}
-			await showDevicePickerAndAddStream(file);
-			return;
-		}
 
-		if (activeStreams.size === 0) {
-			// No active streams — start fresh.
-			await replaceWithNewStream(file, lastDevice);
-		} else {
-			// Other streams are active — ask the user.
-			const fileName = path.basename(file);
-			const choice = await vscode.window.showInformationMessage(
-				`Preview: ${fileName}`,
-				"Clear & Add",
-				"Add",
-			);
-			if (choice === "Clear & Add") {
-				await replaceWithNewStream(file, lastDevice);
-			} else if (choice === "Add") {
-				await addStreamForFile(file, lastDevice);
+	dialogShowing = true;
+	try {
+		let currentFile = file;
+		while (true) {
+			pendingFile = null;
+			await processFile(currentFile);
+
+			if (pendingFile === null) {
+				break;
 			}
-			// Cancel → no-op.
+			// A newer file arrived while the dialog was showing — process it instead.
+			currentFile = pendingFile;
+			if (activeStreams.has(currentFile)) {
+				break;
+			}
 		}
 	} finally {
-		handleEditorBusy = false;
+		dialogShowing = false;
+	}
+}
+
+/**
+ * Show the appropriate dialog for a file and act on the user's choice.
+ * Returns early (without acting) when `pendingFile` becomes non-null,
+ * meaning a newer file superseded this one while the dialog was open.
+ */
+async function processFile(file: string): Promise<void> {
+	// No device selected yet → prompt the user to pick one.
+	if (!lastDevice) {
+		const fileName = path.basename(file);
+		const choice = await vscode.window.showInformationMessage(
+			`"${fileName}" contains #Preview. Select a simulator to start?`,
+			"Select Simulator",
+		);
+		if (pendingFile !== null) {
+			return;
+		}
+		if (choice !== "Select Simulator") {
+			return;
+		}
+		await showDevicePickerAndAddStream(file);
+		return;
+	}
+
+	if (activeStreams.size === 0) {
+		// No active streams — start fresh.
+		await replaceWithNewStream(file, lastDevice);
+	} else {
+		// Other streams are active — ask the user.
+		const fileName = path.basename(file);
+		const choice = await vscode.window.showInformationMessage(
+			`Preview: ${fileName}`,
+			"Clear & Add",
+			"Add",
+		);
+		if (pendingFile !== null) {
+			return;
+		}
+		if (choice === "Clear & Add") {
+			await replaceWithNewStream(file, lastDevice);
+		} else if (choice === "Add") {
+			await addStreamForFile(file, lastDevice);
+		}
+		// Cancel → no-op.
 	}
 }
 
@@ -405,5 +436,6 @@ export function deactivate(): void {
 	// is handled by context.subscriptions. Only reset module-level state here.
 	activeStreams.clear();
 	lastDevice = null;
-	handleEditorBusy = false;
+	dialogShowing = false;
+	pendingFile = null;
 }
