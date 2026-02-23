@@ -1,4 +1,5 @@
 {
+  "originHash" : "8ec6a76a86db3bf95d3b47e2dbffadaa7d4a002eccb77aa5b20a309466561e93",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -7,6 +8,14 @@
       "state" : {
         "revision" : "c5d11a805e765f52ba34ec7284bd4fcd6ba68615",
         "version" : "1.7.0"
+      }
+    },
+    {
+      "identity" : "swift-index-store",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MobileNativeFoundation/swift-index-store",
+      "state" : {
+        "revision" : "c4665d1c0897f45add476bb78692cbf1821c0e7a"
       }
     },
     {
@@ -19,5 +28,5 @@
       }
     }
   ],
-  "version" : 2
+  "version" : 3
 }

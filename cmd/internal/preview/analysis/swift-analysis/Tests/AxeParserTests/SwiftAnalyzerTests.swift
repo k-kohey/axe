@@ -839,12 +839,13 @@ struct ReferencedTypesTests {
 
     #expect(refs.contains("MyViewModel"))
     #expect(refs.contains("FugaView"))
-    #expect(!refs.contains("View"))
-    #expect(!refs.contains("String"))
-    #expect(!refs.contains("Text"))
+    // Standard/SwiftUI types are no longer filtered client-side;
+    // filtering is done by the index store type→file map.
+    #expect(refs.contains("View"))
+    #expect(refs.contains("Text"))
   }
 
-  @Test("No custom types yields empty referencedTypes")
+  @Test("Only framework types yields no user-defined references")
   func noCustomTypes() {
     let source = """
       import SwiftUI
@@ -856,11 +857,12 @@ struct ReferencedTypesTests {
       }
       """
     let result = SwiftAnalyzer(source: source).analyze()
-    for t in result.referencedTypes {
-      #expect(t != "View")
-      #expect(t != "Text")
-      #expect(t != "String")
-    }
+    let refs = Set(result.referencedTypes)
+    // Framework types are now included (filtering moved to index store).
+    #expect(refs.contains("View"))
+    #expect(refs.contains("Text"))
+    // No user-defined custom types should appear.
+    #expect(!refs.contains("SimpleView"))
   }
 
   @Test("Generic type arguments are collected")
@@ -1009,8 +1011,8 @@ struct ExpressionTypeReferenceTests {
     #expect(refs.contains("MyTheme"))
   }
 
-  @Test("Filtered types in expression position are excluded")
-  func filteredTypesExcluded() {
+  @Test("All types including framework types are collected (filtering done by index store)")
+  func allTypesCollected() {
     let source = """
       import SwiftUI
 
@@ -1025,10 +1027,12 @@ struct ExpressionTypeReferenceTests {
     let result = SwiftAnalyzer(source: source).analyze()
     let refs = Set(result.referencedTypes)
 
-    #expect(!refs.contains("Text"))
-    #expect(!refs.contains("VStack"))
-    #expect(!refs.contains("Image"))
-    #expect(!refs.contains("NavigationLink"))
+    // No client-side filtering — framework types are now included.
+    // The index store type→file map filters them during dependency resolution.
+    #expect(refs.contains("Text"))
+    #expect(refs.contains("VStack"))
+    #expect(refs.contains("Image"))
+    #expect(refs.contains("NavigationLink"))
   }
 
   @Test("Real-world pattern: detail view with multiple child views")
@@ -1057,9 +1061,9 @@ struct ExpressionTypeReferenceTests {
     // Expression-position initializer calls
     #expect(refs.contains("ItemFavoriteButton"))
     #expect(refs.contains("ItemCollectionsMenu"))
-    // Filtered SwiftUI types
-    #expect(!refs.contains("ScrollView"))
-    #expect(!refs.contains("VStack"))
+    // SwiftUI types are no longer filtered (done by index store).
+    #expect(refs.contains("ScrollView"))
+    #expect(refs.contains("VStack"))
   }
 }
 

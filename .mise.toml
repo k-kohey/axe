@@ -16,7 +16,7 @@ golangci-lint = "2.10"
 
 [env]
 GO_MODULE = "github.com/k-kohey/axe"
-SWIFT_PARSER = "cmd/internal/preview/parsing/swift-parser"
+SWIFT_ANALYSIS = "cmd/internal/preview/analysis/swift-analysis"
 
 [tasks]
 # Build the application
@@ -27,7 +27,7 @@ build = { depends = ["proto"], run = "go build -C cmd -ldflags \"-X main.version
 # Usage: mise run fmt
 fmt = { run = """
 go fmt -C cmd ./...
-xcrun swift-format format --in-place --recursive $SWIFT_PARSER/Sources $SWIFT_PARSER/Tests
+xcrun swift-format format --in-place --recursive $SWIFT_ANALYSIS/Sources $SWIFT_ANALYSIS/Tests
 """ }
 
 # Tidy up dependencies

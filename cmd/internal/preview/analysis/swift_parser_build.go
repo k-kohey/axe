@@ -1,6 +1,7 @@
-package parsing
+package analysis
 
 import (
+	"context"
 	"crypto/sha256"
 	"embed"
 	"fmt"
@@ -12,32 +13,48 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
-//go:embed swift-parser/Package.swift swift-parser/Sources/AxeParser/*.swift swift-parser/Sources/AxeParserCore/*.swift
-var swiftParserFS embed.FS
+//go:embed swift-analysis/Package.swift swift-analysis/Sources/AxeParser/*.swift swift-analysis/Sources/AxeParserCore/*.swift swift-analysis/Sources/AxeIndexReader/*.swift
+var swiftAnalysisFS embed.FS
 
 var (
 	swiftParserOnce sync.Once
 	swiftParserPath string
 	swiftParserErr  error
+
+	indexReaderOnce sync.Once
+	indexReaderPath string
+	indexReaderErr  error
 )
 
 // ensureSwiftParser builds (or locates the cached) axe-parser binary.
-// The binary is cached at ~/Library/Caches/axe/swift-parser/<hash>/axe-parser.
+// The binary is cached at ~/Library/Caches/axe/swift-analysis/<hash>/axe-parser.
 // The cache key is a hash of the embedded source + `swift --version` + macOS version.
 func ensureSwiftParser() (string, error) {
 	swiftParserOnce.Do(func() {
-		swiftParserPath, swiftParserErr = buildSwiftParser()
+		swiftParserPath, swiftParserErr = buildSwiftAnalysisProduct("axe-parser")
 	})
 	return swiftParserPath, swiftParserErr
 }
 
-func buildSwiftParser() (string, error) {
+// ensureIndexReader builds (or locates the cached) axe-index-reader binary.
+// Uses the same cache directory and key as axe-parser (same package source).
+func ensureIndexReader() (string, error) {
+	indexReaderOnce.Do(func() {
+		indexReaderPath, indexReaderErr = buildSwiftAnalysisProduct("axe-index-reader")
+	})
+	return indexReaderPath, indexReaderErr
+}
+
+// buildSwiftAnalysisProduct builds a specific product from the SwiftAnalysis package.
+// Products share the same embedded source, cache key, and build directory.
+func buildSwiftAnalysisProduct(product string) (string, error) {
 	// Collect all embedded files dynamically so new source files
 	// are automatically included without editing this list.
 	var entries []string
-	if err := fs.WalkDir(swiftParserFS, ".", func(path string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(swiftAnalysisFS, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -53,7 +70,7 @@ func buildSwiftParser() (string, error) {
 	// Compute cache key from embedded sources + swift version + macOS version.
 	h := sha256.New()
 	for _, name := range entries {
-		data, err := swiftParserFS.ReadFile(name)
+		data, err := swiftAnalysisFS.ReadFile(name)
 		if err != nil {
 			return "", fmt.Errorf("reading embedded %s: %w", name, err)
 		}
@@ -61,14 +78,18 @@ func buildSwiftParser() (string, error) {
 	}
 
 	// swift --version
-	swiftVer, err := exec.Command("swift", "--version").Output()
+	swiftVerCtx, swiftVerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer swiftVerCancel()
+	swiftVer, err := exec.CommandContext(swiftVerCtx, "swift", "--version").Output()
 	if err != nil {
 		return "", fmt.Errorf("getting swift version: %w", err)
 	}
 	h.Write(swiftVer)
 
 	// macOS version
-	macVer, _ := exec.Command("sw_vers", "-productVersion").Output()
+	macVerCtx, macVerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer macVerCancel()
+	macVer, _ := exec.CommandContext(macVerCtx, "sw_vers", "-productVersion").Output()
 	h.Write(macVer)
 
 	cacheKey := fmt.Sprintf("%x", h.Sum(nil))
@@ -77,24 +98,24 @@ func buildSwiftParser() (string, error) {
 	if err != nil {
 		cacheDir = filepath.Join(os.Getenv("HOME"), "Library", "Caches")
 	}
-	binDir := filepath.Join(cacheDir, "axe", "swift-parser", cacheKey)
-	binPath := filepath.Join(binDir, "axe-parser")
+	binDir := filepath.Join(cacheDir, "axe", "swift-analysis", cacheKey)
+	binPath := filepath.Join(binDir, product)
 
 	// Check if cached binary exists.
 	if _, err := os.Stat(binPath); err == nil {
-		slog.Debug("Swift parser cached", "path", binPath)
+		slog.Debug("Swift analysis product cached", "product", product, "path", binPath)
 		return binPath, nil
 	}
 
 	// Extract embedded sources to a temp directory and build.
-	tmpDir, err := os.MkdirTemp("", "axe-swift-parser-build-*")
+	tmpDir, err := os.MkdirTemp("", "axe-swift-analysis-build-*")
 	if err != nil {
 		return "", fmt.Errorf("creating temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	for _, name := range entries {
-		data, err := swiftParserFS.ReadFile(name)
+		data, err := swiftAnalysisFS.ReadFile(name)
 		if err != nil {
 			return "", fmt.Errorf("reading embedded %s: %w", name, err)
 		}
@@ -109,7 +130,7 @@ func buildSwiftParser() (string, error) {
 
 	// Create placeholder for the test target directory so SPM doesn't
 	// complain about the missing Tests/AxeParserTests source directory.
-	testDir := filepath.Join(tmpDir, "swift-parser", "Tests", "AxeParserTests")
+	testDir := filepath.Join(tmpDir, "swift-analysis", "Tests", "AxeParserTests")
 	if err := os.MkdirAll(testDir, 0o755); err != nil {
 		return "", fmt.Errorf("creating test placeholder dir: %w", err)
 	}
@@ -117,17 +138,19 @@ func buildSwiftParser() (string, error) {
 		return "", fmt.Errorf("writing test placeholder: %w", err)
 	}
 
-	fmt.Println("Building Swift parser (first run, this may take a moment)...")
-	pkgPath := filepath.Join(tmpDir, "swift-parser")
+	fmt.Fprintf(os.Stderr, "Building %s (first run, this may take a moment)...\n", product)
+	pkgPath := filepath.Join(tmpDir, "swift-analysis")
 
-	cmd := exec.Command("swift", "build", "-c", "release", "--product", "axe-parser", "--package-path", pkgPath)
+	buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer buildCancel()
+	cmd := exec.CommandContext(buildCtx, "swift", "build", "-c", "release", "--product", product, "--package-path", pkgPath)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("building swift parser: %w", err)
+		return "", fmt.Errorf("building %s: %w", product, err)
 	}
 
 	// Find the built binary.
-	srcBin := filepath.Join(pkgPath, ".build", "release", "axe-parser")
+	srcBin := filepath.Join(pkgPath, ".build", "release", product)
 	if _, err := os.Stat(srcBin); err != nil {
 		return "", fmt.Errorf("built binary not found at %s: %w", srcBin, err)
 	}
@@ -150,12 +173,12 @@ func buildSwiftParser() (string, error) {
 	for _, d := range dirEntries {
 		if d.IsDir() && d.Name() != cacheKey {
 			old := filepath.Join(parentDir, d.Name())
-			slog.Debug("Removing old swift-parser cache", "path", old)
+			slog.Debug("Removing old swift-analysis cache", "path", old)
 			_ = os.RemoveAll(old)
 		}
 	}
 
-	slog.Debug("Swift parser built and cached", "path", binPath)
+	slog.Debug("Swift analysis product built and cached", "product", product, "path", binPath)
 	swiftVersion := strings.TrimSpace(string(swiftVer))
 	slog.Debug("Swift version", "version", swiftVersion)
 

@@ -1,0 +1,153 @@
+package analysis
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"path/filepath"
+)
+
+// ResolveDependencies finds source files that define types referenced by the target file.
+// It returns a list of absolute paths to 1-level dependency files (excluding the target itself).
+func ResolveDependencies(ctx context.Context, targetFile string, projectRoot string, sl SwiftFileLister, parser SwiftFileParser) ([]string, error) {
+	referencedTypes, definedTypes, err := parser.ParseTypes(targetFile)
+	if err != nil {
+		return nil, fmt.Errorf("parsing target file: %w", err)
+	}
+
+	if len(referencedTypes) == 0 {
+		slog.Debug("No referenced types in target file")
+		return nil, nil
+	}
+
+	refSet := make(map[string]bool, len(referencedTypes))
+	for _, t := range referencedTypes {
+		refSet[t] = true
+	}
+
+	// Remove types defined in the target file itself.
+	for _, t := range definedTypes {
+		delete(refSet, t)
+	}
+
+	if len(refSet) == 0 {
+		slog.Debug("All referenced types are defined in the target file")
+		return nil, nil
+	}
+
+	slog.Debug("Looking for dependency files", "referencedTypes", refSet)
+
+	// Get all Swift files in the project.
+	swiftFiles, err := sl.SwiftFiles(ctx, projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("listing swift files: %w", err)
+	}
+
+	cleanTarget := filepath.Clean(targetFile)
+	var deps []string
+
+	for _, f := range swiftFiles {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
+		if filepath.Clean(f) == cleanTarget {
+			continue
+		}
+
+		_, fileDefined, err := parser.ParseTypes(f)
+		if err != nil {
+			slog.Debug("Skipping unparseable file", "path", f, "err", err)
+			continue
+		}
+
+		for _, dt := range fileDefined {
+			if refSet[dt] {
+				deps = append(deps, f)
+				slog.Debug("Found dependency file", "path", f, "type", dt)
+				break
+			}
+		}
+	}
+
+	return deps, nil
+}
+
+// ResolveTransitiveDependencies uses the index store to build a complete
+// transitive dependency graph for the target file. If the index store is
+// unavailable or fails, it falls back to the 1-level ResolveDependencies.
+//
+// indexStorePath is the path to the index store (e.g. dirs.Build + "/Index.noindex/DataStore").
+// Returns the dependency graph and the 1-level dependency list for thunk generation.
+func ResolveTransitiveDependencies(ctx context.Context, targetFile string, projectRoot string, indexStorePath string, sl SwiftFileLister, parser SwiftFileParser) (*DependencyGraph, []string, error) {
+	typeMap, err := ReadTypeFileMap(ctx, indexStorePath, projectRoot)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		slog.Warn("Index store unavailable, falling back to 1-level dependency resolution", "err", err)
+		deps, depErr := ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
+		return nil, deps, depErr
+	}
+
+	graph, err := BuildTransitiveDeps(ctx, targetFile, typeMap, parser)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		slog.Warn("Transitive graph construction failed, falling back to 1-level dependency resolution", "err", err)
+		deps, depErr := ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
+		return nil, deps, depErr
+	}
+
+	// Extract 1-level dependencies from the typeMap directly.
+	// This avoids the O(N) full-project scan that ResolveDependencies performs.
+	deps, err := resolveDirectDepsFromTypeMap(targetFile, typeMap, parser)
+	if err != nil {
+		slog.Warn("1-level dependency resolution from typeMap failed, falling back to project scan", "err", err)
+		deps, err = ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
+		if err != nil {
+			return graph, nil, err
+		}
+	}
+
+	return graph, deps, nil
+}
+
+// resolveDirectDepsFromTypeMap resolves 1-level dependencies by looking up
+// the target's referenced types in the typeMap. This is O(R) where R is the
+// number of referenced types, instead of O(N) for a full project scan.
+func resolveDirectDepsFromTypeMap(targetFile string, typeMap map[string]string, parser SwiftFileParser) ([]string, error) {
+	referencedTypes, definedTypes, err := parser.ParseTypes(targetFile)
+	if err != nil {
+		return nil, fmt.Errorf("parsing target file: %w", err)
+	}
+
+	// Build set of types defined in the target to exclude self-references.
+	definedSet := make(map[string]bool, len(definedTypes))
+	for _, t := range definedTypes {
+		definedSet[t] = true
+	}
+
+	cleanTarget := filepath.Clean(targetFile)
+	seen := make(map[string]bool)
+	var deps []string
+
+	for _, typeName := range referencedTypes {
+		if definedSet[typeName] {
+			continue
+		}
+		filePath, ok := typeMap[typeName]
+		if !ok {
+			continue
+		}
+		cleanPath := filepath.Clean(filePath)
+		if cleanPath == cleanTarget || seen[cleanPath] {
+			continue
+		}
+		seen[cleanPath] = true
+		deps = append(deps, filePath)
+	}
+
+	return deps, nil
+}

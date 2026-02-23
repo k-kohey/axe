@@ -1,7 +1,8 @@
-package parsing
+package analysis
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -144,5 +145,97 @@ func TestResolveDependencies_ParserErrorOnCandidateSkips(t *testing.T) {
 	}
 	if filepath.Base(deps[0]) != "Good.swift" {
 		t.Errorf("deps[0] = %q, want Good.swift", deps[0])
+	}
+}
+
+func TestResolveDirectDepsFromTypeMap_Basic(t *testing.T) {
+	target := filepath.Join("/project", "ContentView.swift")
+	dep := filepath.Join("/project", "ChildView.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"ChildView", "Text"}, defined: []string{"ContentView"}},
+	}}
+	typeMap := map[string]string{
+		"ContentView": target,
+		"ChildView":   dep,
+		// "Text" is not in typeMap (framework type), should be skipped.
+	}
+
+	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deps) != 1 {
+		t.Fatalf("deps count = %d, want 1, got %v", len(deps), deps)
+	}
+	if filepath.Base(deps[0]) != "ChildView.swift" {
+		t.Errorf("deps[0] = %q, want ChildView.swift", deps[0])
+	}
+}
+
+func TestResolveDirectDepsFromTypeMap_SelfDefined(t *testing.T) {
+	target := filepath.Join("/project", "Combined.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"MyModel"}, defined: []string{"MyModel", "CombinedView"}},
+	}}
+	typeMap := map[string]string{
+		"MyModel":      target,
+		"CombinedView": target,
+	}
+
+	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deps) != 0 {
+		t.Errorf("deps count = %d, want 0 (self-defined types should not produce deps)", len(deps))
+	}
+}
+
+func TestResolveDirectDepsFromTypeMap_Deduplicates(t *testing.T) {
+	target := filepath.Join("/project", "View.swift")
+	dep := filepath.Join("/project", "Models.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"TypeA", "TypeB"}, defined: []string{"MyView"}},
+	}}
+	// Both types map to the same file.
+	typeMap := map[string]string{
+		"TypeA": dep,
+		"TypeB": dep,
+	}
+
+	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deps) != 1 {
+		t.Fatalf("deps count = %d, want 1 (same file should be deduplicated), got %v", len(deps), deps)
+	}
+}
+
+func TestResolveDependencies_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately before calling.
+
+	target := filepath.Join("/project", "View.swift")
+	other := filepath.Join("/project", "Other.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"OtherType"}, defined: []string{"ViewType"}},
+		other:  {referenced: nil, defined: []string{"OtherType"}},
+	}}
+	lister := &mockLister{files: []string{target, other}}
+
+	_, err := ResolveDependencies(ctx, target, "/project", lister, parser)
+	if err == nil {
+		t.Fatal("expected context cancellation error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

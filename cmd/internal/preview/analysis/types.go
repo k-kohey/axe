@@ -1,22 +1,22 @@
-package parsing
+package analysis
 
 import "context"
 
 // PropertyInfo describes a computed property inside a Swift type.
 type PropertyInfo struct {
-	Name     string `json:"name"`     // "body", "backgroundColor", etc.
-	TypeExpr string `json:"typeExpr"` // "some View", "Color", etc.
-	BodyLine int    `json:"bodyLine"`
-	Source   string `json:"source"`
+	Name     string // "body", "backgroundColor", etc.
+	TypeExpr string // "some View", "Color", etc.
+	BodyLine int
+	Source   string
 }
 
 // MethodInfo describes a method (func) inside a Swift type.
 type MethodInfo struct {
-	Name      string `json:"name"`      // "greet"
-	Selector  string `json:"selector"`  // "greet(name:)" — @_dynamicReplacement 用セレクタ
-	Signature string `json:"signature"` // "(name: String) -> String" — ( から { の直前まで
-	BodyLine  int    `json:"bodyLine"`
-	Source    string `json:"source"`
+	Name      string // "greet"
+	Selector  string // "greet(name:)" — @_dynamicReplacement 用セレクタ
+	Signature string // "(name: String) -> String" — ( から { の直前まで
+	BodyLine  int
+	Source    string
 }
 
 // TypeInfo describes a Swift type parsed from a source file.
@@ -49,9 +49,9 @@ type FileThunkData struct {
 
 // PreviewBlock describes a #Preview { ... } block in the source.
 type PreviewBlock struct {
-	StartLine int    `json:"startLine"`
-	Title     string `json:"title"` // e.g. "Dark Mode", empty for unnamed
-	Source    string `json:"source"`
+	StartLine int
+	Title     string // e.g. "Dark Mode", empty for unnamed
+	Source    string
 }
 
 // PreviewableProperty holds a single @Previewable declaration

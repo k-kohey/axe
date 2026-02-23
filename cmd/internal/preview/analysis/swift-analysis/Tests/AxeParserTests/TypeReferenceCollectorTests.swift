@@ -58,8 +58,9 @@ struct TypeReferenceCollectorTests {
     #expect(!collector.referencedTypes.contains("makeView"))
   }
 
-  @Test("Excludes filteredTypes (standard library and SwiftUI types)")
-  func filteredTypesExcluded() {
+  @Test(
+    "Collects all types including standard library and SwiftUI (filtering is done by index store)")
+  func standardTypesIncluded() {
     let source = """
       struct HogeView {
           var name: String
@@ -74,11 +75,13 @@ struct TypeReferenceCollectorTests {
     let collector = TypeReferenceCollector()
     collector.walk(tree)
 
-    #expect(!collector.referencedTypes.contains("String"))
-    #expect(!collector.referencedTypes.contains("Int"))
-    #expect(!collector.referencedTypes.contains("Text"))
-    #expect(!collector.referencedTypes.contains("VStack"))
-    #expect(!collector.referencedTypes.contains("Image"))
+    // No client-side filtering — the index store type→file map acts as the
+    // authoritative filter (framework types won't be in the map).
+    #expect(collector.referencedTypes.contains("String"))
+    #expect(collector.referencedTypes.contains("Int"))
+    #expect(collector.referencedTypes.contains("Text"))
+    #expect(collector.referencedTypes.contains("VStack"))
+    #expect(collector.referencedTypes.contains("Image"))
   }
 
   @Test("Collects generic type arguments")

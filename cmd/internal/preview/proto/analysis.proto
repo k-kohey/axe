@@ -1,0 +1,58 @@
+syntax = "proto3";
+package axe.analysis;
+option go_package = "github.com/k-kohey/axe/internal/preview/analysisproto";
+
+// --- axe-parser output (replaces Codable/JSON encoding) ---
+
+enum TypeKind {
+  TYPE_KIND_UNKNOWN = 0;
+  TYPE_KIND_STRUCT = 1;
+  TYPE_KIND_CLASS = 2;
+  TYPE_KIND_ENUM = 3;
+  TYPE_KIND_ACTOR = 4;
+}
+
+message PropertyInfo {
+  string name = 1;
+  string type_expr = 2;
+  int32 body_line = 3;
+  string source = 4;
+}
+
+message MethodInfo {
+  string name = 1;
+  string selector = 2;
+  string signature = 3;
+  int32 body_line = 4;
+  string source = 5;
+}
+
+message TypeInfo {
+  string name = 1;
+  TypeKind kind = 2;
+  string access_level = 3;
+  repeated string inherited_types = 4;
+  repeated PropertyInfo properties = 5;
+  repeated MethodInfo methods = 6;
+}
+
+message PreviewBlock {
+  int32 start_line = 1;
+  string title = 2;
+  string source = 3;
+}
+
+message ParseResult {
+  repeated TypeInfo types = 1;
+  repeated string imports = 2;
+  repeated PreviewBlock previews = 3;
+  string skeleton_hash = 4;
+  repeated string referenced_types = 5;
+  repeated string defined_types = 6;
+}
+
+// --- axe-index-reader output ---
+
+message TypeFileMap {
+  map<string, string> types = 1;  // typeName → filePath
+}

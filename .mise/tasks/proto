@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Generate Go/TS code from proto files (idb + preview)"
+#MISE description="Generate Go/TS code from proto files (idb + preview + analysis)"
 #MISE depends=["vscode-deps"]
 # NOTE: sources/outputs caching is intentionally omitted.
 # idb.proto is fetched from a remote URL (not tracked in git),
@@ -27,6 +27,12 @@ protoc \
   --go_out=cmd --go_opt=module="$GO_MODULE" \
   --proto_path=cmd/internal/preview/proto \
   cmd/internal/preview/proto/preview.proto
+
+# --- analysis proto -> Go ---
+protoc \
+  --go_out=cmd --go_opt=module="$GO_MODULE" \
+  --proto_path=cmd/internal/preview/proto \
+  cmd/internal/preview/proto/analysis.proto
 
 # --- preview proto -> TypeScript (ts-proto) ---
 mkdir -p vscode-extension/src/generated

@@ -1,4 +1,4 @@
-package parsing
+package analysis
 
 import (
 	"os"
@@ -1038,15 +1038,17 @@ struct HogeView: View {
 		t.Errorf("referencedTypes should include FugaView, got %v", result.ReferencedTypes)
 	}
 
-	// Should NOT include standard/SwiftUI types
-	if refSet["View"] {
-		t.Errorf("referencedTypes should not include View")
+	// Standard/SwiftUI types are now included (filtering is done by the
+	// index store type→file map during dependency resolution, not here).
+	if !refSet["View"] {
+		t.Errorf("referencedTypes should include View (no client-side filtering)")
 	}
+	if !refSet["Text"] {
+		t.Errorf("referencedTypes should include Text (no client-side filtering)")
+	}
+	// String is not referenced in this source, so it should not appear.
 	if refSet["String"] {
-		t.Errorf("referencedTypes should not include String")
-	}
-	if refSet["Text"] {
-		t.Errorf("referencedTypes should not include Text")
+		t.Errorf("referencedTypes should not include String (not referenced in source)")
 	}
 }
 

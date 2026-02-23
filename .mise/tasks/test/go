@@ -4,9 +4,9 @@
 
 set -euo pipefail
 
-# Build and cache the swift-parser binary before running all tests.
+# Build and cache the swift-analysis binary before running all tests.
 # Without this, multiple test packages would try to build it in parallel,
 # each triggering a slow swift-syntax compilation (10+ min on CI).
-go test -C cmd -run=TestParseSourceFile -count=1 -timeout 20m ./internal/preview/parsing/
+go test -C cmd -run=TestParseSourceFile -count=1 -timeout 20m ./internal/preview/analysis/
 
 go test -C cmd ./... -cover

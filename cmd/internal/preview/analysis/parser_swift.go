@@ -1,41 +1,23 @@
-package parsing
+package analysis
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
+
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
+	"google.golang.org/protobuf/encoding/protojson"
 )
-
-// swiftParseResult mirrors the JSON output from the axe-parser CLI.
-type swiftParseResult struct {
-	Types           []swiftTypeInfo `json:"types"`
-	Imports         []string        `json:"imports"`
-	Previews        []PreviewBlock  `json:"previews"`
-	SkeletonHash    string          `json:"skeletonHash"`
-	ReferencedTypes []string        `json:"referencedTypes"`
-	DefinedTypes    []string        `json:"definedTypes"`
-}
-
-// swiftTypeInfo is the raw per-type JSON from axe-parser.
-// Unlike TypeInfo, it includes ALL properties/methods (including stored ones).
-// convertTypes filters out types with no computed properties or methods.
-type swiftTypeInfo struct {
-	Name           string         `json:"name"`
-	Kind           string         `json:"kind"`
-	AccessLevel    string         `json:"accessLevel"`
-	InheritedTypes []string       `json:"inheritedTypes"`
-	Properties     []PropertyInfo `json:"properties"`
-	Methods        []MethodInfo   `json:"methods"`
-}
 
 // parseCacheEntry holds a cached parse result for a single file.
 type parseCacheEntry struct {
 	modTime int64
-	result  *swiftParseResult
+	result  *pb.ParseResult
 }
 
 // parseCache caches results of swiftParse keyed by file path + modTime
@@ -55,7 +37,7 @@ func ResetCache() {
 
 // swiftParse invokes the axe-parser CLI on the given file and returns the
 // parsed result. Results are cached per file path + modification time.
-func swiftParse(path string) (*swiftParseResult, error) {
+func swiftParse(path string) (*pb.ParseResult, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", path, err)
@@ -76,7 +58,9 @@ func swiftParse(path string) (*swiftParseResult, error) {
 		return nil, fmt.Errorf("ensuring swift parser: %w", err)
 	}
 
-	cmd := exec.Command(binPath, "parse", path)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binPath, "parse", path)
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -86,8 +70,8 @@ func swiftParse(path string) (*swiftParseResult, error) {
 		return nil, fmt.Errorf("running axe-parser: %w", err)
 	}
 
-	var result swiftParseResult
-	if err := json.Unmarshal(out, &result); err != nil {
+	var result pb.ParseResult
+	if err := protojson.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("decoding axe-parser output: %w", err)
 	}
 
@@ -101,16 +85,67 @@ func swiftParse(path string) (*swiftParseResult, error) {
 	return &result, nil
 }
 
-// convertTypes converts parsed Swift type info to internal types,
+// protoKindToString maps proto TypeKind enum to the string representation
+// used by the internal TypeInfo type.
+var protoKindToString = map[pb.TypeKind]string{
+	pb.TypeKind_TYPE_KIND_UNKNOWN: "unknown",
+	pb.TypeKind_TYPE_KIND_STRUCT:  "struct",
+	pb.TypeKind_TYPE_KIND_CLASS:   "class",
+	pb.TypeKind_TYPE_KIND_ENUM:    "enum",
+	pb.TypeKind_TYPE_KIND_ACTOR:   "actor",
+}
+
+// convertProtoType converts a protobuf TypeInfo to the internal TypeInfo.
+func convertProtoType(pt *pb.TypeInfo) TypeInfo {
+	ti := TypeInfo{
+		Name:           pt.GetName(),
+		Kind:           protoKindToString[pt.GetKind()],
+		AccessLevel:    pt.GetAccessLevel(),
+		InheritedTypes: pt.GetInheritedTypes(),
+	}
+	for _, pp := range pt.GetProperties() {
+		ti.Properties = append(ti.Properties, PropertyInfo{
+			Name:     pp.GetName(),
+			TypeExpr: pp.GetTypeExpr(),
+			BodyLine: int(pp.GetBodyLine()),
+			Source:   pp.GetSource(),
+		})
+	}
+	for _, pm := range pt.GetMethods() {
+		ti.Methods = append(ti.Methods, MethodInfo{
+			Name:      pm.GetName(),
+			Selector:  pm.GetSelector(),
+			Signature: pm.GetSignature(),
+			BodyLine:  int(pm.GetBodyLine()),
+			Source:    pm.GetSource(),
+		})
+	}
+	return ti
+}
+
+// convertTypes converts parsed proto type info to internal types,
 // filtering out types with no computed properties or methods.
-func convertTypes(swiftTypes []swiftTypeInfo) []TypeInfo {
+func convertTypes(protoTypes []*pb.TypeInfo) []TypeInfo {
 	var types []TypeInfo
-	for _, st := range swiftTypes {
-		if len(st.Properties) > 0 || len(st.Methods) > 0 {
-			types = append(types, TypeInfo(st))
+	for _, pt := range protoTypes {
+		if len(pt.GetProperties()) > 0 || len(pt.GetMethods()) > 0 {
+			types = append(types, convertProtoType(pt))
 		}
 	}
 	return types
+}
+
+// convertPreviewBlocks converts proto PreviewBlocks to internal PreviewBlocks.
+func convertPreviewBlocks(protoBlocks []*pb.PreviewBlock) []PreviewBlock {
+	blocks := make([]PreviewBlock, 0, len(protoBlocks))
+	for _, block := range protoBlocks {
+		blocks = append(blocks, PreviewBlock{
+			StartLine: int(block.GetStartLine()),
+			Title:     block.GetTitle(),
+			Source:    block.GetSource(),
+		})
+	}
+	return blocks
 }
 
 // SourceFile parses types and imports from a Swift source file.
@@ -121,7 +156,7 @@ func SourceFile(path string) ([]TypeInfo, []string, error) {
 		return nil, nil, fmt.Errorf("parsing source file: %w", err)
 	}
 
-	types := convertTypes(result.Types)
+	types := convertTypes(result.GetTypes())
 
 	// Require at least one View type with a body property.
 	hasBody := false
@@ -141,7 +176,7 @@ func SourceFile(path string) ([]TypeInfo, []string, error) {
 	}
 
 	slog.Debug("Parsed types", "count", len(types))
-	return types, result.Imports, nil
+	return types, result.GetImports(), nil
 }
 
 // PreviewBlocks extracts all #Preview { ... } blocks from the source file.
@@ -151,11 +186,12 @@ func PreviewBlocks(path string) ([]PreviewBlock, error) {
 		return nil, fmt.Errorf("parsing preview blocks: %w", err)
 	}
 
-	for _, b := range result.Previews {
+	blocks := convertPreviewBlocks(result.GetPreviews())
+	for _, b := range blocks {
 		slog.Debug("Found #Preview block", "line", b.StartLine, "title", b.Title)
 	}
 
-	return result.Previews, nil
+	return blocks, nil
 }
 
 // Skeleton computes a SHA-256 hash of the source file with body regions
@@ -165,7 +201,7 @@ func Skeleton(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("computing skeleton: %w", err)
 	}
-	return result.SkeletonHash, nil
+	return result.GetSkeletonHash(), nil
 }
 
 // DefaultParser returns a SwiftFileParser backed by the axe-parser CLI.
@@ -178,7 +214,7 @@ func (defaultSwiftFileParser) ParseTypes(path string) ([]string, []string, error
 	if err != nil {
 		return nil, nil, err
 	}
-	return result.ReferencedTypes, result.DefinedTypes, nil
+	return result.GetReferencedTypes(), result.GetDefinedTypes(), nil
 }
 
 // DependencyFile parses types and imports from a dependency Swift file.
@@ -190,8 +226,8 @@ func DependencyFile(path string) ([]TypeInfo, []string, error) {
 		return nil, nil, fmt.Errorf("parsing dependency file: %w", err)
 	}
 
-	types := convertTypes(result.Types)
-	return types, result.Imports, nil
+	types := convertTypes(result.GetTypes())
+	return types, result.GetImports(), nil
 }
 
 // FilterPrivateCollisions removes dependency files whose private type names
