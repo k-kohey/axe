@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
-// hidClient is the HID-relevant subset of idb.IDBClient.
-// Extracting this interface allows hidHandler to be tested with lightweight mocks.
-type hidClient interface {
+// HIDClient is the HID-relevant subset of idb.IDBClient.
+// Extracting this interface allows HIDHandler to be tested with lightweight mocks.
+type HIDClient interface {
 	Tap(ctx context.Context, x, y float64) error
 	Swipe(ctx context.Context, startX, startY, endX, endY float64, durationSec float64) error
 	Text(ctx context.Context, text string) error
@@ -22,10 +22,10 @@ type hidClient interface {
 	TouchUp(stream idb.HIDStream, x, y float64) error
 }
 
-// hidHandler processes HID input commands (tap, swipe, text, touch gestures)
+// HIDHandler processes HID input commands (tap, swipe, text, touch gestures)
 // with its own mutex, independent of the file-watcher state.
-type hidHandler struct {
-	client       hidClient
+type HIDHandler struct {
+	client       HIDClient
 	screenWidth  int
 	screenHeight int
 
@@ -34,13 +34,13 @@ type hidHandler struct {
 	lastMoveTime    time.Time
 }
 
-// newHIDHandler creates a hidHandler. Returns nil when client is nil,
+// NewHIDHandler creates a HIDHandler. Returns nil when client is nil,
 // so callers can safely call HandleInput on a nil receiver.
-func newHIDHandler(client hidClient, screenWidth, screenHeight int) *hidHandler {
+func NewHIDHandler(client HIDClient, screenWidth, screenHeight int) *HIDHandler {
 	if client == nil {
 		return nil
 	}
-	return &hidHandler{
+	return &HIDHandler{
 		client:       client,
 		screenWidth:  screenWidth,
 		screenHeight: screenHeight,
@@ -49,7 +49,7 @@ func newHIDHandler(client hidClient, screenWidth, screenHeight int) *hidHandler 
 
 // HandleInput dispatches a protocol Input message to the appropriate HID handler.
 // Safe to call on a nil receiver.
-func (h *hidHandler) HandleInput(ctx context.Context, input *pb.Input) {
+func (h *HIDHandler) HandleInput(ctx context.Context, input *pb.Input) {
 	if h == nil || h.client == nil || input == nil {
 		return
 	}
@@ -73,9 +73,8 @@ func (h *hidHandler) HandleInput(ctx context.Context, input *pb.Input) {
 
 // HandleTap dispatches a tap at normalized coordinates (0.0–1.0).
 // Safe to call on a nil receiver. Used by the legacy stdin command path,
-// since the protocol Input message does not define a tap type
-// (tap is only available in the legacy JSON command format).
-func (h *hidHandler) HandleTap(ctx context.Context, x, y float64) {
+// since the protocol Input message does not define a tap type.
+func (h *HIDHandler) HandleTap(ctx context.Context, x, y float64) {
 	if h == nil || h.client == nil {
 		return
 	}
@@ -88,7 +87,7 @@ func (h *hidHandler) HandleTap(ctx context.Context, x, y float64) {
 // HandleSwipe dispatches a swipe gesture at normalized coordinates.
 // Safe to call on a nil receiver. Used by the legacy stdin command path,
 // since the protocol Input message does not define a swipe type.
-func (h *hidHandler) HandleSwipe(ctx context.Context, startX, startY, endX, endY, duration float64) {
+func (h *HIDHandler) HandleSwipe(ctx context.Context, startX, startY, endX, endY, duration float64) {
 	if h == nil || h.client == nil {
 		return
 	}
@@ -98,7 +97,7 @@ func (h *hidHandler) HandleSwipe(ctx context.Context, startX, startY, endX, endY
 	h.handleSwipe(ctx, startX, startY, endX, endY, duration)
 }
 
-func (h *hidHandler) handleTap(ctx context.Context, x, y float64) {
+func (h *HIDHandler) handleTap(ctx context.Context, x, y float64) {
 	sw, sh := h.screenWidth, h.screenHeight
 	go func() {
 		if err := h.client.Tap(ctx, x*float64(sw), y*float64(sh)); err != nil {
@@ -107,7 +106,7 @@ func (h *hidHandler) handleTap(ctx context.Context, x, y float64) {
 	}()
 }
 
-func (h *hidHandler) handleSwipe(ctx context.Context, startX, startY, endX, endY, duration float64) {
+func (h *HIDHandler) handleSwipe(ctx context.Context, startX, startY, endX, endY, duration float64) {
 	sw, sh := h.screenWidth, h.screenHeight
 	dur := duration
 	if dur <= 0 {
@@ -123,7 +122,7 @@ func (h *hidHandler) handleSwipe(ctx context.Context, startX, startY, endX, endY
 	}()
 }
 
-func (h *hidHandler) handleText(ctx context.Context, value string) {
+func (h *HIDHandler) handleText(ctx context.Context, value string) {
 	if value == "" {
 		return
 	}
@@ -134,10 +133,9 @@ func (h *hidHandler) handleText(ctx context.Context, value string) {
 	}()
 }
 
-func (h *hidHandler) handleTouchDown(ctx context.Context, x, y float64) {
+func (h *HIDHandler) handleTouchDown(ctx context.Context, x, y float64) {
 	sw, sh := h.screenWidth, h.screenHeight
 
-	// Close any existing stream first (e.g. if a previous touchUp was lost).
 	h.mu.Lock()
 	old := h.activeHIDStream
 	h.activeHIDStream = nil
@@ -153,7 +151,6 @@ func (h *hidHandler) handleTouchDown(ctx context.Context, x, y float64) {
 	}
 	if err := h.client.TouchDown(stream, x*float64(sw), y*float64(sh)); err != nil {
 		slog.Warn("TouchDown failed", "err", err)
-		// Close the stream to prevent leak on send failure.
 		_, _ = stream.CloseAndRecv()
 		return
 	}
@@ -162,7 +159,7 @@ func (h *hidHandler) handleTouchDown(ctx context.Context, x, y float64) {
 	h.mu.Unlock()
 }
 
-func (h *hidHandler) handleTouchMove(x, y float64) {
+func (h *HIDHandler) handleTouchMove(x, y float64) {
 	sw, sh := h.screenWidth, h.screenHeight
 	h.mu.Lock()
 	stream := h.activeHIDStream
@@ -179,7 +176,7 @@ func (h *hidHandler) handleTouchMove(x, y float64) {
 	}
 }
 
-func (h *hidHandler) handleTouchUp(x, y float64) {
+func (h *HIDHandler) handleTouchUp(x, y float64) {
 	sw, sh := h.screenWidth, h.screenHeight
 	h.mu.Lock()
 	stream := h.activeHIDStream

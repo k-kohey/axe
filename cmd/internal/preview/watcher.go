@@ -15,6 +15,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -33,7 +34,7 @@ type watchState struct {
 
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	bs *buildSettings, dirs previewDirs, wctx watchContext,
-	ws *watchState, hid *hidHandler, events watchEvents) error {
+	ws *watchState, hid *protocol.HIDHandler, events watchEvents) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("creating file watcher: %w", err)
@@ -485,8 +486,8 @@ func readStdinCommands(ch chan<- stdinCommand, serve bool) {
 
 // readProtocolCommands reads JSON Lines from stdin and parses them as Command structs.
 // Invalid JSON lines are logged and skipped. EOF causes the channel to close.
-func readProtocolCommands(ctx context.Context, ew *EventWriter, ch chan<- *pb.Command) {
-	readCommands(ctx, os.Stdin, ew, func(cmd *pb.Command) {
+func readProtocolCommands(ctx context.Context, ew *protocol.EventWriter, ch chan<- *pb.Command) {
+	protocol.ReadCommands(ctx, os.Stdin, ew, func(cmd *pb.Command) {
 		select {
 		case ch <- cmd:
 		default:

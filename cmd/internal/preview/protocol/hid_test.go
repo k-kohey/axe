@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// mockHIDClient records method calls for testing hidHandler.
+// mockHIDClient records method calls for testing HIDHandler.
 // Set error fields to inject failures into specific methods.
 type mockHIDClient struct {
 	mu    sync.Mutex
@@ -116,7 +116,7 @@ func (s *mockHIDStream) RecvMsg(_ any) error          { return nil }
 
 func TestHIDHandler_HandleTap_CoordinateConversion(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleTap(context.Background(), 0.5, 0.3)
 	// Tap runs in a goroutine; wait for it.
@@ -139,7 +139,7 @@ func TestHIDHandler_HandleTap_CoordinateConversion(t *testing.T) {
 
 func TestHIDHandler_HandleSwipe_CoordinateConversionAndDefaultDuration(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleSwipe(context.Background(), 0.1, 0.2, 0.8, 0.9, 0)
 	time.Sleep(50 * time.Millisecond)
@@ -170,7 +170,7 @@ func TestHIDHandler_HandleSwipe_CoordinateConversionAndDefaultDuration(t *testin
 
 func TestHIDHandler_HandleSwipe_ExplicitDuration(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleSwipe(context.Background(), 0.1, 0.2, 0.8, 0.9, 1.5)
 	time.Sleep(50 * time.Millisecond)
@@ -188,7 +188,7 @@ func TestHIDHandler_HandleSwipe_ExplicitDuration(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TextInput(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: "hello"}}})
 	time.Sleep(50 * time.Millisecond)
@@ -204,7 +204,7 @@ func TestHIDHandler_HandleInput_TextInput(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TextEmpty(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: ""}}})
 	time.Sleep(50 * time.Millisecond)
@@ -218,7 +218,7 @@ func TestHIDHandler_HandleInput_TextEmpty(t *testing.T) {
 func TestHIDHandler_HandleInput_TextWorksWithZeroScreenSize(t *testing.T) {
 	mock := &mockHIDClient{}
 	// Screen size is zero, but text input should still work (no coordinate conversion needed).
-	h := &hidHandler{client: mock, screenWidth: 0, screenHeight: 0}
+	h := &HIDHandler{client: mock, screenWidth: 0, screenHeight: 0}
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: "hello"}}})
 	time.Sleep(50 * time.Millisecond)
@@ -236,7 +236,7 @@ func TestHIDHandler_HandleInput_TextWorksWithZeroScreenSize(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TouchLifecycle(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
 
@@ -267,7 +267,7 @@ func TestHIDHandler_HandleInput_TouchLifecycle(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TouchMoveThrottle(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	// Start a gesture.
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
@@ -292,9 +292,9 @@ func TestHIDHandler_HandleInput_TouchMoveThrottle(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TouchMoveWithoutTouchDown(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
-	// touchMove without a prior touchDown — stream is nil, should be a no-op.
+	// touchMove without a prior touchDown -- stream is nil, should be a no-op.
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchMove{TouchMove: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
 
 	calls := mock.getCalls()
@@ -305,9 +305,9 @@ func TestHIDHandler_HandleInput_TouchMoveWithoutTouchDown(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TouchUpWithoutTouchDown(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
-	// touchUp without a prior touchDown — stream is nil, should be a no-op.
+	// touchUp without a prior touchDown -- stream is nil, should be a no-op.
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchUp{TouchUp: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
 
 	calls := mock.getCalls()
@@ -320,7 +320,7 @@ func TestHIDHandler_HandleInput_TouchUpWithoutTouchDown(t *testing.T) {
 
 func TestHIDHandler_HandleInput_OpenHIDStreamError(t *testing.T) {
 	mock := &mockHIDClient{openStreamErr: fmt.Errorf("connection refused")}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	// Should not panic; stream should remain nil.
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
@@ -339,7 +339,7 @@ func TestHIDHandler_HandleInput_TouchDownError_ClosesStream(t *testing.T) {
 		touchDownErr: fmt.Errorf("send failed"),
 		returnStream: stream,
 	}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
 
@@ -364,7 +364,7 @@ func TestHIDHandler_HandleInput_TouchDownError_ClosesStream(t *testing.T) {
 
 func TestHIDHandler_HandleInput_TouchDown(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.3}}})
 
@@ -383,7 +383,7 @@ func TestHIDHandler_HandleInput_TouchDown(t *testing.T) {
 
 func TestHIDHandler_HandleInput_Text(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: "z"}}})
 	time.Sleep(50 * time.Millisecond)
@@ -398,14 +398,14 @@ func TestHIDHandler_HandleInput_Text(t *testing.T) {
 }
 
 func TestHIDHandler_HandleInput_NilReceiver(t *testing.T) {
-	var h *hidHandler
+	var h *HIDHandler
 	// Should not panic.
 	h.HandleInput(context.Background(), &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: 0.5, Y: 0.5}}})
 }
 
 func TestHIDHandler_HandleInput_NilInput(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := newHIDHandler(mock, 390, 844)
+	h := NewHIDHandler(mock, 390, 844)
 	// Should not panic.
 	h.HandleInput(context.Background(), nil)
 }
@@ -414,21 +414,21 @@ func TestHIDHandler_HandleInput_NilInput(t *testing.T) {
 
 func TestHIDHandler_NilReceiver(t *testing.T) {
 	// Should not panic on nil receiver.
-	var h *hidHandler
+	var h *HIDHandler
 	h.HandleTap(context.Background(), 0.5, 0.5)
 }
 
 func TestHIDHandler_NilClient(t *testing.T) {
-	// newHIDHandler returns nil when client is nil.
-	h := newHIDHandler(nil, 390, 844)
+	// NewHIDHandler returns nil when client is nil.
+	h := NewHIDHandler(nil, 390, 844)
 	if h != nil {
-		t.Fatal("expected nil hidHandler for nil client")
+		t.Fatal("expected nil HIDHandler for nil client")
 	}
 }
 
 func TestHIDHandler_ZeroScreenSize(t *testing.T) {
 	mock := &mockHIDClient{}
-	h := &hidHandler{client: mock, screenWidth: 0, screenHeight: 0}
+	h := &HIDHandler{client: mock, screenWidth: 0, screenHeight: 0}
 
 	// Coordinate-based commands should be skipped.
 	h.HandleTap(context.Background(), 0.5, 0.5)

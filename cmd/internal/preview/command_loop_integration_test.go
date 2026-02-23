@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
 func TestRunCommandLoop_DispatchesToStreamManager(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -48,7 +49,7 @@ func TestRunCommandLoop_DispatchesToStreamManager(t *testing.T) {
 func TestRunCommandLoop_MultipleCommands(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
@@ -105,7 +106,7 @@ func TestRunCommandLoop_MultipleCommands(t *testing.T) {
 func TestRunCommandLoop_SkipsInvalidJSON(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -140,7 +141,7 @@ func TestRunCommandLoop_SkipsInvalidJSON(t *testing.T) {
 func TestRunCommandLoop_SendsProtocolErrorForInvalidJSON(t *testing.T) {
 	pool := newFakeDevicePool()
 	var eventBuf syncBuffer
-	ew := NewEventWriter(&eventBuf)
+	ew := protocol.NewEventWriter(&eventBuf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 	sm.StreamLauncher = func(ctx context.Context, _ *StreamManager, _ *stream) {

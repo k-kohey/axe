@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -128,14 +129,14 @@ func nopRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLi
 // newTestStreamManagerWithRunners creates a StreamManager with nop runners and
 // the default stream launcher. Tests that need a custom launcher should set
 // sm.StreamLauncher after calling this.
-func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *EventWriter) *StreamManager {
+func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
 	return NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
 }
 
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
 // a device, sends a "booting" status event, and blocks until ctx is cancelled.
-func newTestStreamManager(pool DevicePoolInterface, ew *EventWriter) *StreamManager {
+func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
 	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -168,7 +169,7 @@ func newTestStreamManager(pool DevicePoolInterface, ew *EventWriter) *StreamMana
 func TestStreamManager_AddStream_Events(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -199,7 +200,7 @@ func TestStreamManager_AddStream_Events(t *testing.T) {
 func TestStreamManager_RemoveStream(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -249,7 +250,7 @@ func TestStreamManager_RemoveStream(t *testing.T) {
 func TestStreamManager_NonexistentRemove(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -267,7 +268,7 @@ func TestStreamManager_NonexistentRemove(t *testing.T) {
 func TestStreamManager_TwoStreams(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -302,7 +303,7 @@ func TestStreamManager_TwoStreams(t *testing.T) {
 func TestStreamManager_StopAll_ShutdownsPool(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 
@@ -328,7 +329,7 @@ func TestStreamManager_AcquireError(t *testing.T) {
 	pool := newFakeDevicePool()
 	pool.acquireErr = fmt.Errorf("no devices available")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
@@ -360,7 +361,7 @@ func TestStreamManager_AcquireError(t *testing.T) {
 func TestStreamManager_DuplicateStreamID(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
@@ -386,7 +387,7 @@ func TestStreamManager_DuplicateStreamID(t *testing.T) {
 func TestStreamManager_EmptyCommand(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManager(pool, ew)
 	defer sm.StopAll()
@@ -400,7 +401,7 @@ func TestStreamManager_EmptyCommand(t *testing.T) {
 func TestStreamManager_FullLifecycle(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -474,7 +475,7 @@ func TestStreamManager_FullLifecycle(t *testing.T) {
 func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
@@ -522,7 +523,7 @@ func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
 func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
@@ -578,7 +579,7 @@ func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
 func TestStreamManager_SwitchFileRouting(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
@@ -630,7 +631,7 @@ func TestStreamManager_SwitchFileRouting(t *testing.T) {
 func TestStreamManager_InputRouting(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
@@ -682,7 +683,7 @@ func TestStreamManager_InputRouting(t *testing.T) {
 func TestStreamManager_CleanupOnError(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
@@ -733,7 +734,7 @@ func TestStreamManager_CleanupOnError(t *testing.T) {
 func TestStreamManager_NextPreviewRouting(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 
 	sm := newTestStreamManagerWithRunners(pool, ew)
 

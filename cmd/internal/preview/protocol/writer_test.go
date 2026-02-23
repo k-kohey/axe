@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"bufio"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -52,7 +53,7 @@ type stream struct {
 	bootCompanion companionProcess
 	idbCompanion  companionProcess
 	idbClient     idb.IDBClient
-	hid           *hidHandler
+	hid           *protocol.HIDHandler
 	ws            *watchState
 	loaderPath    string
 
@@ -62,7 +63,7 @@ type stream struct {
 
 // sendStopped sends a StreamStopped event exactly once per stream.
 // Safe to call multiple times (from launcher error and from RemoveStream).
-func (s *stream) sendStopped(ew *EventWriter, reason, message, diagnostic string) {
+func (s *stream) sendStopped(ew *protocol.EventWriter, reason, message, diagnostic string) {
 	s.stoppedOnce.Do(func() {
 		if err := ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -83,7 +84,7 @@ type StreamManager struct {
 	mu      sync.Mutex
 	streams map[string]*stream
 	pool    DevicePoolInterface
-	ew      *EventWriter
+	ew      *protocol.EventWriter
 
 	// Shared project configuration.
 	pc            ProjectConfig
@@ -112,7 +113,7 @@ type StreamManager struct {
 }
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
-func NewStreamManager(pool DevicePoolInterface, ew *EventWriter, pc ProjectConfig, deviceSetPath string,
+func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
@@ -249,7 +250,7 @@ func (sm *StreamManager) handleInput(streamID string, input *pb.Input) {
 // and coordinated cleanup.
 func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 	defer close(s.done)
-	defer s.cancel() // Ensure launcher goroutines (e.g. relayVideoStreamEvents) stop on normal return.
+	defer s.cancel() // Ensure launcher goroutines (e.g. RelayVideoStreamEvents) stop on normal return.
 	defer sm.cleanupStreamResources(s)
 	defer func() {
 		// Self-remove from map. If handleRemoveStream already deleted us,
@@ -502,17 +503,17 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	s.idbClient = idbClient
 
 	idbErrCh := make(chan error, 1)
-	voc := &videoOutputConfig{
-		ew:       sm.ew,
-		streamID: s.id,
-		device:   udid,
-		file:     s.file,
+	voc := &protocol.VideoOutputConfig{
+		EW:       sm.ew,
+		StreamID: s.id,
+		Device:   udid,
+		File:     s.file,
 	}
-	go relayVideoStreamEvents(ctx, idbClient, idbErrCh, voc)
+	go protocol.RelayVideoStreamEvents(ctx, idbClient, idbErrCh, voc)
 
 	// 14. Create HID handler.
 	if w, h, err := idbClient.ScreenSize(ctx); err == nil {
-		s.hid = newHIDHandler(idbClient, w, h)
+		s.hid = protocol.NewHIDHandler(idbClient, w, h)
 	}
 
 	// 15. Initialize watch state.
@@ -557,8 +558,6 @@ func (sm *StreamManager) StopAll() {
 		s.cancel()
 	}
 	// Wait for all goroutines to finish (cleanup happens in runStream defer).
-	// Use a timeout consistent with handleRemoveStream to prevent hanging
-	// if a stream goroutine is stuck.
 	for _, s := range streams {
 		select {
 		case <-s.done:

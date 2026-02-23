@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"google.golang.org/protobuf/encoding/protojson"
@@ -27,4 +27,13 @@ func UnmarshalCommand(data []byte) (*pb.Command, error) {
 		return nil, err
 	}
 	return cmd, nil
+}
+
+// UnmarshalEvent deserializes a JSON event into a protobuf Event.
+func UnmarshalEvent(data []byte) (*pb.Event, error) {
+	e := &pb.Event{}
+	if err := jsonUnmarshalOpts.Unmarshal(data, e); err != nil {
+		return nil, err
+	}
+	return e, nil
 }

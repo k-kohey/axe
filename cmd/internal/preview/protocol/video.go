@@ -1,4 +1,4 @@
-package preview
+package protocol
 
 import (
 	"bytes"
@@ -15,52 +15,53 @@ import (
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
-// streamRetryConfig controls the retry behavior for video stream reconnection.
-type streamRetryConfig struct {
-	maxRetries     int
-	initialBackoff time.Duration
-	maxBackoff     time.Duration
+// StreamRetryConfig controls the retry behavior for video stream reconnection.
+type StreamRetryConfig struct {
+	MaxRetries     int
+	InitialBackoff time.Duration
+	MaxBackoff     time.Duration
 }
 
-// defaultRetryConfig is the production retry configuration.
-var defaultRetryConfig = streamRetryConfig{
-	maxRetries:     5,
-	initialBackoff: 500 * time.Millisecond,
-	maxBackoff:     5 * time.Second,
+// DefaultRetryConfig is the production retry configuration.
+var DefaultRetryConfig = StreamRetryConfig{
+	MaxRetries:     5,
+	InitialBackoff: 500 * time.Millisecond,
+	MaxBackoff:     5 * time.Second,
 }
 
-// videoOutputConfig controls how video frames are output.
-// When ew is non-nil, frames are sent as JSON Lines Events.
-// When ew is nil, frames are written as raw base64 lines to stdout (legacy mode).
-type videoOutputConfig struct {
-	ew       *EventWriter
-	streamID string
-	device   string
-	file     string
+// VideoOutputConfig controls how video frames are output.
+// When EW is non-nil, frames are sent as JSON Lines Events.
+// When EW is nil, frames are written as raw base64 lines to stdout (legacy mode).
+type VideoOutputConfig struct {
+	EW       *EventWriter
+	StreamID string
+	Device   string
+	File     string
 }
 
-// relayVideoStream opens a raw-pixel video stream from idb_companion, converts
+// RelayVideoStream opens a raw-pixel video stream from idb_companion, converts
 // frames to JPEG, and writes base64-encoded lines to stdout.
 // On stream disconnection it retries with exponential backoff.
-func relayVideoStream(ctx context.Context, client idb.IDBClient, errCh chan<- error) {
-	relayVideoStreamWithConfig(ctx, client, errCh, defaultRetryConfig, nil)
+func RelayVideoStream(ctx context.Context, client idb.IDBClient, errCh chan<- error) {
+	RelayVideoStreamWithConfig(ctx, client, errCh, DefaultRetryConfig, nil)
 }
 
-// relayVideoStreamEvents is the serve-mode variant that outputs JSON Lines Events.
-func relayVideoStreamEvents(ctx context.Context, client idb.IDBClient, errCh chan<- error, voc *videoOutputConfig) {
-	relayVideoStreamWithConfig(ctx, client, errCh, defaultRetryConfig, voc)
+// RelayVideoStreamEvents is the serve-mode variant that outputs JSON Lines Events.
+func RelayVideoStreamEvents(ctx context.Context, client idb.IDBClient, errCh chan<- error, voc *VideoOutputConfig) {
+	RelayVideoStreamWithConfig(ctx, client, errCh, DefaultRetryConfig, voc)
 }
 
-func relayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh chan<- error, cfg streamRetryConfig, voc *videoOutputConfig) {
-	backoff := cfg.initialBackoff
+// RelayVideoStreamWithConfig is the configurable video relay implementation.
+func RelayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh chan<- error, cfg StreamRetryConfig, voc *VideoOutputConfig) {
+	backoff := cfg.InitialBackoff
 
 	for attempt := 0; ; attempt++ {
-		err := runVideoStreamLoop(ctx, client, voc)
+		err := RunVideoStreamLoop(ctx, client, voc)
 		if ctx.Err() != nil {
 			return
 		}
-		if attempt >= cfg.maxRetries {
-			errCh <- fmt.Errorf("video stream failed after %d retries: %w", cfg.maxRetries, err)
+		if attempt >= cfg.MaxRetries {
+			errCh <- fmt.Errorf("video stream failed after %d retries: %w", cfg.MaxRetries, err)
 			return
 		}
 		slog.Warn("video stream disconnected, reconnecting",
@@ -73,18 +74,18 @@ func relayVideoStreamWithConfig(ctx context.Context, client idb.IDBClient, errCh
 			return
 		case <-time.After(backoff):
 		}
-		backoff = min(backoff*2, cfg.maxBackoff)
+		backoff = min(backoff*2, cfg.MaxBackoff)
 	}
 }
 
-// runVideoStreamLoop handles a single RBGA video stream session.
+// RunVideoStreamLoop handles a single RBGA video stream session.
 // idb_companion streams raw RGBA pixels (no inter-frame compression), which
 // are converted to JPEG and written as base64 lines to stdout.
 //
 // RBGA format is used instead of H264 because idb_companion's H264 encoder
 // produces severe ghosting artifacts during rapid screen changes.
 // See survey/idb_companion_h264_issue.md for details.
-func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOutputConfig) error {
+func RunVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *VideoOutputConfig) error {
 	frameCh, err := client.VideoStream(ctx, 30)
 	if err != nil {
 		return fmt.Errorf("video stream open: %w", err)
@@ -125,7 +126,7 @@ func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOut
 
 			// Detect frame dimensions from the first frame.
 			if frameW == 0 {
-				frameW, frameH = detectFrameDimensions(len(data), sw, sh)
+				frameW, frameH = DetectFrameDimensions(len(data), sw, sh)
 				if frameW == 0 {
 					slog.Warn("cannot determine RBGA frame dimensions",
 						"dataSize", len(data), "screen", fmt.Sprintf("%dx%d", sw, sh))
@@ -140,16 +141,16 @@ func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOut
 				continue
 			}
 
-			encoded, err := encodeRBGAFrame(data, frameW, frameH, &buf)
+			encoded, err := EncodeRBGAFrame(data, frameW, frameH, &buf)
 			if err != nil {
 				slog.Debug("JPEG encode failed", "err", err)
 				continue
 			}
 
-			if voc != nil && voc.ew != nil {
-				if sendErr := voc.ew.Send(&pb.Event{
-					StreamId: voc.streamID,
-					Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: voc.device, File: voc.file, Data: encoded}},
+			if voc != nil && voc.EW != nil {
+				if sendErr := voc.EW.Send(&pb.Event{
+					StreamId: voc.StreamID,
+					Payload:  &pb.Event_Frame{Frame: &pb.Frame{Device: voc.Device, File: voc.File, Data: encoded}},
 				}); sendErr != nil {
 					return fmt.Errorf("frame send: %w", sendErr)
 				}
@@ -160,8 +161,8 @@ func runVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *videoOut
 	}
 }
 
-// encodeRBGAFrame converts raw RGBA pixel data into a base64-encoded JPEG string.
-func encodeRBGAFrame(data []byte, frameW, frameH int, buf *bytes.Buffer) (string, error) {
+// EncodeRBGAFrame converts raw RGBA pixel data into a base64-encoded JPEG string.
+func EncodeRBGAFrame(data []byte, frameW, frameH int, buf *bytes.Buffer) (string, error) {
 	img := &image.NRGBA{
 		Pix:    data,
 		Stride: frameW * 4,
@@ -174,9 +175,9 @@ func encodeRBGAFrame(data []byte, frameW, frameH int, buf *bytes.Buffer) (string
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
-// detectFrameDimensions determines RBGA pixel dimensions from the data size
+// DetectFrameDimensions determines RBGA pixel dimensions from the data size
 // and the screen aspect ratio (in points).
-func detectFrameDimensions(dataSize, screenW, screenH int) (width, height int) {
+func DetectFrameDimensions(dataSize, screenW, screenH int) (width, height int) {
 	if dataSize%4 != 0 || screenW == 0 || screenH == 0 {
 		return 0, 0
 	}

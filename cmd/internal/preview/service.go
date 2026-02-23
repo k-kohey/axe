@@ -14,6 +14,7 @@ import (
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/parsing"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -48,14 +49,14 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	defer stop()
 
 	// In serve mode, create an EventWriter to send JSON Lines to stdout.
-	var ew *EventWriter
+	var ew *protocol.EventWriter
 	if serve {
-		ew = NewEventWriter(os.Stdout)
+		ew = protocol.NewEventWriter(os.Stdout)
 
 		// Advertise the protocol version to the extension.
 		if err := ew.Send(&pb.Event{
 			Payload: &pb.Event_Hello{
-				Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+				Hello: &pb.Hello{ProtocolVersion: protocol.ProtocolVersion},
 			},
 		}); err != nil {
 			return fmt.Errorf("sending hello: %w", err)
@@ -273,13 +274,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		streamCtx, cancel := context.WithCancel(context.Background())
 		cancelStream = cancel
 		idbErrCh = make(chan error, 1)
-		voc := &videoOutputConfig{
-			ew:       ew,
-			streamID: defaultStreamID,
-			device:   device,
-			file:     sourceFile,
+		voc := &protocol.VideoOutputConfig{
+			EW:       ew,
+			StreamID: defaultStreamID,
+			Device:   device,
+			File:     sourceFile,
 		}
-		go relayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
+		go protocol.RelayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
 	}
 
 	if watch {
@@ -318,10 +319,10 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			trackedFiles:    trackedFiles,
 		}
 
-		var hid *hidHandler
+		var hid *protocol.HIDHandler
 		if idbClient != nil {
 			if w, h, err := idbClient.ScreenSize(context.Background()); err == nil {
-				hid = newHIDHandler(idbClient, w, h)
+				hid = protocol.NewHIDHandler(idbClient, w, h)
 			}
 		}
 
@@ -356,12 +357,12 @@ func RunServe(pc ProjectConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	ew := NewEventWriter(os.Stdout)
+	ew := protocol.NewEventWriter(os.Stdout)
 
 	// Advertise the protocol version to the extension.
 	if err := ew.Send(&pb.Event{
 		Payload: &pb.Event_Hello{
-			Hello: &pb.Hello{ProtocolVersion: ProtocolVersion},
+			Hello: &pb.Hello{ProtocolVersion: protocol.ProtocolVersion},
 		},
 	}); err != nil {
 		return fmt.Errorf("sending hello: %w", err)

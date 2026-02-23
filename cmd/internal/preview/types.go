@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
 // buildSettings holds values extracted from xcodebuild -showBuildSettings.
@@ -80,7 +82,7 @@ type watchContext struct {
 	deviceSetPath string // custom device set path for simctl --set
 	loaderPath    string // path to the compiled loader binary
 	serve         bool   // true when running in serve mode (IDE integration)
-	ew            *EventWriter
+	ew            *protocol.EventWriter
 
 	// Injected runners for testability.
 	build     BuildRunner

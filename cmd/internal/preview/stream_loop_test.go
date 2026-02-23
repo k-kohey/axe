@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/protocol"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 )
 
@@ -42,7 +43,7 @@ func newTestStream(id string) *stream {
 func TestStreamLoop_Cancellation(t *testing.T) {
 	s := newTestStream("test-cancel")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -68,7 +69,7 @@ func TestStreamLoop_Cancellation(t *testing.T) {
 func TestStreamLoop_SwitchFile(t *testing.T) {
 	s := newTestStream("test-switch")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -97,7 +98,7 @@ func TestStreamLoop_SwitchFile(t *testing.T) {
 func TestStreamLoop_NextPreview(t *testing.T) {
 	s := newTestStream("test-next")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +139,7 @@ func TestStreamLoop_NextPreview(t *testing.T) {
 func TestStreamLoop_BootCrash(t *testing.T) {
 	s := newTestStream("test-crash")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
 
 	// Simulate a boot companion that has already died.
@@ -180,7 +181,7 @@ func TestStreamLoop_BootCrash(t *testing.T) {
 func TestStreamLoop_IDBError(t *testing.T) {
 	s := newTestStream("test-idb-err")
 	var buf syncBuffer
-	ew := NewEventWriter(&buf)
+	ew := protocol.NewEventWriter(&buf)
 	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
 
 	idbErrCh := make(chan error, 1)
