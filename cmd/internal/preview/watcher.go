@@ -506,6 +506,9 @@ func handleSwitchFileCmd(
 	ctx context.Context, newFile, sourceFile string, trackedSet map[string]bool,
 	pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
 ) (string, map[string]bool) {
+	if newFile == "" {
+		return sourceFile, trackedSet
+	}
 	fmt.Fprintf(os.Stderr, "\nSwitching file to %s...\n", newFile)
 	if err := switchFile(ctx, newFile, pc, bs, dirs, wctx, ws); err != nil {
 		fmt.Fprintf(os.Stderr, "File switch error: %v\n", err)
