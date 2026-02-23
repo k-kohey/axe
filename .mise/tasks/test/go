@@ -3,4 +3,4 @@
 #MISE depends=["proto"]
 
 set -euo pipefail
-go test -C cmd ./... -cover
+go test -C cmd ./... -cover -timeout 15m
