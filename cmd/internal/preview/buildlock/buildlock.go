@@ -1,4 +1,4 @@
-package preview
+package buildlock
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// buildLock provides file-based reader-writer locking for the shared build directory.
+// BuildLock provides file-based reader-writer locking for the shared build directory.
 // Multiple preview processes for the same project share a single Build dir.
 //
 // Lock/Unlock (LOCK_EX): exclusive access for xcodebuild execution.
@@ -20,31 +20,32 @@ import (
 // LOCK_SH holders can coexist, but LOCK_EX blocks until all LOCK_SH are released
 // and vice versa. This mirrors Xcode's ResourceGraph Actor serialization
 // (see docs/xcode-preview-reverse-engineering.md).
-type buildLock struct {
+type BuildLock struct {
 	path string
 	file *os.File
 }
 
-func newBuildLock(buildDir string) *buildLock {
-	return &buildLock{
+// New creates a BuildLock for the given build directory.
+func New(buildDir string) *BuildLock {
+	return &BuildLock{
 		path: filepath.Join(buildDir, ".axe-build.lock"),
 	}
 }
 
 // Lock acquires an exclusive file lock, polling until the lock is obtained or
 // ctx is cancelled.
-func (l *buildLock) Lock(ctx context.Context) error {
+func (l *BuildLock) Lock(ctx context.Context) error {
 	return l.lockWithMode(ctx, syscall.LOCK_EX)
 }
 
 // RLock acquires a shared file lock. Multiple readers can hold LOCK_SH
 // simultaneously, but LOCK_SH blocks while LOCK_EX is held (and vice versa).
-func (l *buildLock) RLock(ctx context.Context) error {
+func (l *BuildLock) RLock(ctx context.Context) error {
 	return l.lockWithMode(ctx, syscall.LOCK_SH)
 }
 
 // Unlock releases the file lock and closes the underlying file.
-func (l *buildLock) Unlock() {
+func (l *BuildLock) Unlock() {
 	if l.file == nil {
 		return
 	}
@@ -54,14 +55,14 @@ func (l *buildLock) Unlock() {
 }
 
 // RUnlock releases the shared lock. Implementation is identical to Unlock.
-func (l *buildLock) RUnlock() {
+func (l *BuildLock) RUnlock() {
 	l.Unlock()
 }
 
 // lockWithMode acquires a file lock with the given mode (LOCK_EX or LOCK_SH),
 // polling until the lock is obtained or ctx is cancelled. The poll interval
 // avoids busy-waiting while keeping responsiveness reasonable.
-func (l *buildLock) lockWithMode(ctx context.Context, mode int) (retErr error) {
+func (l *BuildLock) lockWithMode(ctx context.Context, mode int) (retErr error) {
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
 		return fmt.Errorf("creating lock directory: %w", err)
 	}

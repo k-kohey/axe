@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
 // replacementModuleName generates the module name for a thunk dylib, matching
@@ -44,7 +46,7 @@ func compileThunk(ctx context.Context, thunkPath string, bs *buildSettings, dirs
 // compileAndLink runs swiftc compile (.swift → .o) and link (.o → .dylib)
 // under LOCK_SH to protect against concurrent xcodebuild writes to dirs.Build.
 func compileAndLink(ctx context.Context, bs *buildSettings, dirs previewDirs, sdk, target, replacementModule, thunkPath, objPath, dylibPath string, tc ToolchainRunner) error {
-	lock := newBuildLock(dirs.Build)
+	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		return fmt.Errorf("acquiring read lock: %w", err)
 	}

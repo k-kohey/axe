@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
 func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) (*buildSettings, error) {
@@ -76,7 +78,7 @@ func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs,
 }
 
 func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) error {
-	lock := newBuildLock(dirs.Build)
+	lock := buildlock.New(dirs.Build)
 	if err := lock.Lock(ctx); err != nil {
 		return fmt.Errorf("acquiring build lock: %w", err)
 	}
@@ -106,7 +108,7 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br Bu
 // transitive SPM dependencies (C module headers, framework bundles, and
 // generated ObjC module maps) that xcodebuild manages internally.
 func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDirs) {
-	lock := newBuildLock(dirs.Build)
+	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		slog.Warn("Failed to acquire read lock for compiler paths", "err", err)
 		return
