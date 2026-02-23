@@ -34,6 +34,14 @@ type eventLoopConfig struct {
 	idbErrCh      <-chan error
 	bootDiedCh    <-chan struct{}
 
+	// onCancel is called when the context is cancelled (e.g. Ctrl+C).
+	// May be nil if no cleanup message is needed.
+	onCancel func()
+
+	// bootErr returns the error from the boot companion process, if available.
+	// Used to enrich the boot crash error message. May be nil.
+	bootErr func() error
+
 	// onFatal is called when a fatal event occurs (boot crash, idb error)
 	// before returning the error. Multi-stream uses this to send StreamStopped.
 	// May be nil for single-stream mode (no protocol events to send).
@@ -55,6 +63,9 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if cfg.onCancel != nil {
+				cfg.onCancel()
+			}
 			return nil
 
 		case path := <-cfg.fileChangeCh:
@@ -110,6 +121,11 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 
 		case <-cfg.bootDiedCh:
 			msg := "simulator crashed unexpectedly"
+			if cfg.bootErr != nil {
+				if err := cfg.bootErr(); err != nil {
+					msg = fmt.Sprintf("simulator crashed: %v", err)
+				}
+			}
 			if cfg.onFatal != nil {
 				cfg.onFatal("runtime_error", msg)
 			}
@@ -163,6 +179,12 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 		inputCh:       s.inputCh,
 		idbErrCh:      idbErrCh,
 		bootDiedCh:    bootDiedCh,
+		bootErr: func() error {
+			if s.bootCompanion != nil {
+				return s.bootCompanion.Err()
+			}
+			return nil
+		},
 		onFatal: func(reason, message string) {
 			s.sendStopped(sm.ew, reason, message, "")
 		},

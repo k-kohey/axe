@@ -68,6 +68,9 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 		inputCh:       inputCh,
 		idbErrCh:      idbErrCh,
 		bootDiedCh:    bootDiedCh,
+		onCancel: func() {
+			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
+		},
 	}
 
 	return runEventLoop(ctx, cfg)
