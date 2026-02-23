@@ -15,7 +15,7 @@ type DependencyGraph struct {
 // BuildTransitiveDeps performs a BFS over the type→file map starting from
 // targetFile, collecting all transitively referenced files.
 // The returned graph includes targetFile itself.
-func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string]string, parser SwiftFileParser) (*DependencyGraph, error) {
+func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, parser SwiftFileParser) (*DependencyGraph, error) {
 	graph := &DependencyGraph{All: make(map[string]bool)}
 	cleanTarget := filepath.Clean(targetFile)
 	graph.All[cleanTarget] = true
@@ -38,16 +38,18 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 		}
 
 		for _, typeName := range referencedTypes {
-			filePath, ok := typeMap[typeName]
+			filePaths, ok := typeMap[typeName]
 			if !ok {
 				continue
 			}
-			cleanPath := filepath.Clean(filePath)
-			if graph.All[cleanPath] {
-				continue
+			for _, filePath := range filePaths {
+				cleanPath := filepath.Clean(filePath)
+				if graph.All[cleanPath] {
+					continue
+				}
+				graph.All[cleanPath] = true
+				queue = append(queue, cleanPath)
 			}
-			graph.All[cleanPath] = true
-			queue = append(queue, cleanPath)
 		}
 	}
 

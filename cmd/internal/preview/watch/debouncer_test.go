@@ -133,6 +133,38 @@ func TestDebouncer_TrackedDebounceResetsOnRapidChanges(t *testing.T) {
 	}
 }
 
+func TestDebouncer_ResetClearsPendingDepTimer(t *testing.T) {
+	db := NewDebouncer()
+
+	trackedSet := map[string]bool{"/src/HogeView.swift": true}
+
+	// Trigger a dep change (untracked file).
+	db.HandleFileChange("/src/Other.swift", trackedSet)
+
+	// Simulate file switch: reset the debouncer.
+	db.Reset()
+
+	// Old dep timer should NOT fire after reset.
+	select {
+	case <-db.DepCh:
+		t.Fatal("DepCh should not fire after Reset")
+	case <-time.After(DepDebounceDelay + 100*time.Millisecond):
+		// OK — timer was cancelled by Reset.
+	}
+
+	// New tracked change should work normally after reset.
+	db.HandleFileChange("/src/HogeView.swift", trackedSet)
+
+	select {
+	case got := <-db.TrackedCh:
+		if got != "/src/HogeView.swift" {
+			t.Errorf("expected /src/HogeView.swift, got %s", got)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("TrackedCh did not fire after Reset")
+	}
+}
+
 func TestDebouncer_StopCancelsPendingTimers(t *testing.T) {
 	db := NewDebouncer()
 

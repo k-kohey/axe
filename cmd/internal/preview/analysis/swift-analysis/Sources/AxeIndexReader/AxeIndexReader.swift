@@ -83,6 +83,8 @@ func readTypeFileMap(
       continue
     }
 
+    // swift-format-ignore: ReplaceForEachWithForLoop
+    // RecordReader provides forEach but not Sequence conformance.
     recordReader.forEach { occurrence in
       let symbol = occurrence.symbol
       // Only collect type definitions.

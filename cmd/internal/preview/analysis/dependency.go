@@ -80,7 +80,7 @@ func ResolveDependencies(ctx context.Context, targetFile string, projectRoot str
 // indexStorePath is the path to the index store (e.g. dirs.Build + "/Index.noindex/DataStore").
 // Returns the dependency graph and the 1-level dependency list for thunk generation.
 func ResolveTransitiveDependencies(ctx context.Context, targetFile string, projectRoot string, indexStorePath string, sl SwiftFileLister, parser SwiftFileParser) (*DependencyGraph, []string, error) {
-	typeMap, err := ReadTypeFileMap(ctx, indexStorePath, projectRoot)
+	typeMap, err := readTypeFileMultiMap(ctx, indexStorePath, projectRoot)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()
@@ -117,7 +117,9 @@ func ResolveTransitiveDependencies(ctx context.Context, targetFile string, proje
 // resolveDirectDepsFromTypeMap resolves 1-level dependencies by looking up
 // the target's referenced types in the typeMap. This is O(R) where R is the
 // number of referenced types, instead of O(N) for a full project scan.
-func resolveDirectDepsFromTypeMap(targetFile string, typeMap map[string]string, parser SwiftFileParser) ([]string, error) {
+// typeMap maps type names to one or more file paths (multiple files may define
+// the same type name, e.g. across workspace targets with stale index data).
+func resolveDirectDepsFromTypeMap(targetFile string, typeMap map[string][]string, parser SwiftFileParser) ([]string, error) {
 	referencedTypes, definedTypes, err := parser.ParseTypes(targetFile)
 	if err != nil {
 		return nil, fmt.Errorf("parsing target file: %w", err)
@@ -137,16 +139,18 @@ func resolveDirectDepsFromTypeMap(targetFile string, typeMap map[string]string, 
 		if definedSet[typeName] {
 			continue
 		}
-		filePath, ok := typeMap[typeName]
+		filePaths, ok := typeMap[typeName]
 		if !ok {
 			continue
 		}
-		cleanPath := filepath.Clean(filePath)
-		if cleanPath == cleanTarget || seen[cleanPath] {
-			continue
+		for _, filePath := range filePaths {
+			cleanPath := filepath.Clean(filePath)
+			if cleanPath == cleanTarget || seen[cleanPath] {
+				continue
+			}
+			seen[cleanPath] = true
+			deps = append(deps, filePath)
 		}
-		seen[cleanPath] = true
-		deps = append(deps, filePath)
 	}
 
 	return deps, nil

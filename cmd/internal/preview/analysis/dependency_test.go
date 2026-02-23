@@ -155,9 +155,9 @@ func TestResolveDirectDepsFromTypeMap_Basic(t *testing.T) {
 	parser := &mockParser{results: map[string]mockParseResult{
 		target: {referenced: []string{"ChildView", "Text"}, defined: []string{"ContentView"}},
 	}}
-	typeMap := map[string]string{
-		"ContentView": target,
-		"ChildView":   dep,
+	typeMap := map[string][]string{
+		"ContentView": {target},
+		"ChildView":   {dep},
 		// "Text" is not in typeMap (framework type), should be skipped.
 	}
 
@@ -180,9 +180,9 @@ func TestResolveDirectDepsFromTypeMap_SelfDefined(t *testing.T) {
 	parser := &mockParser{results: map[string]mockParseResult{
 		target: {referenced: []string{"MyModel"}, defined: []string{"MyModel", "CombinedView"}},
 	}}
-	typeMap := map[string]string{
-		"MyModel":      target,
-		"CombinedView": target,
+	typeMap := map[string][]string{
+		"MyModel":      {target},
+		"CombinedView": {target},
 	}
 
 	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
@@ -203,9 +203,9 @@ func TestResolveDirectDepsFromTypeMap_Deduplicates(t *testing.T) {
 		target: {referenced: []string{"TypeA", "TypeB"}, defined: []string{"MyView"}},
 	}}
 	// Both types map to the same file.
-	typeMap := map[string]string{
-		"TypeA": dep,
-		"TypeB": dep,
+	typeMap := map[string][]string{
+		"TypeA": {dep},
+		"TypeB": {dep},
 	}
 
 	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
@@ -215,6 +215,36 @@ func TestResolveDirectDepsFromTypeMap_Deduplicates(t *testing.T) {
 
 	if len(deps) != 1 {
 		t.Fatalf("deps count = %d, want 1 (same file should be deduplicated), got %v", len(deps), deps)
+	}
+}
+
+func TestResolveDirectDepsFromTypeMap_DuplicateTypeName(t *testing.T) {
+	target := filepath.Join("/project", "View.swift")
+	depA := filepath.Join("/project", "features", "Product.swift")
+	depB := filepath.Join("/project", "legacy", "Product.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"Product"}, defined: []string{"MyView"}},
+	}}
+	// Same type name defined in two different files.
+	typeMap := map[string][]string{
+		"Product": {depA, depB},
+	}
+
+	deps, err := resolveDirectDepsFromTypeMap(target, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(deps) != 2 {
+		t.Fatalf("deps count = %d, want 2 (both files defining Product), got %v", len(deps), deps)
+	}
+	found := map[string]bool{}
+	for _, d := range deps {
+		found[filepath.Base(d)] = true
+	}
+	if !found["Product.swift"] {
+		t.Error("missing features/Product.swift or legacy/Product.swift")
 	}
 }
 

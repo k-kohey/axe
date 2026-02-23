@@ -16,9 +16,9 @@ func TestBuildTransitiveDeps_SingleLevel(t *testing.T) {
 		target: {referenced: []string{"ChildView"}, defined: []string{"ContentView"}},
 		dep:    {referenced: nil, defined: []string{"ChildView"}},
 	}}
-	typeMap := map[string]string{
-		"ContentView": target,
-		"ChildView":   dep,
+	typeMap := map[string][]string{
+		"ContentView": {target},
+		"ChildView":   {dep},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
@@ -47,10 +47,10 @@ func TestBuildTransitiveDeps_Transitive(t *testing.T) {
 		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
 		c: {referenced: nil, defined: []string{"CType"}},
 	}}
-	typeMap := map[string]string{
-		"AType": a,
-		"BType": b,
-		"CType": c,
+	typeMap := map[string][]string{
+		"AType": {a},
+		"BType": {b},
+		"CType": {c},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
@@ -80,9 +80,9 @@ func TestBuildTransitiveDeps_Cycle(t *testing.T) {
 		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
 		b: {referenced: []string{"AType"}, defined: []string{"BType"}},
 	}}
-	typeMap := map[string]string{
-		"AType": a,
-		"BType": b,
+	typeMap := map[string][]string{
+		"AType": {a},
+		"BType": {b},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
@@ -102,8 +102,8 @@ func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 	parser := &mockParser{results: map[string]mockParseResult{
 		target: {referenced: nil, defined: []string{"Simple"}},
 	}}
-	typeMap := map[string]string{
-		"Simple": target,
+	typeMap := map[string][]string{
+		"Simple": {target},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
@@ -123,8 +123,8 @@ func TestBuildTransitiveDeps_UnknownTypeSkipped(t *testing.T) {
 		target: {referenced: []string{"UnknownFrameworkType"}, defined: []string{"MyView"}},
 	}}
 	// typeMap doesn't contain UnknownFrameworkType — it's a framework type.
-	typeMap := map[string]string{
-		"MyView": target,
+	typeMap := map[string][]string{
+		"MyView": {target},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
@@ -146,9 +146,9 @@ func TestBuildTransitiveDeps_ContextCancelled(t *testing.T) {
 	parser := &mockParser{results: map[string]mockParseResult{
 		target: {referenced: []string{"Other"}, defined: []string{"View"}},
 	}}
-	typeMap := map[string]string{
-		"View":  target,
-		"Other": filepath.Join("/project", "Other.swift"),
+	typeMap := map[string][]string{
+		"View":  {target},
+		"Other": {filepath.Join("/project", "Other.swift")},
 	}
 
 	_, err := BuildTransitiveDeps(ctx, target, typeMap, parser)
@@ -163,7 +163,7 @@ func TestBuildTransitiveDeps_EmptyTypeMap(t *testing.T) {
 	parser := &mockParser{results: map[string]mockParseResult{
 		target: {referenced: []string{"SomeType"}, defined: []string{"AloneView"}},
 	}}
-	typeMap := map[string]string{}
+	typeMap := map[string][]string{}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
 	if err != nil {
@@ -188,10 +188,10 @@ func TestBuildTransitiveDeps_ParseErrorOnDependency(t *testing.T) {
 		goodDep: {referenced: nil, defined: []string{"GoodType"}},
 		badDep:  {err: fmt.Errorf("syntax error in dependency")},
 	}}
-	typeMap := map[string]string{
-		"RootType": target,
-		"GoodType": goodDep,
-		"BadType":  badDep,
+	typeMap := map[string][]string{
+		"RootType": {target},
+		"GoodType": {goodDep},
+		"BadType":  {badDep},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
@@ -239,10 +239,10 @@ func TestBuildTransitiveDeps_MidTraversalContextCancel(t *testing.T) {
 		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
 		c: {referenced: nil, defined: []string{"CType"}},
 	}}
-	typeMap := map[string]string{
-		"AType": a,
-		"BType": b,
-		"CType": c,
+	typeMap := map[string][]string{
+		"AType": {a},
+		"BType": {b},
+		"CType": {c},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -270,9 +270,9 @@ func TestBuildTransitiveDeps_NonCleanPaths(t *testing.T) {
 		dep:      {referenced: []string{"DepType"}, defined: []string{"DepType"}},
 		depClean: {referenced: nil, defined: []string{"DepType"}},
 	}}
-	typeMap := map[string]string{
-		"RootType": target,
-		"DepType":  dep,
+	typeMap := map[string][]string{
+		"RootType": {target},
+		"DepType":  {dep},
 	}
 
 	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
@@ -286,5 +286,37 @@ func TestBuildTransitiveDeps_NonCleanPaths(t *testing.T) {
 	// Ensure no duplicate entry from the non-clean path.
 	if len(graph.All) != 2 {
 		t.Errorf("graph size = %d, want 2 (target + deduplicated dep)", len(graph.All))
+	}
+}
+
+func TestBuildTransitiveDeps_DuplicateTypeName(t *testing.T) {
+	target := filepath.Join("/project", "View.swift")
+	depA := filepath.Join("/project", "features", "Product.swift")
+	depB := filepath.Join("/project", "legacy", "Product.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		target: {referenced: []string{"Product"}, defined: []string{"MyView"}},
+		depA:   {referenced: nil, defined: []string{"Product"}},
+		depB:   {referenced: nil, defined: []string{"Product"}},
+	}}
+	// Same type name maps to multiple files.
+	typeMap := map[string][]string{
+		"MyView":  {target},
+		"Product": {depA, depB},
+	}
+
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !graph.All[filepath.Clean(depA)] {
+		t.Error("graph should include features/Product.swift")
+	}
+	if !graph.All[filepath.Clean(depB)] {
+		t.Error("graph should include legacy/Product.swift")
+	}
+	if len(graph.All) != 3 {
+		t.Errorf("graph size = %d, want 3 (target + 2 Product files)", len(graph.All))
 	}
 }

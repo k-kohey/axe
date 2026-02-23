@@ -24,6 +24,15 @@ final class TypeReferenceCollector: SyntaxVisitor {
     return .visitChildren
   }
 
+  /// Captures qualified type names (e.g. `Outer.Inner`, `A.B.C`).
+  /// Collects both the bare member name (for index store compatibility,
+  /// which records types by `symbol.name`) and the full qualified form.
+  override func visit(_ node: MemberTypeSyntax) -> SyntaxVisitorContinueKind {
+    referencedTypes.insert(node.name.text)
+    referencedTypes.insert(buildQualifiedName(node.baseType) + "." + node.name.text)
+    return .visitChildren
+  }
+
   /// Captures type references in expression position (e.g. `ChildView(title: "Hi")`).
   /// Uses Swift's naming convention (UpperCamelCase = type) as a heuristic.
   override func visit(_ node: DeclReferenceExprSyntax) -> SyntaxVisitorContinueKind {
@@ -32,6 +41,20 @@ final class TypeReferenceCollector: SyntaxVisitor {
       referencedTypes.insert(name)
     }
     return .visitChildren
+  }
+
+  // MARK: - Helpers
+
+  /// Builds a qualified type name from a TypeSyntax node by walking the tree.
+  /// e.g. `MemberTypeSyntax(base: IdentifierTypeSyntax("A"), name: "B")` → "A.B"
+  private func buildQualifiedName(_ type: TypeSyntax) -> String {
+    if let member = type.as(MemberTypeSyntax.self) {
+      return buildQualifiedName(member.baseType) + "." + member.name.text
+    }
+    if let ident = type.as(IdentifierTypeSyntax.self) {
+      return ident.name.text
+    }
+    return type.trimmedDescription
   }
 
   // MARK: - Type Definitions

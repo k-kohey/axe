@@ -173,6 +173,52 @@ struct TypeReferenceCollectorTests {
     #expect(collector.referencedTypes.contains("V"))
   }
 
+  @Test("Collects bare and qualified names from member type syntax (e.g. Outer.Inner)")
+  func memberTypeReferences() {
+    let source = """
+      struct HogeView {
+          var child: Outer.Inner
+          var deep: A.B.C
+          var plain: PlainType
+      }
+      """
+    let tree = Parser.parse(source: source)
+    let collector = TypeReferenceCollector()
+    collector.walk(tree)
+
+    // Bare member names are collected for index store compatibility
+    // (index store records types by their short name via symbol.name).
+    #expect(collector.referencedTypes.contains("Inner"))
+    #expect(collector.referencedTypes.contains("B"))
+    #expect(collector.referencedTypes.contains("C"))
+    // Base type names are collected via IdentifierTypeSyntax.
+    #expect(collector.referencedTypes.contains("Outer"))
+    #expect(collector.referencedTypes.contains("A"))
+    // Qualified forms are also collected for future IndexStoreDB compatibility.
+    #expect(collector.referencedTypes.contains("Outer.Inner"))
+    #expect(collector.referencedTypes.contains("A.B.C"))
+    // Plain types still work.
+    #expect(collector.referencedTypes.contains("PlainType"))
+  }
+
+  @Test("Collects component names from member access in expression position")
+  func memberAccessExpression() {
+    let source = """
+      struct HogeView {
+          var body: some View {
+              Outer.Inner()
+          }
+      }
+      """
+    let tree = Parser.parse(source: source)
+    let collector = TypeReferenceCollector()
+    collector.walk(tree)
+
+    // Both component names are collected via DeclReferenceExprSyntax.
+    #expect(collector.referencedTypes.contains("Outer"))
+    #expect(collector.referencedTypes.contains("Inner"))
+  }
+
   @Test("Struct without computed properties is included in definedTypes")
   func nonComputedStruct() {
     let source = """

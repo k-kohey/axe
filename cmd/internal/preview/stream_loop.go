@@ -116,6 +116,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			}
 
 		case newFile := <-cfg.switchFileCh:
+			db.Reset()
 			newSrc, newSet := handleSwitchFileCmd(ctx, newFile, sourceFile, trackedSet, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws)
 			sourceFile = newSrc
 			trackedSet = newSet

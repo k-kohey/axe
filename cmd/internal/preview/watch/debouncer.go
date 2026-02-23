@@ -89,6 +89,29 @@ func (d *Debouncer) ClearDepTimer() {
 	d.depTimer = nil
 }
 
+// Reset cancels all pending timers and drains the output channels,
+// restoring the debouncer to a clean state. Use this on file switch
+// to prevent stale timers from firing against the new file.
+func (d *Debouncer) Reset() {
+	if d.trackedTimer != nil {
+		d.trackedTimer.Stop()
+		d.trackedTimer = nil
+	}
+	if d.depTimer != nil {
+		d.depTimer.Stop()
+		d.depTimer = nil
+	}
+	// Drain any buffered signals that may have fired between Stop and now.
+	select {
+	case <-d.trackedCh:
+	default:
+	}
+	select {
+	case <-d.depCh:
+	default:
+	}
+}
+
 // Stop cancels all pending timers. Call this when the event loop exits.
 func (d *Debouncer) Stop() {
 	if d.trackedTimer != nil {
