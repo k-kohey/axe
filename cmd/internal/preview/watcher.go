@@ -14,7 +14,6 @@ import (
 
 	"github.com/k-kohey/axe/internal/preview/codegen"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/k-kohey/axe/internal/preview/parsing"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -34,166 +33,147 @@ type watchState struct {
 	trackedFiles    []string          // target + 1-level dependency file paths
 }
 
+// runWatcher sets up file watching and command dispatching, then delegates
+// to the unified event loop. It uses SharedWatcher for file change detection
+// and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	bs *buildSettings, dirs previewDirs, wctx watchContext,
-	ws *watchState, hid *protocol.HIDHandler, events watchEvents) error {
-	watcher, err := fsnotify.NewWatcher()
+	ws *watchState, hid *protocol.HIDHandler,
+	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
+
+	// Set up shared file watcher.
+	watchRoot := filepath.Dir(pc.primaryPath())
+	sw, err := watch.NewSharedWatcher(ctx, watchRoot, wctx.sources)
 	if err != nil {
 		return fmt.Errorf("creating file watcher: %w", err)
 	}
-	defer func() { _ = watcher.Close() }()
-
-	// Watch directories containing Swift source files.
-	// Use git to discover them (fast, respects .gitignore), falling back to WalkDir.
-	watchRoot := filepath.Dir(pc.primaryPath())
-	watchDirs, err := wctx.sources.SwiftDirs(ctx, watchRoot)
-	if err != nil {
-		slog.Debug("git ls-files unavailable, falling back to WalkDir", "err", err)
-		watchDirs, err = watch.WalkSwiftDirs(watchRoot)
-		if err != nil {
-			return fmt.Errorf("setting up directory watch: %w", err)
-		}
-	}
-	for _, d := range watchDirs {
-		if err := watcher.Add(d); err != nil {
-			slog.Debug("Cannot watch directory", "path", d, "err", err)
-		}
-	}
+	defer sw.Close()
 
 	fmt.Fprintf(os.Stderr, "Watching %s for changes (Enter to cycle previews, Ctrl+C to stop)...\n", watchRoot)
 
-	// Read commands from stdin (preview cycling or file switching in serve mode).
-	// In serve mode, new Command protocol is used. In non-serve mode, legacy stdinCommand.
-	cmdCh := make(chan stdinCommand, 1)
-	protoCmdCh := make(chan *pb.Command, 1)
+	// Create typed channels for the event loop.
+	fileChangeCh := make(chan string, 1)
+	switchFileCh := make(chan string, 1)
+	nextPreviewCh := make(chan struct{}, 1)
+	inputCh := make(chan *pb.Input, 1)
+
+	// Register as a listener on the shared watcher.
+	const singleStreamID = "single"
+	sw.AddListener(singleStreamID, fileChangeCh)
+
+	// Dispatch stdin commands to typed channels.
 	if wctx.serve {
+		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
 	} else {
+		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
+		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
 	}
 
-	db := watch.NewDebouncer()
-	defer db.Stop()
+	cfg := &eventLoopConfig{
+		sourceFile:    sourceFile,
+		pc:            pc,
+		bs:            bs,
+		dirs:          dirs,
+		wctx:          wctx,
+		ws:            ws,
+		hid:           hid,
+		fileChangeCh:  fileChangeCh,
+		switchFileCh:  switchFileCh,
+		nextPreviewCh: nextPreviewCh,
+		inputCh:       inputCh,
+		idbErrCh:      idbErrCh,
+		bootDiedCh:    bootDiedCh,
+	}
 
-	// Build a set of tracked file paths for efficient lookup.
-	ws.mu.Lock()
-	trackedFiles := ws.trackedFiles
-	ws.mu.Unlock()
-	trackedSet := buildTrackedSet(trackedFiles)
+	return runEventLoop(ctx, cfg)
+}
 
+// dispatchStdinCommands reads stdinCommands and dispatches them to typed channels.
+// Commands that require multi-step HID operations (tap, swipe) are handled
+// directly via the HIDHandler since they cannot be represented as pb.Input.
+func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *protocol.HIDHandler,
+	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, inputCh chan<- *pb.Input) {
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
-			return nil // cleanup handled by defer in Run
-
-		case event, ok := <-watcher.Events:
+			return
+		case cmd, ok := <-cmdCh:
 			if !ok {
-				return nil
+				return
 			}
-
-			// Only react to .swift files
-			if !strings.HasSuffix(event.Name, ".swift") {
-				continue
-			}
-
-			// Accept Write and Create (atomic save = rename creates new file)
-			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
-				continue
-			}
-
-			db.HandleFileChange(filepath.Clean(event.Name), trackedSet)
-
-		case changedFile := <-db.TrackedCh:
-			ws.mu.Lock()
-			prev := ws.skeletonMap[changedFile]
-			ws.mu.Unlock()
-
-			strategy, newSkeleton := classifyChange(changedFile, prev)
-
-			switch strategy {
-			case strategyHotReload:
-				ws.mu.Lock()
-				ws.skeletonMap[changedFile] = newSkeleton
-				ws.mu.Unlock()
-				if err := reloadMultiFile(ctx, sourceFile, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Reload error: %v\n", err)
-				}
-			case strategyRebuild:
-				if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
-					fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
-				}
-				// Recompute skeletons for all tracked files after rebuild.
-				ws.mu.Lock()
-				for _, tf := range ws.trackedFiles {
-					if s, _ := parsing.Skeleton(tf); s != "" {
-						ws.skeletonMap[filepath.Clean(tf)] = s
-					}
-				}
-				ws.mu.Unlock()
-			}
-
-		case <-db.DepCh:
-			db.ClearDepTimer()
-			if err := rebuildAndRelaunch(ctx, sourceFile, pc, bs, dirs, wctx, ws); err != nil {
-				fmt.Fprintf(os.Stderr, "Rebuild error: %v\n", err)
-			}
-
-		case cmd := <-cmdCh:
 			switch cmd.Type {
 			case "switchFile":
-				if cmd.Path == "" {
-					continue
+				select {
+				case switchFileCh <- cmd.Path:
+				default:
 				}
-				sourceFile, trackedSet = handleSwitchFileCmd(ctx, cmd.Path, sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
 			case "nextPreview":
-				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
+				select {
+				case nextPreviewCh <- struct{}{}:
+				default:
+				}
 			case "tap":
 				hid.HandleTap(ctx, cmd.X, cmd.Y)
 			case "swipe":
 				hid.HandleSwipe(ctx, cmd.StartX, cmd.StartY, cmd.EndX, cmd.EndY, cmd.Duration)
 			case "text":
-				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: cmd.Value}}})
+				select {
+				case inputCh <- &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: cmd.Value}}}:
+				default:
+				}
 			case "touchDown":
-				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
+				select {
+				case inputCh <- &pb.Input{Event: &pb.Input_TouchDown{TouchDown: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}}:
+				default:
+				}
 			case "touchMove":
-				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchMove{TouchMove: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
+				select {
+				case inputCh <- &pb.Input{Event: &pb.Input_TouchMove{TouchMove: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}}:
+				default:
+				}
 			case "touchUp":
-				hid.HandleInput(ctx, &pb.Input{Event: &pb.Input_TouchUp{TouchUp: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}})
+				select {
+				case inputCh <- &pb.Input{Event: &pb.Input_TouchUp{TouchUp: &pb.TouchEvent{X: cmd.X, Y: cmd.Y}}}:
+				default:
+				}
 			}
+		}
+	}
+}
 
-		case protoCmd, ok := <-protoCmdCh:
+// dispatchProtocolCommands reads protocol Commands and dispatches them to typed channels.
+func dispatchProtocolCommands(ctx context.Context, protoCmdCh <-chan *pb.Command, hid *protocol.HIDHandler,
+	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, inputCh chan<- *pb.Input) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case cmd, ok := <-protoCmdCh:
 			if !ok {
-				protoCmdCh = nil // channel closed (EOF) → disable this case
-				continue
+				return
 			}
 			switch {
-			case protoCmd.GetSwitchFile() != nil:
-				if protoCmd.GetSwitchFile().GetFile() == "" {
-					continue
+			case cmd.GetSwitchFile() != nil:
+				select {
+				case switchFileCh <- cmd.GetSwitchFile().GetFile():
+				default:
 				}
-				sourceFile, trackedSet = handleSwitchFileCmd(ctx, protoCmd.GetSwitchFile().GetFile(), sourceFile, trackedSet, pc, bs, dirs, wctx, ws)
-			case protoCmd.GetNextPreview() != nil:
-				handleNextPreviewCmd(ctx, sourceFile, bs, dirs, wctx, ws)
-			case protoCmd.GetInput() != nil:
-				hid.HandleInput(ctx, protoCmd.GetInput())
+			case cmd.GetNextPreview() != nil:
+				select {
+				case nextPreviewCh <- struct{}{}:
+				default:
+				}
+			case cmd.GetInput() != nil:
+				select {
+				case inputCh <- cmd.GetInput():
+				default:
+				}
 			default:
-				slog.Warn("Ignoring unhandled command in single-stream mode", "streamId", protoCmd.GetStreamId())
+				slog.Warn("Ignoring unhandled command in single-stream mode", "streamId", cmd.GetStreamId())
 			}
-
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return nil
-			}
-			slog.Warn("Watcher error", "err", err)
-
-		case err, ok := <-events.idbErr:
-			if ok && err != nil {
-				return fmt.Errorf("idb_companion error: %w", err)
-			}
-
-		case <-events.bootDied:
-			return fmt.Errorf("simulator crashed unexpectedly (boot companion process exited)")
 		}
 	}
 }

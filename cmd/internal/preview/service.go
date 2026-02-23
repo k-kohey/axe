@@ -329,10 +329,8 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			}
 		}
 
-		events := watchEvents{idbErr: idbErrCh, bootDied: bootCompanion.Done()}
-
 		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, events)
+		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
 	}
 
 	// Non-watch mode: wait for signal or boot companion crash.
