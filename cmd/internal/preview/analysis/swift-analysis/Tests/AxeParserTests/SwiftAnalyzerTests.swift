@@ -1347,8 +1347,10 @@ struct ConditionalCompilationTests {
     let result = SwiftAnalyzer(source: source).analyze()
 
     #expect(result.types.count == 1)
-    #expect(result.imports.contains("import SomeFramework"))
+    // Conditional imports inside #if canImport(...) are skipped by ImportCollector
+    #expect(!result.imports.contains("import SomeFramework"))
     let body = result.types[0].properties[0].source
+    // Body source is extracted as raw text, so #if directives are preserved
     #expect(body.contains("#if canImport(SomeFramework)"))
   }
 }

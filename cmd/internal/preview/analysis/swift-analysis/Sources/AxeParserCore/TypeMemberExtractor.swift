@@ -33,13 +33,27 @@ final class TypeMemberExtractor: SyntaxVisitor {
 
   // MARK: - Conditional Compilation
 
-  /// Skip `#if` blocks so that platform-conditional declarations (e.g. inside
-  /// `#if canImport(AppKit)`) are not extracted. The thunk cannot evaluate
-  /// these conditions at compile time. Body source that _contains_ `#if`
-  /// directives is still extracted correctly because the body extractor works
-  /// on raw source text, not the AST.
+  /// Skip member-level `#if canImport(...)` blocks so that platform-conditional
+  /// members (e.g. `#if canImport(AppKit)` wrapping a computed property) are not
+  /// extracted into the thunk. Other conditions like `#if DEBUG` are safe because
+  /// the thunk is compiled with the same build flags (e.g. `-DDEBUG`).
   override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
-    .skipChildren
+    if node.parent?.is(MemberBlockItemSyntax.self) == true,
+       hasCanImportCondition(node) {
+      return .skipChildren
+    }
+    return .visitChildren
+  }
+
+  /// Returns true if any clause in the `#if` block uses a `canImport(...)` condition.
+  private func hasCanImportCondition(_ node: IfConfigDeclSyntax) -> Bool {
+    for clause in node.clauses {
+      if let condition = clause.condition,
+         condition.description.contains("canImport") {
+        return true
+      }
+    }
+    return false
   }
 
   // MARK: - Type Definitions
