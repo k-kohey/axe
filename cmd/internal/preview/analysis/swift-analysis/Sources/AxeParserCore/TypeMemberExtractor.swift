@@ -39,7 +39,8 @@ final class TypeMemberExtractor: SyntaxVisitor {
   /// the thunk is compiled with the same build flags (e.g. `-DDEBUG`).
   override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
     if node.parent?.is(MemberBlockItemSyntax.self) == true,
-       hasCanImportCondition(node) {
+      hasCanImportCondition(node)
+    {
       return .skipChildren
     }
     return .visitChildren
@@ -49,7 +50,8 @@ final class TypeMemberExtractor: SyntaxVisitor {
   private func hasCanImportCondition(_ node: IfConfigDeclSyntax) -> Bool {
     for clause in node.clauses {
       if let condition = clause.condition,
-         condition.description.contains("canImport") {
+        condition.description.contains("canImport")
+      {
         return true
       }
     }
