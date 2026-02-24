@@ -34,6 +34,18 @@ async function defaultOpenSettings(settingId: string): Promise<void> {
 	);
 }
 
+/**
+ * Thrown when the user has initiated an action (install / configure) that
+ * will eventually provide the binary.  Callers should silently swallow
+ * this error instead of showing an error dialog.
+ */
+export class UserActionPendingError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "UserActionPendingError";
+	}
+}
+
 export class BinaryResolver {
 	private cachedPath: string | null = null;
 	private readonly deps: Required<BinaryResolverDeps>;
@@ -86,10 +98,12 @@ export class BinaryResolver {
 
 		if (choice === "Run Install Script") {
 			runInstallScript(this.deps.createTerminal);
+			throw new UserActionPendingError("axe binary not available");
 		}
 
 		if (choice === "Configure Path") {
 			await this.deps.openSettings("axe.executablePath");
+			throw new UserActionPendingError("axe binary not available");
 		}
 
 		throw new Error("axe binary not available");

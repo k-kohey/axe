@@ -2,7 +2,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
-import { BinaryResolver } from "./binaryResolver";
+import { BinaryResolver, UserActionPendingError } from "./binaryResolver";
 import { containsPreview } from "./previewDetector";
 import { PreviewManager } from "./previewManager";
 import {
@@ -212,7 +212,9 @@ async function pickDevice(): Promise<DeviceSelection | undefined> {
 	try {
 		execPath = await resolver.resolve();
 	} catch (err) {
-		vscode.window.showErrorMessage(`Failed to resolve axe binary: ${err}`);
+		if (!(err instanceof UserActionPendingError)) {
+			vscode.window.showErrorMessage(`Failed to resolve axe binary: ${err}`);
+		}
 		return undefined;
 	}
 	const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -395,7 +397,9 @@ async function replaceWithNewStream(
 	} catch (err) {
 		webviewPanel.removeCard(streamId);
 		activeStreams.delete(file);
-		vscode.window.showErrorMessage(`Failed to start preview: ${err}`);
+		if (!(err instanceof UserActionPendingError)) {
+			vscode.window.showErrorMessage(`Failed to start preview: ${err}`);
+		}
 	}
 }
 
@@ -427,7 +431,9 @@ async function addStreamForFile(
 		// Process spawn failed — clean up the ghost card.
 		webviewPanel.removeCard(streamId);
 		activeStreams.delete(file);
-		vscode.window.showErrorMessage(`Failed to start preview: ${err}`);
+		if (!(err instanceof UserActionPendingError)) {
+			vscode.window.showErrorMessage(`Failed to start preview: ${err}`);
+		}
 	}
 }
 

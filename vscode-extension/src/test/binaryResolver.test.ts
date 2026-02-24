@@ -1,6 +1,10 @@
 import * as assert from "node:assert";
 import * as vscode from "vscode";
-import { BinaryResolver, type BinaryResolverDeps } from "../binaryResolver";
+import {
+	BinaryResolver,
+	type BinaryResolverDeps,
+	UserActionPendingError,
+} from "../binaryResolver";
 import type { VersionCheckDeps } from "../versionCheck";
 
 // --- Helpers ---
@@ -74,9 +78,10 @@ suite("BinaryResolver", () => {
 			});
 			const resolver = new BinaryResolver(deps);
 
-			await assert.rejects(() => resolver.resolve(), {
-				message: "axe binary not available",
-			});
+			await assert.rejects(
+				() => resolver.resolve(),
+				(err: unknown) => err instanceof UserActionPendingError,
+			);
 			assert.strictEqual(terminalName, "axe install");
 			assert.ok(sentText.includes("install.sh"));
 		});
@@ -87,9 +92,11 @@ suite("BinaryResolver", () => {
 			});
 			const resolver = new BinaryResolver(deps);
 
-			await assert.rejects(() => resolver.resolve(), {
-				message: "axe binary not available",
-			});
+			await assert.rejects(
+				() => resolver.resolve(),
+				(err: unknown) =>
+					err instanceof Error && !(err instanceof UserActionPendingError),
+			);
 		});
 
 		test("opens settings when user chooses Configure Path", async () => {
@@ -102,7 +109,10 @@ suite("BinaryResolver", () => {
 			});
 			const resolver = new BinaryResolver(deps);
 
-			await assert.rejects(() => resolver.resolve());
+			await assert.rejects(
+				() => resolver.resolve(),
+				(err: unknown) => err instanceof UserActionPendingError,
+			);
 			assert.strictEqual(openedSetting, "axe.executablePath");
 		});
 
