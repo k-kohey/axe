@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -34,6 +35,14 @@ func TestBuildTransitiveDeps_SingleLevel(t *testing.T) {
 	}
 	if len(graph.All) != 2 {
 		t.Errorf("graph size = %d, want 2", len(graph.All))
+	}
+
+	direct := graph.DirectDeps()
+	if len(direct) != 1 {
+		t.Fatalf("DirectDeps count = %d, want 1, got %v", len(direct), direct)
+	}
+	if direct[0] != filepath.Clean(dep) {
+		t.Errorf("DirectDeps[0] = %q, want %q", direct[0], filepath.Clean(dep))
 	}
 }
 
@@ -69,6 +78,14 @@ func TestBuildTransitiveDeps_Transitive(t *testing.T) {
 	}
 	if len(graph.All) != 3 {
 		t.Errorf("graph size = %d, want 3", len(graph.All))
+	}
+
+	direct := graph.DirectDeps()
+	if len(direct) != 1 {
+		t.Fatalf("DirectDeps count = %d, want 1 (only B), got %v", len(direct), direct)
+	}
+	if direct[0] != filepath.Clean(b) {
+		t.Errorf("DirectDeps[0] = %q, want %q", direct[0], filepath.Clean(b))
 	}
 }
 
@@ -113,6 +130,10 @@ func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 
 	if len(graph.All) != 1 {
 		t.Errorf("graph size = %d, want 1 (target only)", len(graph.All))
+	}
+
+	if len(graph.DirectDeps()) != 0 {
+		t.Errorf("DirectDeps count = %d, want 0", len(graph.DirectDeps()))
 	}
 }
 
@@ -318,5 +339,56 @@ func TestBuildTransitiveDeps_DuplicateTypeName(t *testing.T) {
 	}
 	if len(graph.All) != 3 {
 		t.Errorf("graph size = %d, want 3 (target + 2 Product files)", len(graph.All))
+	}
+
+	direct := graph.DirectDeps()
+	if len(direct) != 2 {
+		t.Fatalf("DirectDeps count = %d, want 2, got %v", len(direct), direct)
+	}
+	sort.Strings(direct)
+	expected := []string{filepath.Clean(depA), filepath.Clean(depB)}
+	sort.Strings(expected)
+	for i := range expected {
+		if direct[i] != expected[i] {
+			t.Errorf("DirectDeps[%d] = %q, want %q", i, direct[i], expected[i])
+		}
+	}
+}
+
+func TestBuildTransitiveDeps_DirectDepsMultiDepth(t *testing.T) {
+	// A → B → C → D: only B should be a direct dependency of A.
+	a := filepath.Join("/project", "A.swift")
+	b := filepath.Join("/project", "B.swift")
+	c := filepath.Join("/project", "C.swift")
+	d := filepath.Join("/project", "D.swift")
+
+	parser := &mockParser{results: map[string]mockParseResult{
+		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
+		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
+		c: {referenced: []string{"DType"}, defined: []string{"CType"}},
+		d: {referenced: nil, defined: []string{"DType"}},
+	}}
+	typeMap := map[string][]string{
+		"AType": {a},
+		"BType": {b},
+		"CType": {c},
+		"DType": {d},
+	}
+
+	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(graph.All) != 4 {
+		t.Errorf("graph size = %d, want 4", len(graph.All))
+	}
+
+	direct := graph.DirectDeps()
+	if len(direct) != 1 {
+		t.Fatalf("DirectDeps count = %d, want 1, got %v", len(direct), direct)
+	}
+	if direct[0] != filepath.Clean(b) {
+		t.Errorf("DirectDeps[0] = %q, want %q (only B is depth=1)", direct[0], filepath.Clean(b))
 	}
 }

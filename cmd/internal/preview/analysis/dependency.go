@@ -100,58 +100,5 @@ func ResolveTransitiveDependencies(ctx context.Context, targetFile string, proje
 		return nil, deps, depErr
 	}
 
-	// Extract 1-level dependencies from the typeMap directly.
-	// This avoids the O(N) full-project scan that ResolveDependencies performs.
-	deps, err := resolveDirectDepsFromTypeMap(targetFile, typeMap, parser)
-	if err != nil {
-		slog.Warn("1-level dependency resolution from typeMap failed, falling back to project scan", "err", err)
-		deps, err = ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
-		if err != nil {
-			return graph, nil, err
-		}
-	}
-
-	return graph, deps, nil
-}
-
-// resolveDirectDepsFromTypeMap resolves 1-level dependencies by looking up
-// the target's referenced types in the typeMap. This is O(R) where R is the
-// number of referenced types, instead of O(N) for a full project scan.
-// typeMap maps type names to one or more file paths (multiple files may define
-// the same type name, e.g. across workspace targets with stale index data).
-func resolveDirectDepsFromTypeMap(targetFile string, typeMap map[string][]string, parser SwiftFileParser) ([]string, error) {
-	referencedTypes, definedTypes, err := parser.ParseTypes(targetFile)
-	if err != nil {
-		return nil, fmt.Errorf("parsing target file: %w", err)
-	}
-
-	// Build set of types defined in the target to exclude self-references.
-	definedSet := make(map[string]bool, len(definedTypes))
-	for _, t := range definedTypes {
-		definedSet[t] = true
-	}
-
-	cleanTarget := filepath.Clean(targetFile)
-	seen := make(map[string]bool)
-	var deps []string
-
-	for _, typeName := range referencedTypes {
-		if definedSet[typeName] {
-			continue
-		}
-		filePaths, ok := typeMap[typeName]
-		if !ok {
-			continue
-		}
-		for _, filePath := range filePaths {
-			cleanPath := filepath.Clean(filePath)
-			if cleanPath == cleanTarget || seen[cleanPath] {
-				continue
-			}
-			seen[cleanPath] = true
-			deps = append(deps, filePath)
-		}
-	}
-
-	return deps, nil
+	return graph, graph.DirectDeps(), nil
 }
