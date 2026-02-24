@@ -1,7 +1,5 @@
 package analysis
 
-import "context"
-
 // PropertyInfo describes a computed property inside a Swift type.
 type PropertyInfo struct {
 	Name     string // "body", "backgroundColor", etc.
@@ -65,16 +63,4 @@ type PreviewableProperty struct {
 type TransformedPreview struct {
 	Properties []PreviewableProperty
 	BodySource string
-}
-
-// SwiftFileLister provides access to Swift source files in a project.
-// This is the minimal interface required by ResolveDependencies.
-type SwiftFileLister interface {
-	SwiftFiles(ctx context.Context, root string) ([]string, error)
-}
-
-// SwiftFileParser extracts type definitions and references from a Swift file.
-// ResolveDependencies uses this to determine inter-file dependencies.
-type SwiftFileParser interface {
-	ParseTypes(path string) (referencedTypes []string, definedTypes []string, err error)
 }

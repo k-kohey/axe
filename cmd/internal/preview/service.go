@@ -135,13 +135,12 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	projectRoot := filepath.Dir(pc.primaryPath())
 	rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
 	if cacheErr != nil && ctx.Err() == nil {
-		slog.Warn("Index store cache unavailable, falling back to parser-based resolution", "err", cacheErr)
+		slog.Warn("Index store cache unavailable", "err", cacheErr)
 	}
 	indexCache := newSharedIndexCache(rawCache)
 
-	// Resolve dependencies using the index store for transitive graph,
-	// falling back to 1-level resolution if the index store is unavailable.
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), sl, indexCache.Get(), analysis.DefaultParser())
+	// Resolve dependencies using the index store for transitive graph.
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, indexCache.Get())
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
@@ -152,7 +151,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	slog.Debug("Tracked files (before collision check)", "count", len(trackedFiles), "files", trackedFiles)
 
 	done = step.begin("Parsing source file...")
-	files, trackedFiles, err := parseAndFilterTrackedFiles(sourceFile, trackedFiles)
+	files, trackedFiles, err := parseAndFilterTrackedFiles(sourceFile, trackedFiles, indexCache.Get())
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")

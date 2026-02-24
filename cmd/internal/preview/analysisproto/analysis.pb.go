@@ -76,6 +76,55 @@ func (TypeKind) EnumDescriptor() ([]byte, []int) {
 	return file_analysis_proto_rawDescGZIP(), []int{0}
 }
 
+type MemberSourceKind int32
+
+const (
+	MemberSourceKind_MEMBER_SOURCE_KIND_UNKNOWN  MemberSourceKind = 0
+	MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY MemberSourceKind = 1
+	MemberSourceKind_MEMBER_SOURCE_KIND_METHOD   MemberSourceKind = 2
+)
+
+// Enum value maps for MemberSourceKind.
+var (
+	MemberSourceKind_name = map[int32]string{
+		0: "MEMBER_SOURCE_KIND_UNKNOWN",
+		1: "MEMBER_SOURCE_KIND_PROPERTY",
+		2: "MEMBER_SOURCE_KIND_METHOD",
+	}
+	MemberSourceKind_value = map[string]int32{
+		"MEMBER_SOURCE_KIND_UNKNOWN":  0,
+		"MEMBER_SOURCE_KIND_PROPERTY": 1,
+		"MEMBER_SOURCE_KIND_METHOD":   2,
+	}
+)
+
+func (x MemberSourceKind) Enum() *MemberSourceKind {
+	p := new(MemberSourceKind)
+	*p = x
+	return p
+}
+
+func (x MemberSourceKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MemberSourceKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_analysis_proto_enumTypes[1].Descriptor()
+}
+
+func (MemberSourceKind) Type() protoreflect.EnumType {
+	return &file_analysis_proto_enumTypes[1]
+}
+
+func (x MemberSourceKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MemberSourceKind.Descriptor instead.
+func (MemberSourceKind) EnumDescriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{1}
+}
+
 type MemberKind int32
 
 const (
@@ -118,11 +167,11 @@ func (x MemberKind) String() string {
 }
 
 func (MemberKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_analysis_proto_enumTypes[1].Descriptor()
+	return file_analysis_proto_enumTypes[2].Descriptor()
 }
 
 func (MemberKind) Type() protoreflect.EnumType {
-	return &file_analysis_proto_enumTypes[1]
+	return &file_analysis_proto_enumTypes[2]
 }
 
 func (x MemberKind) Number() protoreflect.EnumNumber {
@@ -131,7 +180,7 @@ func (x MemberKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use MemberKind.Descriptor instead.
 func (MemberKind) EnumDescriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{1}
+	return file_analysis_proto_rawDescGZIP(), []int{2}
 }
 
 type PropertyInfo struct {
@@ -422,21 +471,127 @@ func (x *PreviewBlock) GetSource() string {
 	return ""
 }
 
+type MemberSource struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TypeName      string                 `protobuf:"bytes,1,opt,name=type_name,json=typeName,proto3" json:"type_name,omitempty"`
+	Line          int32                  `protobuf:"varint,2,opt,name=line,proto3" json:"line,omitempty"`
+	Kind          MemberSourceKind       `protobuf:"varint,3,opt,name=kind,proto3,enum=axe.analysis.MemberSourceKind" json:"kind,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	TypeExpr      string                 `protobuf:"bytes,5,opt,name=type_expr,json=typeExpr,proto3" json:"type_expr,omitempty"`
+	Signature     string                 `protobuf:"bytes,6,opt,name=signature,proto3" json:"signature,omitempty"`
+	Selector      string                 `protobuf:"bytes,7,opt,name=selector,proto3" json:"selector,omitempty"`
+	BodyLine      int32                  `protobuf:"varint,8,opt,name=body_line,json=bodyLine,proto3" json:"body_line,omitempty"`
+	Source        string                 `protobuf:"bytes,9,opt,name=source,proto3" json:"source,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemberSource) Reset() {
+	*x = MemberSource{}
+	mi := &file_analysis_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemberSource) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemberSource) ProtoMessage() {}
+
+func (x *MemberSource) ProtoReflect() protoreflect.Message {
+	mi := &file_analysis_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemberSource.ProtoReflect.Descriptor instead.
+func (*MemberSource) Descriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MemberSource) GetTypeName() string {
+	if x != nil {
+		return x.TypeName
+	}
+	return ""
+}
+
+func (x *MemberSource) GetLine() int32 {
+	if x != nil {
+		return x.Line
+	}
+	return 0
+}
+
+func (x *MemberSource) GetKind() MemberSourceKind {
+	if x != nil {
+		return x.Kind
+	}
+	return MemberSourceKind_MEMBER_SOURCE_KIND_UNKNOWN
+}
+
+func (x *MemberSource) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *MemberSource) GetTypeExpr() string {
+	if x != nil {
+		return x.TypeExpr
+	}
+	return ""
+}
+
+func (x *MemberSource) GetSignature() string {
+	if x != nil {
+		return x.Signature
+	}
+	return ""
+}
+
+func (x *MemberSource) GetSelector() string {
+	if x != nil {
+		return x.Selector
+	}
+	return ""
+}
+
+func (x *MemberSource) GetBodyLine() int32 {
+	if x != nil {
+		return x.BodyLine
+	}
+	return 0
+}
+
+func (x *MemberSource) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
 type ParseResult struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Types           []*TypeInfo            `protobuf:"bytes,1,rep,name=types,proto3" json:"types,omitempty"`
-	Imports         []string               `protobuf:"bytes,2,rep,name=imports,proto3" json:"imports,omitempty"`
-	Previews        []*PreviewBlock        `protobuf:"bytes,3,rep,name=previews,proto3" json:"previews,omitempty"`
-	SkeletonHash    string                 `protobuf:"bytes,4,opt,name=skeleton_hash,json=skeletonHash,proto3" json:"skeleton_hash,omitempty"`
-	ReferencedTypes []string               `protobuf:"bytes,5,rep,name=referenced_types,json=referencedTypes,proto3" json:"referenced_types,omitempty"`
-	DefinedTypes    []string               `protobuf:"bytes,6,rep,name=defined_types,json=definedTypes,proto3" json:"defined_types,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Imports       []string               `protobuf:"bytes,2,rep,name=imports,proto3" json:"imports,omitempty"`
+	Previews      []*PreviewBlock        `protobuf:"bytes,3,rep,name=previews,proto3" json:"previews,omitempty"`
+	SkeletonHash  string                 `protobuf:"bytes,4,opt,name=skeleton_hash,json=skeletonHash,proto3" json:"skeleton_hash,omitempty"`
+	MemberSources []*MemberSource        `protobuf:"bytes,7,rep,name=member_sources,json=memberSources,proto3" json:"member_sources,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ParseResult) Reset() {
 	*x = ParseResult{}
-	mi := &file_analysis_proto_msgTypes[4]
+	mi := &file_analysis_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -448,7 +603,7 @@ func (x *ParseResult) String() string {
 func (*ParseResult) ProtoMessage() {}
 
 func (x *ParseResult) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[4]
+	mi := &file_analysis_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -461,14 +616,7 @@ func (x *ParseResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ParseResult.ProtoReflect.Descriptor instead.
 func (*ParseResult) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *ParseResult) GetTypes() []*TypeInfo {
-	if x != nil {
-		return x.Types
-	}
-	return nil
+	return file_analysis_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ParseResult) GetImports() []string {
@@ -492,16 +640,9 @@ func (x *ParseResult) GetSkeletonHash() string {
 	return ""
 }
 
-func (x *ParseResult) GetReferencedTypes() []string {
+func (x *ParseResult) GetMemberSources() []*MemberSource {
 	if x != nil {
-		return x.ReferencedTypes
-	}
-	return nil
-}
-
-func (x *ParseResult) GetDefinedTypes() []string {
-	if x != nil {
-		return x.DefinedTypes
+		return x.MemberSources
 	}
 	return nil
 }
@@ -515,7 +656,7 @@ type TypeFileMap struct {
 
 func (x *TypeFileMap) Reset() {
 	*x = TypeFileMap{}
-	mi := &file_analysis_proto_msgTypes[5]
+	mi := &file_analysis_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +668,7 @@ func (x *TypeFileMap) String() string {
 func (*TypeFileMap) ProtoMessage() {}
 
 func (x *TypeFileMap) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[5]
+	mi := &file_analysis_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +681,7 @@ func (x *TypeFileMap) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TypeFileMap.ProtoReflect.Descriptor instead.
 func (*TypeFileMap) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{5}
+	return file_analysis_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *TypeFileMap) GetTypes() map[string]string {
@@ -564,7 +705,7 @@ type IndexMemberInfo struct {
 
 func (x *IndexMemberInfo) Reset() {
 	*x = IndexMemberInfo{}
-	mi := &file_analysis_proto_msgTypes[6]
+	mi := &file_analysis_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -576,7 +717,7 @@ func (x *IndexMemberInfo) String() string {
 func (*IndexMemberInfo) ProtoMessage() {}
 
 func (x *IndexMemberInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[6]
+	mi := &file_analysis_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -589,7 +730,7 @@ func (x *IndexMemberInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexMemberInfo.ProtoReflect.Descriptor instead.
 func (*IndexMemberInfo) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{6}
+	return file_analysis_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *IndexMemberInfo) GetName() string {
@@ -649,7 +790,7 @@ type IndexTypeInfo struct {
 
 func (x *IndexTypeInfo) Reset() {
 	*x = IndexTypeInfo{}
-	mi := &file_analysis_proto_msgTypes[7]
+	mi := &file_analysis_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -661,7 +802,7 @@ func (x *IndexTypeInfo) String() string {
 func (*IndexTypeInfo) ProtoMessage() {}
 
 func (x *IndexTypeInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[7]
+	mi := &file_analysis_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -674,7 +815,7 @@ func (x *IndexTypeInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexTypeInfo.ProtoReflect.Descriptor instead.
 func (*IndexTypeInfo) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{7}
+	return file_analysis_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *IndexTypeInfo) GetName() string {
@@ -738,7 +879,7 @@ type IndexFileData struct {
 
 func (x *IndexFileData) Reset() {
 	*x = IndexFileData{}
-	mi := &file_analysis_proto_msgTypes[8]
+	mi := &file_analysis_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -750,7 +891,7 @@ func (x *IndexFileData) String() string {
 func (*IndexFileData) ProtoMessage() {}
 
 func (x *IndexFileData) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[8]
+	mi := &file_analysis_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -763,7 +904,7 @@ func (x *IndexFileData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexFileData.ProtoReflect.Descriptor instead.
 func (*IndexFileData) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{8}
+	return file_analysis_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *IndexFileData) GetFilePath() string {
@@ -804,7 +945,7 @@ type IndexStoreResult struct {
 
 func (x *IndexStoreResult) Reset() {
 	*x = IndexStoreResult{}
-	mi := &file_analysis_proto_msgTypes[9]
+	mi := &file_analysis_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -816,7 +957,7 @@ func (x *IndexStoreResult) String() string {
 func (*IndexStoreResult) ProtoMessage() {}
 
 func (x *IndexStoreResult) ProtoReflect() protoreflect.Message {
-	mi := &file_analysis_proto_msgTypes[9]
+	mi := &file_analysis_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +970,7 @@ func (x *IndexStoreResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexStoreResult.ProtoReflect.Descriptor instead.
 func (*IndexStoreResult) Descriptor() ([]byte, []int) {
-	return file_analysis_proto_rawDescGZIP(), []int{9}
+	return file_analysis_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *IndexStoreResult) GetFiles() []*IndexFileData {
@@ -876,14 +1017,22 @@ const file_analysis_proto_rawDesc = "" +
 	"\n" +
 	"start_line\x18\x01 \x01(\x05R\tstartLine\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x16\n" +
-	"\x06source\x18\x03 \x01(\tR\x06source\"\x82\x02\n" +
-	"\vParseResult\x12,\n" +
-	"\x05types\x18\x01 \x03(\v2\x16.axe.analysis.TypeInfoR\x05types\x12\x18\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\"\x93\x02\n" +
+	"\fMemberSource\x12\x1b\n" +
+	"\ttype_name\x18\x01 \x01(\tR\btypeName\x12\x12\n" +
+	"\x04line\x18\x02 \x01(\x05R\x04line\x122\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\x1e.axe.analysis.MemberSourceKindR\x04kind\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1b\n" +
+	"\ttype_expr\x18\x05 \x01(\tR\btypeExpr\x12\x1c\n" +
+	"\tsignature\x18\x06 \x01(\tR\tsignature\x12\x1a\n" +
+	"\bselector\x18\a \x01(\tR\bselector\x12\x1b\n" +
+	"\tbody_line\x18\b \x01(\x05R\bbodyLine\x12\x16\n" +
+	"\x06source\x18\t \x01(\tR\x06source\"\xd9\x01\n" +
+	"\vParseResult\x12\x18\n" +
 	"\aimports\x18\x02 \x03(\tR\aimports\x126\n" +
 	"\bpreviews\x18\x03 \x03(\v2\x1a.axe.analysis.PreviewBlockR\bpreviews\x12#\n" +
-	"\rskeleton_hash\x18\x04 \x01(\tR\fskeletonHash\x12)\n" +
-	"\x10referenced_types\x18\x05 \x03(\tR\x0freferencedTypes\x12#\n" +
-	"\rdefined_types\x18\x06 \x03(\tR\fdefinedTypes\"\x83\x01\n" +
+	"\rskeleton_hash\x18\x04 \x01(\tR\fskeletonHash\x12A\n" +
+	"\x0emember_sources\x18\a \x03(\v2\x1a.axe.analysis.MemberSourceR\rmemberSourcesJ\x04\b\x01\x10\x02J\x04\b\x05\x10\x06J\x04\b\x06\x10\a\"\x83\x01\n" +
 	"\vTypeFileMap\x12:\n" +
 	"\x05types\x18\x01 \x03(\v2$.axe.analysis.TypeFileMap.TypesEntryR\x05types\x1a8\n" +
 	"\n" +
@@ -922,7 +1071,11 @@ const file_analysis_proto_rawDesc = "" +
 	"\x10TYPE_KIND_STRUCT\x10\x01\x12\x13\n" +
 	"\x0fTYPE_KIND_CLASS\x10\x02\x12\x12\n" +
 	"\x0eTYPE_KIND_ENUM\x10\x03\x12\x13\n" +
-	"\x0fTYPE_KIND_ACTOR\x10\x04*\xc6\x01\n" +
+	"\x0fTYPE_KIND_ACTOR\x10\x04*r\n" +
+	"\x10MemberSourceKind\x12\x1e\n" +
+	"\x1aMEMBER_SOURCE_KIND_UNKNOWN\x10\x00\x12\x1f\n" +
+	"\x1bMEMBER_SOURCE_KIND_PROPERTY\x10\x01\x12\x1d\n" +
+	"\x19MEMBER_SOURCE_KIND_METHOD\x10\x02*\xc6\x01\n" +
 	"\n" +
 	"MemberKind\x12\x17\n" +
 	"\x13MEMBER_KIND_UNKNOWN\x10\x00\x12!\n" +
@@ -944,42 +1097,45 @@ func file_analysis_proto_rawDescGZIP() []byte {
 	return file_analysis_proto_rawDescData
 }
 
-var file_analysis_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_analysis_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_analysis_proto_goTypes = []any{
 	(TypeKind)(0),            // 0: axe.analysis.TypeKind
-	(MemberKind)(0),          // 1: axe.analysis.MemberKind
-	(*PropertyInfo)(nil),     // 2: axe.analysis.PropertyInfo
-	(*MethodInfo)(nil),       // 3: axe.analysis.MethodInfo
-	(*TypeInfo)(nil),         // 4: axe.analysis.TypeInfo
-	(*PreviewBlock)(nil),     // 5: axe.analysis.PreviewBlock
-	(*ParseResult)(nil),      // 6: axe.analysis.ParseResult
-	(*TypeFileMap)(nil),      // 7: axe.analysis.TypeFileMap
-	(*IndexMemberInfo)(nil),  // 8: axe.analysis.IndexMemberInfo
-	(*IndexTypeInfo)(nil),    // 9: axe.analysis.IndexTypeInfo
-	(*IndexFileData)(nil),    // 10: axe.analysis.IndexFileData
-	(*IndexStoreResult)(nil), // 11: axe.analysis.IndexStoreResult
-	nil,                      // 12: axe.analysis.TypeFileMap.TypesEntry
-	nil,                      // 13: axe.analysis.IndexStoreResult.TypeFileMapEntry
+	(MemberSourceKind)(0),    // 1: axe.analysis.MemberSourceKind
+	(MemberKind)(0),          // 2: axe.analysis.MemberKind
+	(*PropertyInfo)(nil),     // 3: axe.analysis.PropertyInfo
+	(*MethodInfo)(nil),       // 4: axe.analysis.MethodInfo
+	(*TypeInfo)(nil),         // 5: axe.analysis.TypeInfo
+	(*PreviewBlock)(nil),     // 6: axe.analysis.PreviewBlock
+	(*MemberSource)(nil),     // 7: axe.analysis.MemberSource
+	(*ParseResult)(nil),      // 8: axe.analysis.ParseResult
+	(*TypeFileMap)(nil),      // 9: axe.analysis.TypeFileMap
+	(*IndexMemberInfo)(nil),  // 10: axe.analysis.IndexMemberInfo
+	(*IndexTypeInfo)(nil),    // 11: axe.analysis.IndexTypeInfo
+	(*IndexFileData)(nil),    // 12: axe.analysis.IndexFileData
+	(*IndexStoreResult)(nil), // 13: axe.analysis.IndexStoreResult
+	nil,                      // 14: axe.analysis.TypeFileMap.TypesEntry
+	nil,                      // 15: axe.analysis.IndexStoreResult.TypeFileMapEntry
 }
 var file_analysis_proto_depIdxs = []int32{
 	0,  // 0: axe.analysis.TypeInfo.kind:type_name -> axe.analysis.TypeKind
-	2,  // 1: axe.analysis.TypeInfo.properties:type_name -> axe.analysis.PropertyInfo
-	3,  // 2: axe.analysis.TypeInfo.methods:type_name -> axe.analysis.MethodInfo
-	4,  // 3: axe.analysis.ParseResult.types:type_name -> axe.analysis.TypeInfo
-	5,  // 4: axe.analysis.ParseResult.previews:type_name -> axe.analysis.PreviewBlock
-	12, // 5: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
-	1,  // 6: axe.analysis.IndexMemberInfo.kind:type_name -> axe.analysis.MemberKind
-	0,  // 7: axe.analysis.IndexTypeInfo.kind:type_name -> axe.analysis.TypeKind
-	8,  // 8: axe.analysis.IndexTypeInfo.members:type_name -> axe.analysis.IndexMemberInfo
-	9,  // 9: axe.analysis.IndexFileData.types:type_name -> axe.analysis.IndexTypeInfo
-	10, // 10: axe.analysis.IndexStoreResult.files:type_name -> axe.analysis.IndexFileData
-	13, // 11: axe.analysis.IndexStoreResult.type_file_map:type_name -> axe.analysis.IndexStoreResult.TypeFileMapEntry
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	3,  // 1: axe.analysis.TypeInfo.properties:type_name -> axe.analysis.PropertyInfo
+	4,  // 2: axe.analysis.TypeInfo.methods:type_name -> axe.analysis.MethodInfo
+	1,  // 3: axe.analysis.MemberSource.kind:type_name -> axe.analysis.MemberSourceKind
+	6,  // 4: axe.analysis.ParseResult.previews:type_name -> axe.analysis.PreviewBlock
+	7,  // 5: axe.analysis.ParseResult.member_sources:type_name -> axe.analysis.MemberSource
+	14, // 6: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
+	2,  // 7: axe.analysis.IndexMemberInfo.kind:type_name -> axe.analysis.MemberKind
+	0,  // 8: axe.analysis.IndexTypeInfo.kind:type_name -> axe.analysis.TypeKind
+	10, // 9: axe.analysis.IndexTypeInfo.members:type_name -> axe.analysis.IndexMemberInfo
+	11, // 10: axe.analysis.IndexFileData.types:type_name -> axe.analysis.IndexTypeInfo
+	12, // 11: axe.analysis.IndexStoreResult.files:type_name -> axe.analysis.IndexFileData
+	15, // 12: axe.analysis.IndexStoreResult.type_file_map:type_name -> axe.analysis.IndexStoreResult.TypeFileMapEntry
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_analysis_proto_init() }
@@ -992,8 +1148,8 @@ func file_analysis_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_analysis_proto_rawDesc), len(file_analysis_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   12,
+			NumEnums:      3,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -98,7 +98,12 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, bs, dirs, selector, counter, wctx.toolchain)
+	var cache *analysis.IndexStoreCache
+	if ws.indexCache != nil {
+		cache = ws.indexCache.Get()
+	}
+
+	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, cache, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -135,12 +140,11 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 1. Resolve dependencies for the new file using index store.
-	projectRoot := filepath.Dir(pc.primaryPath())
 	var cache *analysis.IndexStoreCache
 	if ws.indexCache != nil {
 		cache = ws.indexCache.Get()
 	}
-	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, cache, analysis.DefaultParser())
+	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, cache)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -152,7 +156,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	trackedFiles = append(trackedFiles, depFiles...)
 
 	// 2. Parse source and dependency files, filter private type collisions.
-	files, trackedFiles, err := parseAndFilterTrackedFiles(newSourceFile, trackedFiles)
+	files, trackedFiles, err := parseAndFilterTrackedFiles(newSourceFile, trackedFiles, cache)
 	if err != nil {
 		return err
 	}
@@ -243,11 +247,16 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("incremental build: %w", err)
 	}
 
-	files := parseTrackedFiles(sourceFile, tracked)
+	var rebuildCache *analysis.IndexStoreCache
+	if ws.indexCache != nil {
+		rebuildCache = ws.indexCache.Get()
+	}
+
+	files := parseTrackedFiles(sourceFile, tracked, rebuildCache)
 
 	// Fallback: if no tracked dependency files have types, use target only.
 	if len(files) == 0 {
-		types, imports, err := analysis.SourceFile(sourceFile)
+		types, imports, err := analysis.SourceFile(sourceFile, rebuildCache)
 		if err != nil {
 			return fmt.Errorf("parse: %w", err)
 		}
@@ -308,7 +317,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	if ws.indexCache != nil {
 		resolveCache = ws.indexCache.Get()
 	}
-	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, resolveCache, analysis.DefaultParser())
+	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, resolveCache)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

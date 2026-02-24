@@ -42,13 +42,30 @@ message PreviewBlock {
   string source = 3;
 }
 
+enum MemberSourceKind {
+  MEMBER_SOURCE_KIND_UNKNOWN = 0;
+  MEMBER_SOURCE_KIND_PROPERTY = 1;
+  MEMBER_SOURCE_KIND_METHOD = 2;
+}
+
+message MemberSource {
+  string type_name = 1;
+  int32 line = 2;
+  MemberSourceKind kind = 3;
+  string name = 4;
+  string type_expr = 5;
+  string signature = 6;
+  string selector = 7;
+  int32 body_line = 8;
+  string source = 9;
+}
+
 message ParseResult {
-  repeated TypeInfo types = 1;
+  reserved 1, 5, 6;  // removed: types, referenced_types, defined_types
   repeated string imports = 2;
   repeated PreviewBlock previews = 3;
   string skeleton_hash = 4;
-  repeated string referenced_types = 5;
-  repeated string defined_types = 6;
+  repeated MemberSource member_sources = 7;
 }
 
 // --- axe-index-reader output ---

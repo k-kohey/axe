@@ -101,7 +101,7 @@ func TestBuildTransitiveDeps_WithCache(t *testing.T) {
 	}
 
 	graph, err := BuildTransitiveDeps(
-		t.Context(), target, cache.TypeFileMultiMap(), cache, nil,
+		t.Context(), target, cache.TypeFileMultiMap(), cache,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,7 @@ func TestBuildTransitiveDeps_CacheTransitive(t *testing.T) {
 	}
 
 	graph, err := BuildTransitiveDeps(
-		t.Context(), a, cache.TypeFileMultiMap(), cache, nil,
+		t.Context(), a, cache.TypeFileMultiMap(), cache,
 	)
 	if err != nil {
 		t.Fatal(err)

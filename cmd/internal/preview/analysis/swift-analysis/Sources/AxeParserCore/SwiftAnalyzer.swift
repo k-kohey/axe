@@ -19,12 +19,8 @@ public struct SwiftAnalyzer {
     let importCollector = ImportCollector()
     importCollector.walk(tree)
 
-    let typeRefCollector = TypeReferenceCollector()
-    typeRefCollector.walk(tree)
-
-    let memberExtractor = TypeMemberExtractor(helper: helper)
+    let memberExtractor = MemberSourceExtractor(helper: helper)
     memberExtractor.walk(tree)
-    memberExtractor.resolvePendingExtensions()
 
     let previewExtractor = PreviewExtractor(helper: helper)
     previewExtractor.walk(tree)
@@ -36,12 +32,10 @@ public struct SwiftAnalyzer {
     )
 
     return ParseResult(
-      types: memberExtractor.types,
+      memberSources: memberExtractor.memberSources,
       imports: importCollector.imports,
       previews: previewExtractor.previews,
-      skeletonHash: skeletonHash,
-      referencedTypes: Array(typeRefCollector.referencedTypes).sorted(),
-      definedTypes: typeRefCollector.definedTypes
+      skeletonHash: skeletonHash
     )
   }
 

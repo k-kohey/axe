@@ -18,16 +18,16 @@ import (
 // in the source file are expected and should not be fatal.
 // Callers that need stricter behavior (Run, switchFile) should check the result
 // for sourceFile presence after calling this function.
-func parseTrackedFiles(sourceFile string, trackedFiles []string) []analysis.FileThunkData {
+func parseTrackedFiles(sourceFile string, trackedFiles []string, cache *analysis.IndexStoreCache) []analysis.FileThunkData {
 	var files []analysis.FileThunkData
 	for _, tf := range trackedFiles {
 		var types []analysis.TypeInfo
 		var imports []string
 		var err error
 		if tf == sourceFile {
-			types, imports, err = analysis.SourceFile(tf)
+			types, imports, err = analysis.SourceFile(tf, cache)
 		} else {
-			types, imports, err = analysis.DependencyFile(tf)
+			types, imports, err = analysis.DependencyFile(tf, cache)
 		}
 		if err != nil {
 			slog.Debug("Skipping tracked file", "path", tf, "err", err)
@@ -60,10 +60,10 @@ func hasFile(files []analysis.FileThunkData, absPath string) bool {
 // name collisions. Used by Run() and switchFile() where collision filtering
 // is needed. Returns the filtered files, the filtered trackedFiles list, and
 // an error if the sourceFile could not be parsed.
-func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string) (
+func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string, cache *analysis.IndexStoreCache) (
 	[]analysis.FileThunkData, []string, error,
 ) {
-	files := parseTrackedFiles(sourceFile, trackedFiles)
+	files := parseTrackedFiles(sourceFile, trackedFiles, cache)
 	if !hasFile(files, sourceFile) {
 		return nil, nil, fmt.Errorf("no types found in %s", sourceFile)
 	}
@@ -97,13 +97,14 @@ func compilePipeline(
 	ctx context.Context,
 	sourceFile string,
 	trackedFiles []string,
+	cache *analysis.IndexStoreCache,
 	bs *buildSettings,
 	dirs previewDirs,
 	previewSelector string,
 	counter int,
 	tc ToolchainRunner,
 ) (string, error) {
-	files := parseTrackedFiles(sourceFile, trackedFiles)
+	files := parseTrackedFiles(sourceFile, trackedFiles, cache)
 	if len(files) == 0 {
 		return "", fmt.Errorf("no types found in tracked files")
 	}

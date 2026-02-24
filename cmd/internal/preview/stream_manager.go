@@ -443,14 +443,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 	sm.indexCache.Set(cache)
 
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, projectRoot, s.dirs.IndexStorePath(), sm.sources, sm.indexCache.Get(), analysis.DefaultParser())
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, sm.indexCache.Get())
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
 	}
 	trackedFiles := append([]string{s.file}, depFiles...)
 
-	files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles)
+	files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return

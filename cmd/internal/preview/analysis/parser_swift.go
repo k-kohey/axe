@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,46 +96,6 @@ var protoKindToString = map[pb.TypeKind]string{
 	pb.TypeKind_TYPE_KIND_ACTOR:   "actor",
 }
 
-// convertProtoType converts a protobuf TypeInfo to the internal TypeInfo.
-func convertProtoType(pt *pb.TypeInfo) TypeInfo {
-	ti := TypeInfo{
-		Name:           pt.GetName(),
-		Kind:           protoKindToString[pt.GetKind()],
-		AccessLevel:    pt.GetAccessLevel(),
-		InheritedTypes: pt.GetInheritedTypes(),
-	}
-	for _, pp := range pt.GetProperties() {
-		ti.Properties = append(ti.Properties, PropertyInfo{
-			Name:     pp.GetName(),
-			TypeExpr: pp.GetTypeExpr(),
-			BodyLine: int(pp.GetBodyLine()),
-			Source:   pp.GetSource(),
-		})
-	}
-	for _, pm := range pt.GetMethods() {
-		ti.Methods = append(ti.Methods, MethodInfo{
-			Name:      pm.GetName(),
-			Selector:  pm.GetSelector(),
-			Signature: pm.GetSignature(),
-			BodyLine:  int(pm.GetBodyLine()),
-			Source:    pm.GetSource(),
-		})
-	}
-	return ti
-}
-
-// convertTypes converts parsed proto type info to internal types,
-// filtering out types with no computed properties or methods.
-func convertTypes(protoTypes []*pb.TypeInfo) []TypeInfo {
-	var types []TypeInfo
-	for _, pt := range protoTypes {
-		if len(pt.GetProperties()) > 0 || len(pt.GetMethods()) > 0 {
-			types = append(types, convertProtoType(pt))
-		}
-	}
-	return types
-}
-
 // convertPreviewBlocks converts proto PreviewBlocks to internal PreviewBlocks.
 func convertPreviewBlocks(protoBlocks []*pb.PreviewBlock) []PreviewBlock {
 	blocks := make([]PreviewBlock, 0, len(protoBlocks))
@@ -148,15 +109,165 @@ func convertPreviewBlocks(protoBlocks []*pb.PreviewBlock) []PreviewBlock {
 	return blocks
 }
 
+// memberKey identifies a member source by type name, line, and member name.
+type memberKey struct {
+	typeName string
+	line     int32
+	name     string
+}
+
+// nameKey identifies a member source by type name and member name only.
+type nameKey struct {
+	typeName string
+	name     string
+}
+
+// combineWithIndexStore combines Index Store member metadata with parser source text
+// to produce TypeInfo values. The Index Store provides filtering (instance/computed/non-init)
+// and the parser provides source text.
+func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseResult) []TypeInfo {
+	// Build short→qualified name mapping from parser output.
+	// The parser emits qualified names (e.g. "OuterView.InnerView") while the
+	// Index Store uses short names (e.g. "InnerView"). We need the qualified
+	// name for correct extension generation in thunk templates.
+	qualifiedNames := make(map[string]string) // shortName → qualifiedName
+	for _, ms := range parserResult.GetMemberSources() {
+		qn := ms.GetTypeName()
+		shortName := qn
+		if idx := strings.LastIndex(qn, "."); idx >= 0 {
+			shortName = qn[idx+1:]
+		}
+		// First occurrence wins to avoid ambiguity.
+		if _, exists := qualifiedNames[shortName]; !exists {
+			qualifiedNames[shortName] = qn
+		}
+	}
+
+	// Build lookup: (typeName, line, name) → MemberSource
+	sourceMap := make(map[memberKey]*pb.MemberSource, len(parserResult.GetMemberSources()))
+	for _, ms := range parserResult.GetMemberSources() {
+		key := memberKey{typeName: ms.GetTypeName(), line: ms.GetLine(), name: ms.GetName()}
+		sourceMap[key] = ms
+	}
+
+	// Also build a name-only fallback map: (typeName, name) → MemberSource
+	// Used when line numbers don't match exactly (e.g. minor offset differences).
+	fallbackMap := make(map[nameKey]*pb.MemberSource, len(parserResult.GetMemberSources()))
+	for _, ms := range parserResult.GetMemberSources() {
+		key := nameKey{typeName: ms.GetTypeName(), name: ms.GetName()}
+		// Only store the first occurrence per (typeName, name) to avoid ambiguity.
+		if _, exists := fallbackMap[key]; !exists {
+			fallbackMap[key] = ms
+		}
+	}
+
+	var types []TypeInfo
+	for _, idxType := range indexData.GetTypes() {
+		// Resolve qualified name: use the parser's qualified name if available,
+		// otherwise fall back to the Index Store's short name.
+		typeName := idxType.GetName()
+		if qn, ok := qualifiedNames[typeName]; ok {
+			typeName = qn
+		}
+
+		ti := TypeInfo{
+			Name:           typeName,
+			Kind:           protoKindToString[idxType.GetKind()],
+			AccessLevel:    idxType.GetAccessLevel(),
+			InheritedTypes: idxType.GetInheritedTypes(),
+		}
+
+		for _, idxMember := range idxType.GetMembers() {
+			switch idxMember.GetKind() {
+			case pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY:
+				if !idxMember.GetIsComputed() {
+					continue // stored property — skip
+				}
+				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				if ms == nil {
+					slog.Debug("No parser source for computed property",
+						"type", typeName, "member", idxMember.GetName(),
+						"line", idxMember.GetLine())
+					continue
+				}
+				ti.Properties = append(ti.Properties, PropertyInfo{
+					Name:     ms.GetName(),
+					TypeExpr: ms.GetTypeExpr(),
+					BodyLine: int(ms.GetBodyLine()),
+					Source:   ms.GetSource(),
+				})
+
+			case pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD:
+				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				if ms == nil {
+					slog.Debug("No parser source for instance method",
+						"type", typeName, "member", idxMember.GetName(),
+						"line", idxMember.GetLine())
+					continue
+				}
+				ti.Methods = append(ti.Methods, MethodInfo{
+					Name:      ms.GetName(),
+					Selector:  ms.GetSelector(),
+					Signature: ms.GetSignature(),
+					BodyLine:  int(ms.GetBodyLine()),
+					Source:    ms.GetSource(),
+				})
+
+			default:
+				// static, constructor, unknown — skip
+				continue
+			}
+		}
+
+		if len(ti.Properties) > 0 || len(ti.Methods) > 0 {
+			types = append(types, ti)
+		}
+	}
+
+	return types
+}
+
+// lookupMemberSource tries to find a MemberSource by (typeName, line, name),
+// falling back to (typeName, name) if the exact line match is not found.
+func lookupMemberSource(
+	sourceMap map[memberKey]*pb.MemberSource,
+	fallbackMap map[nameKey]*pb.MemberSource,
+	typeName string,
+	idxMember *pb.IndexMemberInfo,
+) *pb.MemberSource {
+	memberName := idxMember.GetName()
+
+	// Try exact match first (typeName + line + name).
+	key := memberKey{typeName: typeName, line: idxMember.GetLine(), name: memberName}
+	if ms, ok := sourceMap[key]; ok {
+		return ms
+	}
+
+	// Fallback: match by (typeName, name) only.
+	nk := nameKey{typeName: typeName, name: memberName}
+	if ms, ok := fallbackMap[nk]; ok {
+		return ms
+	}
+
+	return nil
+}
+
 // SourceFile parses types and imports from a Swift source file.
+// It requires an Index Store cache for semantic filtering.
 // It requires at least one View type with a body property.
-func SourceFile(path string) ([]TypeInfo, []string, error) {
+func SourceFile(path string, cache *IndexStoreCache) ([]TypeInfo, []string, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing source file: %w", err)
 	}
 
-	types := convertTypes(result.GetTypes())
+	var types []TypeInfo
+	if cache != nil {
+		indexData := cache.FileData(path)
+		if indexData != nil {
+			types = combineWithIndexStore(indexData, result)
+		}
+	}
 
 	// Require at least one View type with a body property.
 	hasBody := false
@@ -204,29 +315,23 @@ func Skeleton(path string) (string, error) {
 	return result.GetSkeletonHash(), nil
 }
 
-// DefaultParser returns a SwiftFileParser backed by the axe-parser CLI.
-func DefaultParser() SwiftFileParser { return defaultSwiftFileParser{} }
-
-type defaultSwiftFileParser struct{}
-
-func (defaultSwiftFileParser) ParseTypes(path string) ([]string, []string, error) {
-	result, err := swiftParse(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	return result.GetReferencedTypes(), result.GetDefinedTypes(), nil
-}
-
 // DependencyFile parses types and imports from a dependency Swift file.
 // Unlike SourceFile, it does not require a body property or View conformance.
 // It returns all types (with computed properties/methods) found in the file.
-func DependencyFile(path string) ([]TypeInfo, []string, error) {
+func DependencyFile(path string, cache *IndexStoreCache) ([]TypeInfo, []string, error) {
 	result, err := swiftParse(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parsing dependency file: %w", err)
 	}
 
-	types := convertTypes(result.GetTypes())
+	var types []TypeInfo
+	if cache != nil {
+		indexData := cache.FileData(path)
+		if indexData != nil {
+			types = combineWithIndexStore(indexData, result)
+		}
+	}
+
 	return types, result.GetImports(), nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 )
 
@@ -43,11 +44,12 @@ func writeFixtureFile(t *testing.T, dir, fileName, source string) string {
 	return p
 }
 
-// buildFixtureModule compiles Swift sources into a .swiftmodule.
-// Returns the directory containing the built module.
-func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string) string {
+// buildFixtureModule compiles Swift sources into a .swiftmodule with an index store.
+// Returns the module directory and an IndexStoreCache loaded from the built index store.
+func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string) (string, *analysis.IndexStoreCache) {
 	t.Helper()
 	outDir := t.TempDir()
+	indexStorePath := filepath.Join(outDir, "index-store")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -62,6 +64,7 @@ func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string)
 		"-enable-testing",
 		"-Xfrontend", "-enable-implicit-dynamic",
 		"-Xfrontend", "-enable-private-imports",
+		"-index-store-path", indexStorePath,
 	}
 	args = append(args, srcFiles...)
 
@@ -70,7 +73,16 @@ func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string)
 	if err != nil {
 		t.Fatalf("building fixture module: %v\n%s", err, out)
 	}
-	return outDir
+
+	// Load Index Store cache for source file parsing.
+	// Use the first source file's directory as source root.
+	sourceRoot := filepath.Dir(srcFiles[0])
+	cache, cacheErr := analysis.LoadIndexStore(ctx, indexStorePath, sourceRoot)
+	if cacheErr != nil {
+		t.Fatalf("loading index store: %v", cacheErr)
+	}
+
+	return outDir, cache
 }
 
 // typecheckGeneratedThunk runs swiftc -typecheck on the generated thunk
@@ -645,11 +657,25 @@ func TestThunkCompilation(t *testing.T) {
 				stripped := stripPreviewBlocks(src)
 				moduleSrcPaths = append(moduleSrcPaths, writeFixtureFile(t, moduleSrcDir, name, stripped))
 			}
-			moduleDir := buildFixtureModule(t, moduleSrcPaths, compileTestModuleName, sdk)
+			moduleDir, cache := buildFixtureModule(t, moduleSrcPaths, compileTestModuleName, sdk)
 
 			// Generate thunk.
+			// Use the parse directory sources (with #Preview blocks) for axe-parser,
+			// but use the cache from the module build (stripped sources) for Index Store data.
+			// The cache is keyed by module source paths; we need to remap to parse paths.
 			targetPath := filepath.Join(parseDir, tt.target)
 			dirs := previewDirs{Thunk: filepath.Join(t.TempDir(), "thunk")}
+
+			// Build a remapped cache: moduleSrcDir paths → parseDir paths.
+			remappedFiles := make(map[string]*pb.IndexFileData)
+			for name := range tt.sources {
+				parsePath := filepath.Join(parseDir, name)
+				modulePath := filepath.Join(moduleSrcDir, name)
+				if data := cache.FileData(modulePath); data != nil {
+					remappedFiles[parsePath] = data
+				}
+			}
+			remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
 
 			var files []analysis.FileThunkData
 			for name := range tt.sources {
@@ -658,9 +684,9 @@ func TestThunkCompilation(t *testing.T) {
 				var imports []string
 				var err error
 				if name == tt.target {
-					types, imports, err = analysis.SourceFile(path)
+					types, imports, err = analysis.SourceFile(path, remappedCache)
 				} else {
-					types, imports, err = analysis.DependencyFile(path)
+					types, imports, err = analysis.DependencyFile(path, remappedCache)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -701,12 +727,19 @@ func TestThunkCompilation_PathEscaping(t *testing.T) {
 	moduleSrcDir := t.TempDir()
 	moduleSrc := stripPreviewBlocks(fixturePathEscaping)
 	moduleSrcPath := writeFixtureFile(t, moduleSrcDir, "EscapeView.swift", moduleSrc)
-	moduleDir := buildFixtureModule(t, []string{moduleSrcPath}, compileTestModuleName, sdk)
+	moduleDir, cache := buildFixtureModule(t, []string{moduleSrcPath}, compileTestModuleName, sdk)
 
 	// Write the parse source to the weird directory.
 	srcPath := writeFixtureFile(t, weirdDir, `My\View.swift`, fixturePathEscaping)
 
-	types, imports, err := analysis.SourceFile(srcPath)
+	// Remap cache from module source path to parse source path.
+	remappedFiles := make(map[string]*pb.IndexFileData)
+	if data := cache.FileData(moduleSrcPath); data != nil {
+		remappedFiles[srcPath] = data
+	}
+	remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
+
+	types, imports, err := analysis.SourceFile(srcPath, remappedCache)
 	if err != nil {
 		t.Fatal(err)
 	}

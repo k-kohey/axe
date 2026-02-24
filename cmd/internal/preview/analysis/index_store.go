@@ -81,3 +81,11 @@ func (c *IndexStoreCache) DefinedTypes(path string) []string {
 	}
 	return fd.GetDefinedTypeNames()
 }
+
+// FileData returns the per-file Index Store data for the given path.
+// Returns nil if the file is not in the cache.
+func (c *IndexStoreCache) FileData(path string) *pb.IndexFileData {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.files[path]
+}

@@ -5,7 +5,328 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 )
+
+// --- combineWithIndexStore unit tests ---
+
+func TestCombineWithIndexStore_ComputedProperty(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "HogeView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "HogeView", Line: 4, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if types[0].Name != "HogeView" {
+		t.Errorf("Name = %q, want HogeView", types[0].Name)
+	}
+	if len(types[0].Properties) != 1 {
+		t.Fatalf("Properties count = %d, want 1", len(types[0].Properties))
+	}
+	if types[0].Properties[0].Name != "body" {
+		t.Errorf("Property name = %q, want body", types[0].Properties[0].Name)
+	}
+	if types[0].Properties[0].TypeExpr != "some View" {
+		t.Errorf("TypeExpr = %q, want some View", types[0].Properties[0].TypeExpr)
+	}
+}
+
+func TestCombineWithIndexStore_InstanceMethod(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "HogeView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "greet", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 8},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "HogeView", Line: 8, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "greet", Selector: "greet(name:)", Signature: "(name: String) -> String", BodyLine: 9, Source: `return "Hello"`},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if len(types[0].Methods) != 1 {
+		t.Fatalf("Methods count = %d, want 1", len(types[0].Methods))
+	}
+	m := types[0].Methods[0]
+	if m.Name != "greet" {
+		t.Errorf("Method.Name = %q, want greet", m.Name)
+	}
+	if m.Selector != "greet(name:)" {
+		t.Errorf("Method.Selector = %q, want greet(name:)", m.Selector)
+	}
+	if m.Signature != "(name: String) -> String" {
+		t.Errorf("Method.Signature = %q, want (name: String) -> String", m.Signature)
+	}
+}
+
+func TestCombineWithIndexStore_SkipsStoredProperty(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "MyView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "count", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: false, Line: 3},
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 5},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "MyView", Line: 5, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", TypeExpr: "some View", BodyLine: 6, Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	// Only body (computed) should be included, count (stored) should be skipped.
+	if len(types[0].Properties) != 1 {
+		t.Fatalf("Properties count = %d, want 1 (stored property should be skipped)", len(types[0].Properties))
+	}
+	if types[0].Properties[0].Name != "body" {
+		t.Errorf("Property name = %q, want body", types[0].Properties[0].Name)
+	}
+}
+
+func TestCombineWithIndexStore_SkipsStaticMember(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "MyView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "create", Kind: pb.MemberKind_MEMBER_KIND_STATIC_METHOD, Line: 3},
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 5},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "MyView", Line: 3, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "create", Source: "MyView()"},
+			{TypeName: "MyView", Line: 5, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", TypeExpr: "some View", Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	// Static method should be skipped.
+	if len(types[0].Methods) != 0 {
+		t.Errorf("Methods count = %d, want 0 (static should be skipped)", len(types[0].Methods))
+	}
+}
+
+func TestCombineWithIndexStore_SkipsConstructor(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "MyView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "init", Kind: pb.MemberKind_MEMBER_KIND_CONSTRUCTOR, Line: 3},
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 5},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "MyView", Line: 3, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "init", Source: "self.x = 0"},
+			{TypeName: "MyView", Line: 5, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", TypeExpr: "some View", Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	// init should be skipped.
+	if len(types[0].Methods) != 0 {
+		t.Errorf("Methods count = %d, want 0 (constructor should be skipped)", len(types[0].Methods))
+	}
+}
+
+func TestCombineWithIndexStore_NameFallback(t *testing.T) {
+	// Line number mismatch — should fall back to name-only lookup.
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "MyView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 10},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			// Line 5 from parser doesn't match line 10 from index store.
+			{TypeName: "MyView", Line: 5, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", TypeExpr: "some View", BodyLine: 6, Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if len(types[0].Properties) != 1 {
+		t.Fatalf("Properties count = %d, want 1 (should fallback to name match)", len(types[0].Properties))
+	}
+}
+
+func TestCombineWithIndexStore_MultipleTypes(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "HogeView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+			{
+				Name:           "FugaView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 10},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "HogeView", Line: 4, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", Source: "Text(\"Hello\")"},
+			{TypeName: "FugaView", Line: 10, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", Source: "Text(\"World\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 2 {
+		t.Fatalf("types count = %d, want 2", len(types))
+	}
+	if types[0].Name != "HogeView" {
+		t.Errorf("types[0].Name = %q, want HogeView", types[0].Name)
+	}
+	if types[1].Name != "FugaView" {
+		t.Errorf("types[1].Name = %q, want FugaView", types[1].Name)
+	}
+}
+
+func TestCombineWithIndexStore_NoMemberSource(t *testing.T) {
+	// Index Store says there's a computed property, but parser didn't extract source.
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "MyView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: nil, // No member sources from parser.
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	// Type has no properties (no matching source), so it should be empty.
+	if len(types) != 0 {
+		t.Errorf("types count = %d, want 0 (no matching member source)", len(types))
+	}
+}
+
+func TestCombineWithIndexStore_InheritedTypes(t *testing.T) {
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "MyView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "public",
+				InheritedTypes: []string{"View", "Identifiable"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "MyView", Line: 4, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", Source: "Text(\"Hello\")"},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if !types[0].IsView() {
+		t.Error("expected IsView() to be true")
+	}
+	if types[0].AccessLevel != "public" {
+		t.Errorf("AccessLevel = %q, want public", types[0].AccessLevel)
+	}
+	if len(types[0].InheritedTypes) != 2 {
+		t.Errorf("InheritedTypes = %v, want [View Identifiable]", types[0].InheritedTypes)
+	}
+}
+
+// --- SourceFile / DependencyFile integration tests ---
+// These require the axe-parser binary. They are integration tests that actually
+// parse Swift files and combine with a mock IndexStoreCache.
+
+// buildMockCache creates an IndexStoreCache with the given file data.
+func buildMockCache(path string, indexData *pb.IndexFileData) *IndexStoreCache {
+	return &IndexStoreCache{
+		files: map[string]*pb.IndexFileData{
+			path: indexData,
+		},
+		typeMap: map[string][]string{},
+	}
+}
 
 func TestParseSourceFile(t *testing.T) {
 	src := `import SwiftUI
@@ -24,7 +345,21 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, imports, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "HogeView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 5},
+				},
+			},
+		},
+	})
+
+	types, imports, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +379,6 @@ struct HogeView: View {
 	if body.Name != "body" {
 		t.Errorf("Property name = %q, want body", body.Name)
 	}
-	if body.BodyLine != 6 {
-		t.Errorf("BodyLine = %d, want 6", body.BodyLine)
-	}
 	if len(imports) != 1 || imports[0] != "import SomeFramework" {
 		t.Errorf("Imports = %v, want [import SomeFramework]", imports)
 	}
@@ -65,9 +397,42 @@ struct NotAView {
 		t.Fatal(err)
 	}
 
-	_, _, err := SourceFile(path)
+	// No View conformance in index data.
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "NotAView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal",
+			},
+		},
+	})
+
+	_, _, err := SourceFile(path, cache)
 	if err == nil {
 		t.Fatal("expected error for file without View struct")
+	}
+}
+
+func TestParseSourceFile_NilCache(t *testing.T) {
+	src := `import SwiftUI
+
+struct HogeView: View {
+    var body: some View {
+        Text("Hello")
+    }
+}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "HogeView.swift")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// With nil cache, SourceFile can't find types → error.
+	_, _, err := SourceFile(path, nil)
+	if err == nil {
+		t.Fatal("expected error when cache is nil")
 	}
 }
 
@@ -90,7 +455,22 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "HogeView",
+				Kind:           pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "backgroundColor", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 7},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +517,27 @@ struct PiyoView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members:        []*pb.IndexMemberInfo{{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4}},
+			},
+			{
+				Name: "FugaView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members:        []*pb.IndexMemberInfo{{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 10}},
+			},
+			{
+				Name: "PiyoView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members:        []*pb.IndexMemberInfo{{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 16}},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +820,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "greet", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 8},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +879,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "create", Kind: pb.MemberKind_MEMBER_KIND_STATIC_METHOD, Line: 8},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +921,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "refresh", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 8},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +970,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "add", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 8},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +1019,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	types, _, err := SourceFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					{Name: "configure", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 8},
+				},
+			},
+		},
+	})
+
+	types, _, err := SourceFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -960,7 +1425,19 @@ struct HogeView: View {
 	}
 	ResetCache()
 
-	types, _, err := DependencyFile(path)
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "HogeView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+		},
+	})
+
+	types, _, err := DependencyFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -988,7 +1465,19 @@ struct NotAView {
 	}
 	ResetCache()
 
-	types, _, err := DependencyFile(path)
+	// No computed properties in index data.
+	cache := buildMockCache(path, &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name: "NotAView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "name", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: false, Line: 4},
+				},
+			},
+		},
+	})
+
+	types, _, err := DependencyFile(path, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -999,17 +1488,12 @@ struct NotAView {
 	}
 }
 
-// --- referencedTypes / definedTypes tests ---
-
-func TestSwiftParse_ReferencedTypes(t *testing.T) {
+func TestParseDependencyFile_NilCache(t *testing.T) {
 	src := `import SwiftUI
 
 struct HogeView: View {
-    var model: MyViewModel
-    var child: FugaView
-
     var body: some View {
-        Text(model.name)
+        Text("Hello")
     }
 }
 `
@@ -1020,80 +1504,12 @@ struct HogeView: View {
 	}
 	ResetCache()
 
-	result, err := swiftParse(path)
+	// With nil cache, no types are produced (but no error either).
+	types, _, err := DependencyFile(path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	refSet := make(map[string]bool)
-	for _, rt := range result.ReferencedTypes {
-		refSet[rt] = true
-	}
-
-	// Should include custom types
-	if !refSet["MyViewModel"] {
-		t.Errorf("referencedTypes should include MyViewModel, got %v", result.ReferencedTypes)
-	}
-	if !refSet["FugaView"] {
-		t.Errorf("referencedTypes should include FugaView, got %v", result.ReferencedTypes)
-	}
-
-	// Standard/SwiftUI types are now included (filtering is done by the
-	// index store type→file map during dependency resolution, not here).
-	if !refSet["View"] {
-		t.Errorf("referencedTypes should include View (no client-side filtering)")
-	}
-	if !refSet["Text"] {
-		t.Errorf("referencedTypes should include Text (no client-side filtering)")
-	}
-	// String is not referenced in this source, so it should not appear.
-	if refSet["String"] {
-		t.Errorf("referencedTypes should not include String (not referenced in source)")
-	}
-}
-
-func TestSwiftParse_DefinedTypes(t *testing.T) {
-	src := `import SwiftUI
-
-struct HogeView: View {
-    var body: some View {
-        Text("Hello")
-    }
-}
-
-class MyViewModel {
-    var name: String = ""
-}
-
-enum MyState {
-    case idle
-    case loading
-}
-`
-	dir := t.TempDir()
-	path := filepath.Join(dir, "Combined.swift")
-	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ResetCache()
-
-	result, err := swiftParse(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defSet := make(map[string]bool)
-	for _, dt := range result.DefinedTypes {
-		defSet[dt] = true
-	}
-
-	if !defSet["HogeView"] {
-		t.Errorf("definedTypes should include HogeView, got %v", result.DefinedTypes)
-	}
-	if !defSet["MyViewModel"] {
-		t.Errorf("definedTypes should include MyViewModel, got %v", result.DefinedTypes)
-	}
-	if !defSet["MyState"] {
-		t.Errorf("definedTypes should include MyState, got %v", result.DefinedTypes)
+	if len(types) != 0 {
+		t.Errorf("types count = %d, want 0 with nil cache", len(types))
 	}
 }

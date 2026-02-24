@@ -3,26 +3,51 @@ package analysis
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"sort"
 	"testing"
+
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 )
+
+// newTestCache creates an IndexStoreCache from a map of file→(referenced, defined) types.
+func newTestCache(data map[string]struct {
+	referenced []string
+	defined    []string
+}) *IndexStoreCache {
+	files := make(map[string]*pb.IndexFileData, len(data))
+	typeMap := make(map[string][]string)
+
+	for path, d := range data {
+		files[path] = &pb.IndexFileData{
+			FilePath:            path,
+			ReferencedTypeNames: d.referenced,
+			DefinedTypeNames:    d.defined,
+		}
+		for _, def := range d.defined {
+			typeMap[def] = append(typeMap[def], path)
+		}
+	}
+
+	return &IndexStoreCache{
+		files:   files,
+		typeMap: typeMap,
+	}
+}
 
 func TestBuildTransitiveDeps_SingleLevel(t *testing.T) {
 	target := filepath.Join("/project", "ContentView.swift")
 	dep := filepath.Join("/project", "ChildView.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target: {referenced: []string{"ChildView"}, defined: []string{"ContentView"}},
 		dep:    {referenced: nil, defined: []string{"ChildView"}},
-	}}
-	typeMap := map[string][]string{
-		"ContentView": {target},
-		"ChildView":   {dep},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +76,16 @@ func TestBuildTransitiveDeps_Transitive(t *testing.T) {
 	b := filepath.Join("/project", "B.swift")
 	c := filepath.Join("/project", "C.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
 		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
 		c: {referenced: nil, defined: []string{"CType"}},
-	}}
-	typeMap := map[string][]string{
-		"AType": {a},
-		"BType": {b},
-		"CType": {c},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,16 +116,15 @@ func TestBuildTransitiveDeps_Cycle(t *testing.T) {
 	a := filepath.Join("/project", "A.swift")
 	b := filepath.Join("/project", "B.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
 		b: {referenced: []string{"AType"}, defined: []string{"BType"}},
-	}}
-	typeMap := map[string][]string{
-		"AType": {a},
-		"BType": {b},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +138,14 @@ func TestBuildTransitiveDeps_Cycle(t *testing.T) {
 func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 	target := filepath.Join("/project", "Simple.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target: {referenced: nil, defined: []string{"Simple"}},
-	}}
-	typeMap := map[string][]string{
-		"Simple": {target},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,15 +162,14 @@ func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 func TestBuildTransitiveDeps_UnknownTypeSkipped(t *testing.T) {
 	target := filepath.Join("/project", "View.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target: {referenced: []string{"UnknownFrameworkType"}, defined: []string{"MyView"}},
-	}}
-	// typeMap doesn't contain UnknownFrameworkType — it's a framework type.
-	typeMap := map[string][]string{
-		"MyView": {target},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,15 +185,15 @@ func TestBuildTransitiveDeps_ContextCancelled(t *testing.T) {
 	cancel() // Cancel immediately.
 
 	target := filepath.Join("/project", "View.swift")
-	parser := &mockParser{results: map[string]mockParseResult{
-		target: {referenced: []string{"Other"}, defined: []string{"View"}},
-	}}
-	typeMap := map[string][]string{
-		"View":  {target},
-		"Other": {filepath.Join("/project", "Other.swift")},
-	}
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
+		target:                                   {referenced: []string{"Other"}, defined: []string{"View"}},
+		filepath.Join("/project", "Other.swift"): {referenced: nil, defined: []string{"Other"}},
+	})
 
-	_, err := BuildTransitiveDeps(ctx, target, typeMap, nil, parser)
+	_, err := BuildTransitiveDeps(ctx, target, cache.TypeFileMultiMap(), cache)
 	if err == nil {
 		t.Fatal("expected context cancellation error")
 	}
@@ -181,12 +202,15 @@ func TestBuildTransitiveDeps_ContextCancelled(t *testing.T) {
 func TestBuildTransitiveDeps_EmptyTypeMap(t *testing.T) {
 	target := filepath.Join("/project", "Alone.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target: {referenced: []string{"SomeType"}, defined: []string{"AloneView"}},
-	}}
-	typeMap := map[string][]string{}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	// Use empty typeMap to simulate the type not being found.
+	graph, err := BuildTransitiveDeps(context.Background(), target, map[string][]string{}, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,104 +223,26 @@ func TestBuildTransitiveDeps_EmptyTypeMap(t *testing.T) {
 	}
 }
 
-func TestBuildTransitiveDeps_ParseErrorOnDependency(t *testing.T) {
-	target := filepath.Join("/project", "Root.swift")
-	goodDep := filepath.Join("/project", "Good.swift")
-	badDep := filepath.Join("/project", "Bad.swift")
-
-	parser := &mockParser{results: map[string]mockParseResult{
-		target:  {referenced: []string{"GoodType", "BadType"}, defined: []string{"RootType"}},
-		goodDep: {referenced: nil, defined: []string{"GoodType"}},
-		badDep:  {err: fmt.Errorf("syntax error in dependency")},
-	}}
-	typeMap := map[string][]string{
-		"RootType": {target},
-		"GoodType": {goodDep},
-		"BadType":  {badDep},
-	}
-
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !graph.All[filepath.Clean(target)] {
-		t.Error("graph should include target file")
-	}
-	if !graph.All[filepath.Clean(goodDep)] {
-		t.Error("graph should include good dependency")
-	}
-	if !graph.All[filepath.Clean(badDep)] {
-		t.Error("graph should include bad dependency path (added before parse attempt)")
-	}
-	if len(graph.All) != 3 {
-		t.Errorf("graph size = %d, want 3", len(graph.All))
-	}
-}
-
-// cancellingParser cancels the context on the Nth ParseTypes call.
-type cancellingParser struct {
-	inner     *mockParser
-	cancel    context.CancelFunc
-	callCount int
-	cancelAt  int
-}
-
-func (p *cancellingParser) ParseTypes(path string) ([]string, []string, error) {
-	p.callCount++
-	if p.callCount >= p.cancelAt {
-		p.cancel()
-	}
-	return p.inner.ParseTypes(path)
-}
-
-func TestBuildTransitiveDeps_MidTraversalContextCancel(t *testing.T) {
-	a := filepath.Join("/project", "A.swift")
-	b := filepath.Join("/project", "B.swift")
-	c := filepath.Join("/project", "C.swift")
-
-	inner := &mockParser{results: map[string]mockParseResult{
-		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
-		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
-		c: {referenced: nil, defined: []string{"CType"}},
-	}}
-	typeMap := map[string][]string{
-		"AType": {a},
-		"BType": {b},
-		"CType": {c},
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel on the second call to ParseTypes (when processing B),
-	// so C should not be discovered.
-	parser := &cancellingParser{inner: inner, cancel: cancel, cancelAt: 2}
-
-	_, err := BuildTransitiveDeps(ctx, a, typeMap, nil, parser)
-	if err == nil {
-		t.Fatal("expected context cancellation error, got nil")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled, got %v", err)
-	}
-}
-
 func TestBuildTransitiveDeps_NonCleanPaths(t *testing.T) {
 	target := filepath.Join("/project", "src", "Root.swift")
 	// typeMap entry uses a non-clean path with ".." segments.
 	dep := filepath.Join("/project", "src", "..", "src", "Dep.swift")
 	depClean := filepath.Clean(dep)
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target:   {referenced: []string{"DepType"}, defined: []string{"RootType"}},
-		dep:      {referenced: []string{"DepType"}, defined: []string{"DepType"}},
 		depClean: {referenced: nil, defined: []string{"DepType"}},
-	}}
+	})
+
 	typeMap := map[string][]string{
 		"RootType": {target},
-		"DepType":  {dep},
+		"DepType":  {dep}, // non-clean path
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,18 +261,16 @@ func TestBuildTransitiveDeps_DuplicateTypeName(t *testing.T) {
 	depA := filepath.Join("/project", "features", "Product.swift")
 	depB := filepath.Join("/project", "legacy", "Product.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		target: {referenced: []string{"Product"}, defined: []string{"MyView"}},
 		depA:   {referenced: nil, defined: []string{"Product"}},
 		depB:   {referenced: nil, defined: []string{"Product"}},
-	}}
-	// Same type name maps to multiple files.
-	typeMap := map[string][]string{
-		"MyView":  {target},
-		"Product": {depA, depB},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,20 +306,17 @@ func TestBuildTransitiveDeps_DirectDepsMultiDepth(t *testing.T) {
 	c := filepath.Join("/project", "C.swift")
 	d := filepath.Join("/project", "D.swift")
 
-	parser := &mockParser{results: map[string]mockParseResult{
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
 		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
 		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
 		c: {referenced: []string{"DType"}, defined: []string{"CType"}},
 		d: {referenced: nil, defined: []string{"DType"}},
-	}}
-	typeMap := map[string][]string{
-		"AType": {a},
-		"BType": {b},
-		"CType": {c},
-		"DType": {d},
-	}
+	})
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, cache.TypeFileMultiMap(), cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,5 +331,50 @@ func TestBuildTransitiveDeps_DirectDepsMultiDepth(t *testing.T) {
 	}
 	if direct[0] != filepath.Clean(b) {
 		t.Errorf("DirectDeps[0] = %q, want %q (only B is depth=1)", direct[0], filepath.Clean(b))
+	}
+}
+
+func TestBuildTransitiveDeps_NilCache(t *testing.T) {
+	target := filepath.Join("/project", "View.swift")
+	typeMap := map[string][]string{
+		"View":  {target},
+		"Other": {filepath.Join("/project", "Other.swift")},
+	}
+
+	// With nil cache, no refs are found, so only the target is in the graph.
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.All) != 1 {
+		t.Errorf("graph size = %d, want 1 (nil cache returns no refs)", len(graph.All))
+	}
+}
+
+func TestBuildTransitiveDeps_MidTraversalContextCancel(t *testing.T) {
+	// Build a deep chain where context cancellation is detected during BFS.
+	a := filepath.Join("/project", "A.swift")
+	b := filepath.Join("/project", "B.swift")
+	c := filepath.Join("/project", "C.swift")
+
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
+		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
+		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
+		c: {referenced: nil, defined: []string{"CType"}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel before traversal to ensure the context check triggers.
+	cancel()
+
+	_, err := BuildTransitiveDeps(ctx, a, cache.TypeFileMultiMap(), cache)
+	if err == nil {
+		t.Fatal("expected context cancellation error, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

@@ -69,7 +69,8 @@ private struct TypeBuilder {
   let kind: Int
   let accessLevel: String
   var inheritedTypes: Set<String> = []
-  var members: [MemberBuilder] = []
+  /// Members keyed by USR to deduplicate across multiple Index Store records.
+  var membersByUSR: [String: MemberBuilder] = [:]
   let line: Int32
   let column: Int32
 }
@@ -197,10 +198,20 @@ func readIndexStore(
         )
 
         // Find parent type via childOf relation and add member.
+        // If the parent type was defined in another file (extension case),
+        // create a placeholder TypeBuilder so the member isn't dropped.
         // swift-format-ignore: ReplaceForEachWithForLoop
         occurrence.forEach { relatedSymbol, roles in
           if roles.contains(.childOf) {
-            fileAccumulators[mainFile]?.types[relatedSymbol.usr]?.members.append(member)
+            if fileAccumulators[mainFile]?.types[relatedSymbol.usr] == nil {
+              fileAccumulators[mainFile]?.types[relatedSymbol.usr] = TypeBuilder(
+                name: relatedSymbol.name,
+                kind: symbolKindToTypeKind(relatedSymbol.kind),
+                accessLevel: accessLevel(from: relatedSymbol.properties),
+                line: 0, column: 0
+              )
+            }
+            fileAccumulators[mainFile]?.types[relatedSymbol.usr]?.membersByUSR[member.usr] = member
           }
         }
       }
@@ -219,6 +230,19 @@ func readIndexStore(
       if occurrence.roles.contains(.reference), typeKinds.contains(symbol.kind) {
         fileAccumulators[mainFile]?.referencedTypeNames.insert(name)
       }
+
+      // --- Inheritance / conformance references ---
+      // Protocol conformances (e.g. `: View`) appear as reference occurrences
+      // with a baseOf relation to the conforming type. We collect these here
+      // because the type definition occurrence does not always carry them.
+      if occurrence.roles.contains(.reference) {
+        // swift-format-ignore: ReplaceForEachWithForLoop
+        occurrence.forEach { relatedSymbol, roles in
+          if roles.contains(.baseOf) {
+            fileAccumulators[mainFile]?.types[relatedSymbol.usr]?.inheritedTypes.insert(name)
+          }
+        }
+      }
     }
   }
 
@@ -229,16 +253,18 @@ func readIndexStore(
     var types: [IndexTypeInfoOutput] = []
 
     for (_, builder) in acc.types.sorted(by: { $0.value.line < $1.value.line }) {
-      let members = builder.members.map { member in
-        IndexMemberInfoOutput(
-          name: member.name,
-          kind: member.kind,
-          accessLevel: member.accessLevel,
-          line: member.line,
-          column: member.column,
-          isComputed: computedPropertyUSRs.contains(member.usr)
-        )
-      }
+      let members = builder.membersByUSR.values
+        .sorted(by: { $0.line < $1.line })
+        .map { member in
+          IndexMemberInfoOutput(
+            name: member.name,
+            kind: member.kind,
+            accessLevel: member.accessLevel,
+            line: member.line,
+            column: member.column,
+            isComputed: computedPropertyUSRs.contains(member.usr)
+          )
+        }
 
       types.append(
         IndexTypeInfoOutput(

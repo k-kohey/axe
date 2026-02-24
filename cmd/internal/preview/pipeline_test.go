@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 )
 
 // --- Fake ToolchainRunner (for parent tests that need nop toolchain) ---
@@ -59,6 +60,11 @@ func (f *fakeToolchainRunner) Codesign(_ context.Context, path string) error {
 	return f.codesignErr
 }
 
+// buildTestCache creates an IndexStoreCache for test files.
+func buildTestCache(entries map[string]*pb.IndexFileData) *analysis.IndexStoreCache {
+	return analysis.NewIndexStoreCache(entries, map[string][]string{})
+}
+
 func TestParseTrackedFiles_SourceAndDependency(t *testing.T) {
 	dir := t.TempDir()
 
@@ -88,7 +94,32 @@ struct ChildView: View {
 	}
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "MainView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 5},
+					},
+				},
+			},
+		},
+		depPath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "ChildView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
+	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 
 	if len(files) != 2 {
 		t.Fatalf("files count = %d, want 2", len(files))
@@ -124,7 +155,7 @@ struct ChildView: View {
 func TestParseTrackedFiles_SourceParseErrorSkipped(t *testing.T) {
 	dir := t.TempDir()
 
-	// Source file with syntax error (no View type).
+	// Source file with no View type — SourceFile will fail.
 	sourcePath := filepath.Join(dir, "Broken.swift")
 	if err := os.WriteFile(sourcePath, []byte(`import SwiftUI
 
@@ -148,8 +179,27 @@ struct HelperView: View {
 	}
 	analysis.ResetCache()
 
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{Name: "NotAView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal"},
+			},
+		},
+		depPath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "HelperView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
 	// In lenient mode, sourceFile parse error is skipped (not fatal).
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 
 	// Only the dependency should be returned.
 	if len(files) != 1 {
@@ -179,7 +229,21 @@ struct MainView: View {
 	depPath := filepath.Join(dir, "NonExistent.swift")
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "MainView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
+	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 
 	if len(files) != 1 {
 		t.Fatalf("files count = %d, want 1 (broken dep skipped)", len(files))
@@ -204,7 +268,7 @@ struct MainView: View {
 		t.Fatal(err)
 	}
 
-	// Dependency with only stored properties → parseDependencyFile succeeds
+	// Dependency with only stored properties → DependencyFile succeeds
 	// but returns 0 types (no computed properties), hitting len(types) == 0.
 	depPath := filepath.Join(dir, "Model.swift")
 	if err := os.WriteFile(depPath, []byte(`import Foundation
@@ -217,7 +281,31 @@ struct Model {
 	}
 	analysis.ResetCache()
 
-	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "MainView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+		depPath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "Model", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					Members: []*pb.IndexMemberInfo{
+						{Name: "name", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: false, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
+	files := parseTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 
 	// Only source should be returned; dep is skipped (no computed properties).
 	if len(files) != 1 {
@@ -260,7 +348,16 @@ struct Model {
 	}
 	analysis.ResetCache()
 
-	_, _, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath})
+	// Cache with no View type.
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{Name: "Model", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal"},
+			},
+		},
+	})
+
+	_, _, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath}, cache)
 	if err == nil {
 		t.Fatal("expected error when sourceFile is not in results")
 	}
@@ -294,7 +391,32 @@ private struct SharedName: View {
 	}
 	analysis.ResetCache()
 
-	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "SharedName", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "private",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+		depPath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "SharedName", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "private",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
+	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,11 +450,20 @@ struct Model {
 	}
 	analysis.ResetCache()
 
+	// No View type in cache.
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{Name: "Model", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal"},
+			},
+		},
+	})
+
 	bs := &buildSettings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
 
 	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}
-	_, err := compilePipeline(context.Background(), sourcePath, []string{sourcePath}, bs, dirs, "0", 0, tc)
+	_, err := compilePipeline(context.Background(), sourcePath, []string{sourcePath}, cache, bs, dirs, "0", 0, tc)
 	if err == nil {
 		t.Fatal("expected error for empty parse result, got nil")
 	}
@@ -514,7 +645,32 @@ struct HelperView: View {
 	}
 	analysis.ResetCache()
 
-	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath})
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "MainView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+		depPath: {
+			Types: []*pb.IndexTypeInfo{
+				{
+					Name: "HelperView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Members: []*pb.IndexMemberInfo{
+						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+					},
+				},
+			},
+		},
+	})
+
+	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
 	if err != nil {
 		t.Fatal(err)
 	}

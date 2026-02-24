@@ -87,18 +87,3 @@ func readIndexStore(ctx context.Context, indexStorePath string, sourceRoot strin
 	)
 	return &result, nil
 }
-
-// readTypeFileMultiMap reads the index store and returns a multi-map of
-// type names to file paths. Used by ResolveTransitiveDependencies for BFS.
-func readTypeFileMultiMap(ctx context.Context, indexStorePath string, sourceRoot string) (map[string][]string, error) {
-	result, err := readIndexStore(ctx, indexStorePath, sourceRoot)
-	if err != nil {
-		return nil, err
-	}
-	flat := result.GetTypeFileMap()
-	multiMap := make(map[string][]string, len(flat))
-	for typeName, filePath := range flat {
-		multiMap[typeName] = []string{filePath}
-	}
-	return multiMap, nil
-}

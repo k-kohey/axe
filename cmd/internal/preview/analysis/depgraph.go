@@ -23,10 +23,8 @@ type bfsEntry struct {
 // targetFile, collecting all transitively referenced files.
 // The returned graph includes targetFile itself.
 //
-// When cache is non-nil, referenced types are looked up from the in-memory
-// Index Store cache (no subprocess calls). When cache is nil, the parser
-// fallback is used instead.
-func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, cache *IndexStoreCache, parser SwiftFileParser) (*DependencyGraph, error) {
+// Referenced types are looked up from the in-memory Index Store cache.
+func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, cache *IndexStoreCache) (*DependencyGraph, error) {
 	graph := &DependencyGraph{
 		All:   make(map[string]bool),
 		depth: make(map[string]int),
@@ -46,7 +44,7 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 		entry := queue[0]
 		queue = queue[1:]
 
-		referencedTypes := refsFromCacheOrParser(entry.path, cache, parser)
+		referencedTypes := refsFromCache(entry.path, cache)
 
 		nextDepth := entry.depth + 1
 		for _, typeName := range referencedTypes {
@@ -73,19 +71,10 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 	return graph, nil
 }
 
-// refsFromCacheOrParser returns referenced type names for a file,
-// preferring the Index Store cache when available.
-func refsFromCacheOrParser(path string, cache *IndexStoreCache, parser SwiftFileParser) []string {
+// refsFromCache returns referenced type names for a file from the Index Store cache.
+func refsFromCache(path string, cache *IndexStoreCache) []string {
 	if cache != nil {
 		return cache.ReferencedTypes(path)
-	}
-	if parser != nil {
-		refs, _, err := parser.ParseTypes(path)
-		if err != nil {
-			slog.Debug("Skipping file in BFS (parse error)", "path", path, "err", err)
-			return nil
-		}
-		return refs
 	}
 	return nil
 }
