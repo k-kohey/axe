@@ -71,6 +71,7 @@ func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, targe
 		"-gline-tables-only",
 		"-Xfrontend", "-disable-previous-implementation-calls-in-dynamic-replacements",
 		"-Xfrontend", "-disable-modules-validate-system-headers",
+		"-Xfrontend", "-disable-access-control",
 	}
 	for _, p := range cfg.ExtraIncludePaths {
 		compileArgs = append(compileArgs, "-I", p)
