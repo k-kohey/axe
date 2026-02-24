@@ -136,7 +136,11 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 1. Resolve dependencies for the new file using index store.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, analysis.DefaultParser())
+	var cache *analysis.IndexStoreCache
+	if ws.indexCache != nil {
+		cache = ws.indexCache.Get()
+	}
+	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, cache, analysis.DefaultParser())
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -289,8 +293,22 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return ctx.Err()
 	}
 
+	// Reload Index Store cache after rebuild (index data is updated by the build).
+	// Update the shared cache so all streams (in multi-stream mode) see fresh data.
 	projectRoot := filepath.Dir(pc.primaryPath())
-	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, analysis.DefaultParser())
+	newCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
+	if cacheErr != nil && ctx.Err() == nil {
+		slog.Warn("Failed to reload index store cache after rebuild", "err", cacheErr)
+	}
+	if ws.indexCache != nil {
+		ws.indexCache.Set(newCache)
+	}
+
+	var resolveCache *analysis.IndexStoreCache
+	if ws.indexCache != nil {
+		resolveCache = ws.indexCache.Get()
+	}
+	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), wctx.sources, resolveCache, analysis.DefaultParser())
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()

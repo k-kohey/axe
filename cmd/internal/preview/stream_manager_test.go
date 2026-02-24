@@ -779,6 +779,90 @@ func TestStreamManager_NextPreviewRouting(t *testing.T) {
 	sm.StopAll()
 }
 
+// TestStreamManager_SharedIndexCache verifies that all streams share the same
+// sharedIndexCache instance from StreamManager. When one stream updates the
+// cache (simulating a rebuild), other streams see the new value.
+func TestStreamManager_SharedIndexCache(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+
+	sm := newTestStreamManagerWithRunners(pool, ew)
+
+	// Channels for synchronization between test and fake launcher goroutines.
+	streamAReady := make(chan struct{})
+	streamBReady := make(chan struct{})
+	streamAUpdated := make(chan struct{})
+	streamBResult := make(chan bool, 1) // true if B sees the updated cache
+
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		// Initialize per-stream watchState with the shared cache.
+		s.ws = &watchState{
+			indexCache: sm.indexCache, // shared reference
+		}
+
+		switch s.id {
+		case "stream-a":
+			close(streamAReady)
+
+			// Wait for stream B to be ready, then update the shared cache.
+			select {
+			case <-streamBReady:
+			case <-ctx.Done():
+				return
+			}
+
+			// Simulate rebuild: update the shared cache.
+			sm.indexCache.Set(makeTestCache("UpdatedType", "/project/Updated.swift"))
+			close(streamAUpdated)
+
+		case "stream-b":
+			close(streamBReady)
+
+			// Wait for stream A to update the shared cache.
+			select {
+			case <-streamAUpdated:
+			case <-ctx.Done():
+				return
+			}
+
+			// Verify that reading through ws.indexCache (same shared ref)
+			// returns the value set by stream A.
+			got := s.ws.indexCache.Get()
+			streamBResult <- (got != nil &&
+				len(got.DefinedTypes("/project/Updated.swift")) == 1 &&
+				got.DefinedTypes("/project/Updated.swift")[0] == "UpdatedType")
+		}
+
+		<-ctx.Done()
+	}
+
+	ctx := t.Context()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/a.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-b",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/b.swift", DeviceType: "iPad-Air", Runtime: "iOS-18-2"}},
+	})
+
+	select {
+	case ok := <-streamBResult:
+		if !ok {
+			t.Error("stream B did not see the cache update from stream A")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for stream B to verify cache")
+	}
+
+	sm.StopAll()
+}
+
 // syncBuffer is a thread-safe bytes.Buffer wrapper for use as an io.Writer
 // shared between goroutines (e.g. EventWriter + test assertions).
 type syncBuffer struct {

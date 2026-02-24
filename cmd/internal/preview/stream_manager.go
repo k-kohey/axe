@@ -97,6 +97,11 @@ type StreamManager struct {
 	bs          *buildSettings
 	bsExtracted bool // true after extractCompilerPaths has been called
 
+	// Shared Index Store cache across all streams.
+	// When any stream rebuilds, it updates this cache so other streams
+	// see fresh type/reference data without a stale in-memory snapshot.
+	indexCache *sharedIndexCache
+
 	// Shared file watcher (set by RunServe before starting command loop).
 	watcher *watch.SharedWatcher
 
@@ -123,6 +128,7 @@ func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc Pro
 		ew:            ew,
 		pc:            pc,
 		deviceSetPath: deviceSetPath,
+		indexCache:    newSharedIndexCache(nil),
 		build:         br,
 		toolchain:     tc,
 		app:           ar,
@@ -428,7 +434,16 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 8. Resolve dependencies using index store for transitive graph.
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, projectRoot, s.dirs.IndexStorePath(), sm.sources, analysis.DefaultParser())
+	// Load (or refresh) the shared Index Store cache. The first stream to
+	// build populates it; subsequent streams reuse the same instance.
+	cache, cacheErr := analysis.LoadIndexStore(ctx, s.dirs.IndexStorePath(), projectRoot)
+	if cacheErr != nil && ctx.Err() == nil {
+		slog.Warn("Index store cache unavailable for stream",
+			"streamId", s.id, "err", cacheErr)
+	}
+	sm.indexCache.Set(cache)
+
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, projectRoot, s.dirs.IndexStorePath(), sm.sources, sm.indexCache.Get(), analysis.DefaultParser())
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only",
 			"streamId", s.id, "err", err)
@@ -527,6 +542,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		skeletonMap:     buildSkeletonMap(trackedFiles),
 		trackedFiles:    trackedFiles,
 		depGraph:        depGraph,
+		indexCache:      sm.indexCache, // shared across all streams
 	}
 
 	// 16. Register with shared watcher for file change notifications.

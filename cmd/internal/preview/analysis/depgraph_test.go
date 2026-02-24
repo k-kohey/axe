@@ -22,7 +22,7 @@ func TestBuildTransitiveDeps_SingleLevel(t *testing.T) {
 		"ChildView":   {dep},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestBuildTransitiveDeps_Transitive(t *testing.T) {
 		"CType": {c},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestBuildTransitiveDeps_Cycle(t *testing.T) {
 		"BType": {b},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 		"Simple": {target},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestBuildTransitiveDeps_UnknownTypeSkipped(t *testing.T) {
 		"MyView": {target},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestBuildTransitiveDeps_ContextCancelled(t *testing.T) {
 		"Other": {filepath.Join("/project", "Other.swift")},
 	}
 
-	_, err := BuildTransitiveDeps(ctx, target, typeMap, parser)
+	_, err := BuildTransitiveDeps(ctx, target, typeMap, nil, parser)
 	if err == nil {
 		t.Fatal("expected context cancellation error")
 	}
@@ -186,7 +186,7 @@ func TestBuildTransitiveDeps_EmptyTypeMap(t *testing.T) {
 	}}
 	typeMap := map[string][]string{}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestBuildTransitiveDeps_ParseErrorOnDependency(t *testing.T) {
 		"BadType":  {badDep},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestBuildTransitiveDeps_MidTraversalContextCancel(t *testing.T) {
 	// so C should not be discovered.
 	parser := &cancellingParser{inner: inner, cancel: cancel, cancelAt: 2}
 
-	_, err := BuildTransitiveDeps(ctx, a, typeMap, parser)
+	_, err := BuildTransitiveDeps(ctx, a, typeMap, nil, parser)
 	if err == nil {
 		t.Fatal("expected context cancellation error, got nil")
 	}
@@ -296,7 +296,7 @@ func TestBuildTransitiveDeps_NonCleanPaths(t *testing.T) {
 		"DepType":  {dep},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestBuildTransitiveDeps_DuplicateTypeName(t *testing.T) {
 		"Product": {depA, depB},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), target, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestBuildTransitiveDeps_DirectDepsMultiDepth(t *testing.T) {
 		"DType": {d},
 	}
 
-	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, parser)
+	graph, err := BuildTransitiveDeps(context.Background(), a, typeMap, nil, parser)
 	if err != nil {
 		t.Fatal(err)
 	}

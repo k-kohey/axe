@@ -131,10 +131,17 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	extractCompilerPaths(ctx, bs, dirs)
 
+	// Load Index Store cache for fast in-memory dependency resolution.
+	projectRoot := filepath.Dir(pc.primaryPath())
+	rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
+	if cacheErr != nil && ctx.Err() == nil {
+		slog.Warn("Index store cache unavailable, falling back to parser-based resolution", "err", cacheErr)
+	}
+	indexCache := newSharedIndexCache(rawCache)
+
 	// Resolve dependencies using the index store for transitive graph,
 	// falling back to 1-level resolution if the index store is unavailable.
-	projectRoot := filepath.Dir(pc.primaryPath())
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), sl, analysis.DefaultParser())
+	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, projectRoot, dirs.IndexStorePath(), sl, indexCache.Get(), analysis.DefaultParser())
 	if err != nil && ctx.Err() == nil {
 		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 	}
@@ -317,6 +324,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			skeletonMap:     skeletonMap,
 			trackedFiles:    trackedFiles,
 			depGraph:        depGraph,
+			indexCache:      indexCache,
 		}
 
 		var hid *protocol.HIDHandler

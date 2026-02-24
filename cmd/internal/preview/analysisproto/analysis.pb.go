@@ -76,6 +76,64 @@ func (TypeKind) EnumDescriptor() ([]byte, []int) {
 	return file_analysis_proto_rawDescGZIP(), []int{0}
 }
 
+type MemberKind int32
+
+const (
+	MemberKind_MEMBER_KIND_UNKNOWN           MemberKind = 0
+	MemberKind_MEMBER_KIND_INSTANCE_PROPERTY MemberKind = 1
+	MemberKind_MEMBER_KIND_INSTANCE_METHOD   MemberKind = 2
+	MemberKind_MEMBER_KIND_STATIC_PROPERTY   MemberKind = 3
+	MemberKind_MEMBER_KIND_STATIC_METHOD     MemberKind = 4
+	MemberKind_MEMBER_KIND_CONSTRUCTOR       MemberKind = 5
+)
+
+// Enum value maps for MemberKind.
+var (
+	MemberKind_name = map[int32]string{
+		0: "MEMBER_KIND_UNKNOWN",
+		1: "MEMBER_KIND_INSTANCE_PROPERTY",
+		2: "MEMBER_KIND_INSTANCE_METHOD",
+		3: "MEMBER_KIND_STATIC_PROPERTY",
+		4: "MEMBER_KIND_STATIC_METHOD",
+		5: "MEMBER_KIND_CONSTRUCTOR",
+	}
+	MemberKind_value = map[string]int32{
+		"MEMBER_KIND_UNKNOWN":           0,
+		"MEMBER_KIND_INSTANCE_PROPERTY": 1,
+		"MEMBER_KIND_INSTANCE_METHOD":   2,
+		"MEMBER_KIND_STATIC_PROPERTY":   3,
+		"MEMBER_KIND_STATIC_METHOD":     4,
+		"MEMBER_KIND_CONSTRUCTOR":       5,
+	}
+)
+
+func (x MemberKind) Enum() *MemberKind {
+	p := new(MemberKind)
+	*p = x
+	return p
+}
+
+func (x MemberKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MemberKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_analysis_proto_enumTypes[1].Descriptor()
+}
+
+func (MemberKind) Type() protoreflect.EnumType {
+	return &file_analysis_proto_enumTypes[1]
+}
+
+func (x MemberKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MemberKind.Descriptor instead.
+func (MemberKind) EnumDescriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{1}
+}
+
 type PropertyInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -492,6 +550,302 @@ func (x *TypeFileMap) GetTypes() map[string]string {
 	return nil
 }
 
+type IndexMemberInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"` // "body", "greet(name:)"
+	Kind          MemberKind             `protobuf:"varint,2,opt,name=kind,proto3,enum=axe.analysis.MemberKind" json:"kind,omitempty"`
+	AccessLevel   string                 `protobuf:"bytes,3,opt,name=access_level,json=accessLevel,proto3" json:"access_level,omitempty"` // "private", "internal", "public", etc.
+	Line          int32                  `protobuf:"varint,4,opt,name=line,proto3" json:"line,omitempty"`
+	Column        int32                  `protobuf:"varint,5,opt,name=column,proto3" json:"column,omitempty"`
+	IsComputed    bool                   `protobuf:"varint,6,opt,name=is_computed,json=isComputed,proto3" json:"is_computed,omitempty"` // accessor occurrence の有無で判定
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexMemberInfo) Reset() {
+	*x = IndexMemberInfo{}
+	mi := &file_analysis_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexMemberInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexMemberInfo) ProtoMessage() {}
+
+func (x *IndexMemberInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_analysis_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexMemberInfo.ProtoReflect.Descriptor instead.
+func (*IndexMemberInfo) Descriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *IndexMemberInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IndexMemberInfo) GetKind() MemberKind {
+	if x != nil {
+		return x.Kind
+	}
+	return MemberKind_MEMBER_KIND_UNKNOWN
+}
+
+func (x *IndexMemberInfo) GetAccessLevel() string {
+	if x != nil {
+		return x.AccessLevel
+	}
+	return ""
+}
+
+func (x *IndexMemberInfo) GetLine() int32 {
+	if x != nil {
+		return x.Line
+	}
+	return 0
+}
+
+func (x *IndexMemberInfo) GetColumn() int32 {
+	if x != nil {
+		return x.Column
+	}
+	return 0
+}
+
+func (x *IndexMemberInfo) GetIsComputed() bool {
+	if x != nil {
+		return x.IsComputed
+	}
+	return false
+}
+
+type IndexTypeInfo struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                             // ネスト型は "Outer.Inner"
+	Kind           TypeKind               `protobuf:"varint,2,opt,name=kind,proto3,enum=axe.analysis.TypeKind" json:"kind,omitempty"` // 既存の TypeKind enum を再利用
+	AccessLevel    string                 `protobuf:"bytes,3,opt,name=access_level,json=accessLevel,proto3" json:"access_level,omitempty"`
+	InheritedTypes []string               `protobuf:"bytes,4,rep,name=inherited_types,json=inheritedTypes,proto3" json:"inherited_types,omitempty"`
+	Members        []*IndexMemberInfo     `protobuf:"bytes,5,rep,name=members,proto3" json:"members,omitempty"`
+	Line           int32                  `protobuf:"varint,6,opt,name=line,proto3" json:"line,omitempty"`
+	Column         int32                  `protobuf:"varint,7,opt,name=column,proto3" json:"column,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *IndexTypeInfo) Reset() {
+	*x = IndexTypeInfo{}
+	mi := &file_analysis_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexTypeInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexTypeInfo) ProtoMessage() {}
+
+func (x *IndexTypeInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_analysis_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexTypeInfo.ProtoReflect.Descriptor instead.
+func (*IndexTypeInfo) Descriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *IndexTypeInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *IndexTypeInfo) GetKind() TypeKind {
+	if x != nil {
+		return x.Kind
+	}
+	return TypeKind_TYPE_KIND_UNKNOWN
+}
+
+func (x *IndexTypeInfo) GetAccessLevel() string {
+	if x != nil {
+		return x.AccessLevel
+	}
+	return ""
+}
+
+func (x *IndexTypeInfo) GetInheritedTypes() []string {
+	if x != nil {
+		return x.InheritedTypes
+	}
+	return nil
+}
+
+func (x *IndexTypeInfo) GetMembers() []*IndexMemberInfo {
+	if x != nil {
+		return x.Members
+	}
+	return nil
+}
+
+func (x *IndexTypeInfo) GetLine() int32 {
+	if x != nil {
+		return x.Line
+	}
+	return 0
+}
+
+func (x *IndexTypeInfo) GetColumn() int32 {
+	if x != nil {
+		return x.Column
+	}
+	return 0
+}
+
+type IndexFileData struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	FilePath            string                 `protobuf:"bytes,1,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
+	Types               []*IndexTypeInfo       `protobuf:"bytes,2,rep,name=types,proto3" json:"types,omitempty"`
+	ReferencedTypeNames []string               `protobuf:"bytes,3,rep,name=referenced_type_names,json=referencedTypeNames,proto3" json:"referenced_type_names,omitempty"`
+	DefinedTypeNames    []string               `protobuf:"bytes,4,rep,name=defined_type_names,json=definedTypeNames,proto3" json:"defined_type_names,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *IndexFileData) Reset() {
+	*x = IndexFileData{}
+	mi := &file_analysis_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexFileData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexFileData) ProtoMessage() {}
+
+func (x *IndexFileData) ProtoReflect() protoreflect.Message {
+	mi := &file_analysis_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexFileData.ProtoReflect.Descriptor instead.
+func (*IndexFileData) Descriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *IndexFileData) GetFilePath() string {
+	if x != nil {
+		return x.FilePath
+	}
+	return ""
+}
+
+func (x *IndexFileData) GetTypes() []*IndexTypeInfo {
+	if x != nil {
+		return x.Types
+	}
+	return nil
+}
+
+func (x *IndexFileData) GetReferencedTypeNames() []string {
+	if x != nil {
+		return x.ReferencedTypeNames
+	}
+	return nil
+}
+
+func (x *IndexFileData) GetDefinedTypeNames() []string {
+	if x != nil {
+		return x.DefinedTypeNames
+	}
+	return nil
+}
+
+type IndexStoreResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Files         []*IndexFileData       `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	TypeFileMap   map[string]string      `protobuf:"bytes,2,rep,name=type_file_map,json=typeFileMap,proto3" json:"type_file_map,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IndexStoreResult) Reset() {
+	*x = IndexStoreResult{}
+	mi := &file_analysis_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IndexStoreResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IndexStoreResult) ProtoMessage() {}
+
+func (x *IndexStoreResult) ProtoReflect() protoreflect.Message {
+	mi := &file_analysis_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IndexStoreResult.ProtoReflect.Descriptor instead.
+func (*IndexStoreResult) Descriptor() ([]byte, []int) {
+	return file_analysis_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *IndexStoreResult) GetFiles() []*IndexFileData {
+	if x != nil {
+		return x.Files
+	}
+	return nil
+}
+
+func (x *IndexStoreResult) GetTypeFileMap() map[string]string {
+	if x != nil {
+		return x.TypeFileMap
+	}
+	return nil
+}
+
 var File_analysis_proto protoreflect.FileDescriptor
 
 const file_analysis_proto_rawDesc = "" +
@@ -535,13 +889,48 @@ const file_analysis_proto_rawDesc = "" +
 	"\n" +
 	"TypesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc3\x01\n" +
+	"\x0fIndexMemberInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x18.axe.analysis.MemberKindR\x04kind\x12!\n" +
+	"\faccess_level\x18\x03 \x01(\tR\vaccessLevel\x12\x12\n" +
+	"\x04line\x18\x04 \x01(\x05R\x04line\x12\x16\n" +
+	"\x06column\x18\x05 \x01(\x05R\x06column\x12\x1f\n" +
+	"\vis_computed\x18\x06 \x01(\bR\n" +
+	"isComputed\"\x80\x02\n" +
+	"\rIndexTypeInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12*\n" +
+	"\x04kind\x18\x02 \x01(\x0e2\x16.axe.analysis.TypeKindR\x04kind\x12!\n" +
+	"\faccess_level\x18\x03 \x01(\tR\vaccessLevel\x12'\n" +
+	"\x0finherited_types\x18\x04 \x03(\tR\x0einheritedTypes\x127\n" +
+	"\amembers\x18\x05 \x03(\v2\x1d.axe.analysis.IndexMemberInfoR\amembers\x12\x12\n" +
+	"\x04line\x18\x06 \x01(\x05R\x04line\x12\x16\n" +
+	"\x06column\x18\a \x01(\x05R\x06column\"\xc1\x01\n" +
+	"\rIndexFileData\x12\x1b\n" +
+	"\tfile_path\x18\x01 \x01(\tR\bfilePath\x121\n" +
+	"\x05types\x18\x02 \x03(\v2\x1b.axe.analysis.IndexTypeInfoR\x05types\x122\n" +
+	"\x15referenced_type_names\x18\x03 \x03(\tR\x13referencedTypeNames\x12,\n" +
+	"\x12defined_type_names\x18\x04 \x03(\tR\x10definedTypeNames\"\xda\x01\n" +
+	"\x10IndexStoreResult\x121\n" +
+	"\x05files\x18\x01 \x03(\v2\x1b.axe.analysis.IndexFileDataR\x05files\x12S\n" +
+	"\rtype_file_map\x18\x02 \x03(\v2/.axe.analysis.IndexStoreResult.TypeFileMapEntryR\vtypeFileMap\x1a>\n" +
+	"\x10TypeFileMapEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*u\n" +
 	"\bTypeKind\x12\x15\n" +
 	"\x11TYPE_KIND_UNKNOWN\x10\x00\x12\x14\n" +
 	"\x10TYPE_KIND_STRUCT\x10\x01\x12\x13\n" +
 	"\x0fTYPE_KIND_CLASS\x10\x02\x12\x12\n" +
 	"\x0eTYPE_KIND_ENUM\x10\x03\x12\x13\n" +
-	"\x0fTYPE_KIND_ACTOR\x10\x04B7Z5github.com/k-kohey/axe/internal/preview/analysisprotob\x06proto3"
+	"\x0fTYPE_KIND_ACTOR\x10\x04*\xc6\x01\n" +
+	"\n" +
+	"MemberKind\x12\x17\n" +
+	"\x13MEMBER_KIND_UNKNOWN\x10\x00\x12!\n" +
+	"\x1dMEMBER_KIND_INSTANCE_PROPERTY\x10\x01\x12\x1f\n" +
+	"\x1bMEMBER_KIND_INSTANCE_METHOD\x10\x02\x12\x1f\n" +
+	"\x1bMEMBER_KIND_STATIC_PROPERTY\x10\x03\x12\x1d\n" +
+	"\x19MEMBER_KIND_STATIC_METHOD\x10\x04\x12\x1b\n" +
+	"\x17MEMBER_KIND_CONSTRUCTOR\x10\x05B7Z5github.com/k-kohey/axe/internal/preview/analysisprotob\x06proto3"
 
 var (
 	file_analysis_proto_rawDescOnce sync.Once
@@ -555,30 +944,42 @@ func file_analysis_proto_rawDescGZIP() []byte {
 	return file_analysis_proto_rawDescData
 }
 
-var file_analysis_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_analysis_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_analysis_proto_goTypes = []any{
-	(TypeKind)(0),        // 0: axe.analysis.TypeKind
-	(*PropertyInfo)(nil), // 1: axe.analysis.PropertyInfo
-	(*MethodInfo)(nil),   // 2: axe.analysis.MethodInfo
-	(*TypeInfo)(nil),     // 3: axe.analysis.TypeInfo
-	(*PreviewBlock)(nil), // 4: axe.analysis.PreviewBlock
-	(*ParseResult)(nil),  // 5: axe.analysis.ParseResult
-	(*TypeFileMap)(nil),  // 6: axe.analysis.TypeFileMap
-	nil,                  // 7: axe.analysis.TypeFileMap.TypesEntry
+	(TypeKind)(0),            // 0: axe.analysis.TypeKind
+	(MemberKind)(0),          // 1: axe.analysis.MemberKind
+	(*PropertyInfo)(nil),     // 2: axe.analysis.PropertyInfo
+	(*MethodInfo)(nil),       // 3: axe.analysis.MethodInfo
+	(*TypeInfo)(nil),         // 4: axe.analysis.TypeInfo
+	(*PreviewBlock)(nil),     // 5: axe.analysis.PreviewBlock
+	(*ParseResult)(nil),      // 6: axe.analysis.ParseResult
+	(*TypeFileMap)(nil),      // 7: axe.analysis.TypeFileMap
+	(*IndexMemberInfo)(nil),  // 8: axe.analysis.IndexMemberInfo
+	(*IndexTypeInfo)(nil),    // 9: axe.analysis.IndexTypeInfo
+	(*IndexFileData)(nil),    // 10: axe.analysis.IndexFileData
+	(*IndexStoreResult)(nil), // 11: axe.analysis.IndexStoreResult
+	nil,                      // 12: axe.analysis.TypeFileMap.TypesEntry
+	nil,                      // 13: axe.analysis.IndexStoreResult.TypeFileMapEntry
 }
 var file_analysis_proto_depIdxs = []int32{
-	0, // 0: axe.analysis.TypeInfo.kind:type_name -> axe.analysis.TypeKind
-	1, // 1: axe.analysis.TypeInfo.properties:type_name -> axe.analysis.PropertyInfo
-	2, // 2: axe.analysis.TypeInfo.methods:type_name -> axe.analysis.MethodInfo
-	3, // 3: axe.analysis.ParseResult.types:type_name -> axe.analysis.TypeInfo
-	4, // 4: axe.analysis.ParseResult.previews:type_name -> axe.analysis.PreviewBlock
-	7, // 5: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	0,  // 0: axe.analysis.TypeInfo.kind:type_name -> axe.analysis.TypeKind
+	2,  // 1: axe.analysis.TypeInfo.properties:type_name -> axe.analysis.PropertyInfo
+	3,  // 2: axe.analysis.TypeInfo.methods:type_name -> axe.analysis.MethodInfo
+	4,  // 3: axe.analysis.ParseResult.types:type_name -> axe.analysis.TypeInfo
+	5,  // 4: axe.analysis.ParseResult.previews:type_name -> axe.analysis.PreviewBlock
+	12, // 5: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
+	1,  // 6: axe.analysis.IndexMemberInfo.kind:type_name -> axe.analysis.MemberKind
+	0,  // 7: axe.analysis.IndexTypeInfo.kind:type_name -> axe.analysis.TypeKind
+	8,  // 8: axe.analysis.IndexTypeInfo.members:type_name -> axe.analysis.IndexMemberInfo
+	9,  // 9: axe.analysis.IndexFileData.types:type_name -> axe.analysis.IndexTypeInfo
+	10, // 10: axe.analysis.IndexStoreResult.files:type_name -> axe.analysis.IndexFileData
+	13, // 11: axe.analysis.IndexStoreResult.type_file_map:type_name -> axe.analysis.IndexStoreResult.TypeFileMapEntry
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_analysis_proto_init() }
@@ -591,8 +992,8 @@ func file_analysis_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_analysis_proto_rawDesc), len(file_analysis_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   7,
+			NumEnums:      2,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

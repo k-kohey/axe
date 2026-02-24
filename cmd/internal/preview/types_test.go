@@ -2,7 +2,11 @@ package preview
 
 import (
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/k-kohey/axe/internal/preview/analysis"
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 )
 
 // mustNewPreviewDirs is a test helper that calls newPreviewDirs and fails on error.
@@ -113,4 +117,85 @@ func TestNewPreviewDirs_SocketPathTooLong(t *testing.T) {
 	if !strings.Contains(err.Error(), "socket path exceeds") {
 		t.Errorf("expected socket path error message, got: %v", err)
 	}
+}
+
+// --- sharedIndexCache tests ---
+
+func makeTestCache(typeName, filePath string) *analysis.IndexStoreCache {
+	return analysis.NewIndexStoreCache(
+		map[string]*pb.IndexFileData{
+			filePath: {
+				FilePath:            filePath,
+				ReferencedTypeNames: nil,
+				DefinedTypeNames:    []string{typeName},
+			},
+		},
+		map[string][]string{typeName: {filePath}},
+	)
+}
+
+func TestSharedIndexCache_NilInitial(t *testing.T) {
+	sc := newSharedIndexCache(nil)
+	if got := sc.Get(); got != nil {
+		t.Errorf("expected nil from fresh sharedIndexCache, got %v", got)
+	}
+}
+
+func TestSharedIndexCache_GetSet(t *testing.T) {
+	sc := newSharedIndexCache(nil)
+
+	c := makeTestCache("FooView", "/project/Foo.swift")
+	sc.Set(c)
+
+	got := sc.Get()
+	if got != c {
+		t.Errorf("Get() returned different pointer after Set()")
+	}
+	if refs := got.DefinedTypes("/project/Foo.swift"); len(refs) != 1 || refs[0] != "FooView" {
+		t.Errorf("cache content mismatch: %v", refs)
+	}
+}
+
+func TestSharedIndexCache_SetReplacesOld(t *testing.T) {
+	old := makeTestCache("OldType", "/project/Old.swift")
+	sc := newSharedIndexCache(old)
+
+	if got := sc.Get(); got != old {
+		t.Fatal("initial Get should return the cache passed to constructor")
+	}
+
+	newC := makeTestCache("NewType", "/project/New.swift")
+	sc.Set(newC)
+
+	if got := sc.Get(); got != newC {
+		t.Error("Get() should return the new cache after Set()")
+	}
+	if got := sc.Get(); got == old {
+		t.Error("Get() should no longer return the old cache")
+	}
+}
+
+func TestSharedIndexCache_ConcurrentAccess(t *testing.T) {
+	sc := newSharedIndexCache(nil)
+
+	var wg sync.WaitGroup
+	const goroutines = 20
+
+	// Half the goroutines write, half read.
+	for i := range goroutines {
+		wg.Add(1)
+		if i%2 == 0 {
+			go func() {
+				defer wg.Done()
+				c := makeTestCache("Type", "/project/File.swift")
+				sc.Set(c)
+			}()
+		} else {
+			go func() {
+				defer wg.Done()
+				_ = sc.Get() // must not panic or race
+			}()
+		}
+	}
+	wg.Wait()
 }

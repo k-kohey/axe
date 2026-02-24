@@ -91,6 +91,32 @@ func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
 	}
 }
 
+// sharedIndexCache is a thread-safe wrapper around IndexStoreCache.
+// In multi-stream mode a single instance is shared across all streams via
+// StreamManager, so that when any stream rebuilds (refreshing the on-disk
+// Index Store) the new cache is visible to every other stream.
+// In single-stream mode a dedicated instance is created locally.
+type sharedIndexCache struct {
+	mu    sync.RWMutex
+	cache *analysis.IndexStoreCache
+}
+
+func newSharedIndexCache(c *analysis.IndexStoreCache) *sharedIndexCache {
+	return &sharedIndexCache{cache: c}
+}
+
+func (s *sharedIndexCache) Get() *analysis.IndexStoreCache {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cache
+}
+
+func (s *sharedIndexCache) Set(c *analysis.IndexStoreCache) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache = c
+}
+
 // watchState holds mutable state for the watch loop, protected by a mutex.
 // Immutable configuration (device, loaderPath, etc.) lives in watchContext.
 type watchState struct {
@@ -103,6 +129,7 @@ type watchState struct {
 	skeletonMap     map[string]string         // file path → skeleton hash
 	trackedFiles    []string                  // target + 1-level dependency file paths
 	depGraph        *analysis.DependencyGraph // transitive dependency graph (nil = fallback to rebuild)
+	indexCache      *sharedIndexCache         // shared Index Store cache (nil = fallback to parser)
 }
 
 // watchContext holds immutable configuration for the watch loop.

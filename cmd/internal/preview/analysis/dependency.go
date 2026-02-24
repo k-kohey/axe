@@ -77,20 +77,30 @@ func ResolveDependencies(ctx context.Context, targetFile string, projectRoot str
 // transitive dependency graph for the target file. If the index store is
 // unavailable or fails, it falls back to the 1-level ResolveDependencies.
 //
-// indexStorePath is the path to the index store (e.g. dirs.Build + "/Index.noindex/DataStore").
+// When cache is non-nil, the BFS uses it for in-memory lookups (no subprocess
+// calls per file). When cache is nil, the type→file map is read from the index
+// store and the parser is used for per-file type references.
+//
 // Returns the dependency graph and the 1-level dependency list for thunk generation.
-func ResolveTransitiveDependencies(ctx context.Context, targetFile string, projectRoot string, indexStorePath string, sl SwiftFileLister, parser SwiftFileParser) (*DependencyGraph, []string, error) {
-	typeMap, err := readTypeFileMultiMap(ctx, indexStorePath, projectRoot)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, nil, ctx.Err()
+func ResolveTransitiveDependencies(ctx context.Context, targetFile string, projectRoot string, indexStorePath string, sl SwiftFileLister, cache *IndexStoreCache, parser SwiftFileParser) (*DependencyGraph, []string, error) {
+	var typeMap map[string][]string
+
+	if cache != nil {
+		typeMap = cache.TypeFileMultiMap()
+	} else {
+		var err error
+		typeMap, err = readTypeFileMultiMap(ctx, indexStorePath, projectRoot)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, nil, ctx.Err()
+			}
+			slog.Warn("Index store unavailable, falling back to 1-level dependency resolution", "err", err)
+			deps, depErr := ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
+			return nil, deps, depErr
 		}
-		slog.Warn("Index store unavailable, falling back to 1-level dependency resolution", "err", err)
-		deps, depErr := ResolveDependencies(ctx, targetFile, projectRoot, sl, parser)
-		return nil, deps, depErr
 	}
 
-	graph, err := BuildTransitiveDeps(ctx, targetFile, typeMap, parser)
+	graph, err := BuildTransitiveDeps(ctx, targetFile, typeMap, cache, parser)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, nil, ctx.Err()

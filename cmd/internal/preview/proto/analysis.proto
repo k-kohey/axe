@@ -56,3 +56,45 @@ message ParseResult {
 message TypeFileMap {
   map<string, string> types = 1;  // typeName → filePath
 }
+
+// --- axe-index-reader rich output (Index Store) ---
+
+enum MemberKind {
+  MEMBER_KIND_UNKNOWN = 0;
+  MEMBER_KIND_INSTANCE_PROPERTY = 1;
+  MEMBER_KIND_INSTANCE_METHOD = 2;
+  MEMBER_KIND_STATIC_PROPERTY = 3;
+  MEMBER_KIND_STATIC_METHOD = 4;
+  MEMBER_KIND_CONSTRUCTOR = 5;
+}
+
+message IndexMemberInfo {
+  string name = 1;           // "body", "greet(name:)"
+  MemberKind kind = 2;
+  string access_level = 3;   // "private", "internal", "public", etc.
+  int32 line = 4;
+  int32 column = 5;
+  bool is_computed = 6;      // accessor occurrence の有無で判定
+}
+
+message IndexTypeInfo {
+  string name = 1;              // ネスト型は "Outer.Inner"
+  TypeKind kind = 2;            // 既存の TypeKind enum を再利用
+  string access_level = 3;
+  repeated string inherited_types = 4;
+  repeated IndexMemberInfo members = 5;
+  int32 line = 6;
+  int32 column = 7;
+}
+
+message IndexFileData {
+  string file_path = 1;
+  repeated IndexTypeInfo types = 2;
+  repeated string referenced_type_names = 3;
+  repeated string defined_type_names = 4;
+}
+
+message IndexStoreResult {
+  repeated IndexFileData files = 1;
+  map<string, string> type_file_map = 2;
+}

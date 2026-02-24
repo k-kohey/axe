@@ -12,10 +12,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// readTypeFileMap invokes axe-index-reader on the given index store path
-// and returns a map of type names to file paths.
+// readIndexStore invokes axe-index-reader on the given index store path
+// and returns the full IndexStoreResult with per-file data and type→file map.
 // sourceRoot, if non-empty, limits results to files under that directory.
-func readTypeFileMap(ctx context.Context, indexStorePath string, sourceRoot string) (map[string]string, error) {
+func readIndexStore(ctx context.Context, indexStorePath string, sourceRoot string) (*pb.IndexStoreResult, error) {
 	binPath, err := ensureIndexReader()
 	if err != nil {
 		return nil, fmt.Errorf("ensuring index reader: %w", err)
@@ -39,28 +39,29 @@ func readTypeFileMap(ctx context.Context, indexStorePath string, sourceRoot stri
 		return nil, fmt.Errorf("running axe-index-reader: %w", err)
 	}
 
-	var tfm pb.TypeFileMap
-	if err := protojson.Unmarshal(out, &tfm); err != nil {
+	var result pb.IndexStoreResult
+	if err := protojson.Unmarshal(out, &result); err != nil {
 		return nil, fmt.Errorf("decoding axe-index-reader output: %w", err)
 	}
 
-	slog.Debug("Read type-file map from index store", "types", len(tfm.GetTypes()))
-	return tfm.GetTypes(), nil
+	slog.Debug("Read index store",
+		"files", len(result.GetFiles()),
+		"typeMapEntries", len(result.GetTypeFileMap()),
+	)
+	return &result, nil
 }
 
-// readTypeFileMultiMap wraps readTypeFileMap and converts the result to a
-// multi-map (map[string][]string) where each type name may map to multiple
-// file paths. The current proto format (map<string, string>) only supports one
-// file per type, but this abstraction allows consumers to handle duplicates
-// when other sources (e.g. fallback scan) provide additional entries.
+// readTypeFileMultiMap reads the index store and returns a multi-map of
+// type names to file paths. Used by ResolveTransitiveDependencies for BFS.
 func readTypeFileMultiMap(ctx context.Context, indexStorePath string, sourceRoot string) (map[string][]string, error) {
-	flat, err := readTypeFileMap(ctx, indexStorePath, sourceRoot)
+	result, err := readIndexStore(ctx, indexStorePath, sourceRoot)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string][]string, len(flat))
+	flat := result.GetTypeFileMap()
+	multiMap := make(map[string][]string, len(flat))
 	for typeName, filePath := range flat {
-		result[typeName] = []string{filePath}
+		multiMap[typeName] = []string{filePath}
 	}
-	return result, nil
+	return multiMap, nil
 }

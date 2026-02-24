@@ -22,7 +22,11 @@ type bfsEntry struct {
 // BuildTransitiveDeps performs a BFS over the type→file map starting from
 // targetFile, collecting all transitively referenced files.
 // The returned graph includes targetFile itself.
-func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, parser SwiftFileParser) (*DependencyGraph, error) {
+//
+// When cache is non-nil, referenced types are looked up from the in-memory
+// Index Store cache (no subprocess calls). When cache is nil, the parser
+// fallback is used instead.
+func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, cache *IndexStoreCache, parser SwiftFileParser) (*DependencyGraph, error) {
 	graph := &DependencyGraph{
 		All:   make(map[string]bool),
 		depth: make(map[string]int),
@@ -42,11 +46,7 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 		entry := queue[0]
 		queue = queue[1:]
 
-		referencedTypes, _, err := parser.ParseTypes(entry.path)
-		if err != nil {
-			slog.Debug("Skipping file in BFS (parse error)", "path", entry.path, "err", err)
-			continue
-		}
+		referencedTypes := refsFromCacheOrParser(entry.path, cache, parser)
 
 		nextDepth := entry.depth + 1
 		for _, typeName := range referencedTypes {
@@ -71,6 +71,23 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 		"files", len(graph.All),
 	)
 	return graph, nil
+}
+
+// refsFromCacheOrParser returns referenced type names for a file,
+// preferring the Index Store cache when available.
+func refsFromCacheOrParser(path string, cache *IndexStoreCache, parser SwiftFileParser) []string {
+	if cache != nil {
+		return cache.ReferencedTypes(path)
+	}
+	if parser != nil {
+		refs, _, err := parser.ParseTypes(path)
+		if err != nil {
+			slog.Debug("Skipping file in BFS (parse error)", "path", path, "err", err)
+			return nil
+		}
+		return refs
+	}
+	return nil
 }
 
 // DirectDeps returns the file paths at depth 1 (direct dependencies of the target).
