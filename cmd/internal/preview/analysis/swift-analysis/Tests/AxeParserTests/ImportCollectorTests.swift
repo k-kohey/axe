@@ -60,18 +60,24 @@ struct ImportCollectorTests {
     #expect(collector.imports.isEmpty)
   }
 
-  @Test("#if canImport imports are collected")
-  func canImportCollected() {
+  @Test("#if canImport imports are skipped")
+  func canImportSkipped() {
     let source = """
       import SwiftUI
+      import Foundation
       #if canImport(MapKit)
       import MapKit
+      #endif
+      #if canImport(AppKit)
+      import AppKit
+      #elseif canImport(UIKit)
+      import UIKit
       #endif
       """
     let tree = Parser.parse(source: source)
     let collector = ImportCollector()
     collector.walk(tree)
 
-    #expect(collector.imports.contains("import MapKit"))
+    #expect(collector.imports == ["import Foundation"])
   }
 }

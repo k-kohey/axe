@@ -31,6 +31,17 @@ final class TypeMemberExtractor: SyntaxVisitor {
     super.init(viewMode: .sourceAccurate)
   }
 
+  // MARK: - Conditional Compilation
+
+  /// Skip `#if` blocks so that platform-conditional declarations (e.g. inside
+  /// `#if canImport(AppKit)`) are not extracted. The thunk cannot evaluate
+  /// these conditions at compile time. Body source that _contains_ `#if`
+  /// directives is still extracted correctly because the body extractor works
+  /// on raw source text, not the AST.
+  override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
+    .skipChildren
+  }
+
   // MARK: - Type Definitions
 
   /// Pushes a new type context onto the stack. Called at the start of each type declaration visit.
