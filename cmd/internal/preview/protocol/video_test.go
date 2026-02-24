@@ -155,12 +155,12 @@ func (d *delayCloseIDBClient) VideoStream(_ context.Context, _ int) (<-chan []by
 
 func TestRunVideoStreamLoop_EventWriter(t *testing.T) {
 	const w, h = 4, 4
-	// Create a small RGBA frame.
+	// Create a small BGRA frame (idb_companion sends BGRA byte order).
 	frame := make([]byte, w*h*4)
 	for i := 0; i < len(frame); i += 4 {
-		frame[i] = 0xFF   // R
+		frame[i] = 0x00   // B
 		frame[i+1] = 0x00 // G
-		frame[i+2] = 0x00 // B
+		frame[i+2] = 0xFF // R
 		frame[i+3] = 0xFF // A
 	}
 
@@ -251,7 +251,7 @@ func TestRunVideoStreamLoop_SendFailureStopsLoop(t *testing.T) {
 	const w, h = 4, 4
 	frame := make([]byte, w*h*4)
 	for i := 0; i < len(frame); i += 4 {
-		frame[i], frame[i+1], frame[i+2], frame[i+3] = 0xFF, 0x00, 0x00, 0xFF
+		frame[i], frame[i+1], frame[i+2], frame[i+3] = 0x00, 0x00, 0xFF, 0xFF // BGRA
 	}
 
 	frameCh := make(chan []byte, 2)
@@ -283,12 +283,13 @@ func TestRunVideoStreamLoop_SendFailureStopsLoop(t *testing.T) {
 
 func TestEncodeRBGAFrame(t *testing.T) {
 	const w, h = 4, 4
-	// Create a small 4x4 RGBA frame (red pixels).
+	// Create a small 4x4 BGRA frame (red pixels in BGRA byte order).
+	// idb_companion sends BGRA, so red = {B:0x00, G:0x00, R:0xFF, A:0xFF}.
 	data := make([]byte, w*h*4)
 	for i := 0; i < len(data); i += 4 {
-		data[i] = 0xFF   // R
+		data[i] = 0x00   // B
 		data[i+1] = 0x00 // G
-		data[i+2] = 0x00 // B
+		data[i+2] = 0xFF // R
 		data[i+3] = 0xFF // A
 	}
 
@@ -311,6 +312,13 @@ func TestEncodeRBGAFrame(t *testing.T) {
 	bounds := img.Bounds()
 	if bounds.Dx() != w || bounds.Dy() != h {
 		t.Errorf("JPEG dimensions = %dx%d, want %dx%d", bounds.Dx(), bounds.Dy(), w, h)
+	}
+
+	// After BGRA→RGBA swap, all pixels should be red.
+	r, g, b, _ := img.At(0, 0).RGBA()
+	// JPEG is lossy, so allow some tolerance.
+	if r>>8 < 0xF0 || g>>8 > 0x10 || b>>8 > 0x10 {
+		t.Errorf("expected red pixel, got R=%d G=%d B=%d", r>>8, g>>8, b>>8)
 	}
 }
 

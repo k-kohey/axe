@@ -161,8 +161,14 @@ func RunVideoStreamLoop(ctx context.Context, client idb.IDBClient, voc *VideoOut
 	}
 }
 
-// EncodeRBGAFrame converts raw RGBA pixel data into a base64-encoded JPEG string.
+// EncodeRBGAFrame converts raw BGRA pixel data (from idb_companion) into a base64-encoded JPEG string.
+// Despite the protobuf enum name "RBGA", idb_companion maps it to BGRA encoding internally,
+// so the byte order is B, G, R, A. We swap R and B in-place before encoding.
 func EncodeRBGAFrame(data []byte, frameW, frameH int, buf *bytes.Buffer) (string, error) {
+	// Swap B and R channels: idb_companion sends BGRA, but image.NRGBA expects RGBA.
+	for i := 0; i+2 < len(data); i += 4 {
+		data[i], data[i+2] = data[i+2], data[i]
+	}
 	img := &image.NRGBA{
 		Pix:    data,
 		Stride: frameW * 4,
