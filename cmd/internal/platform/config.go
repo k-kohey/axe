@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/k-kohey/axe/internal/procgroup"
 	"howett.net/plist"
 )
 
@@ -24,7 +25,9 @@ type ProcessLister interface {
 type RealProcessLister struct{}
 
 func (r *RealProcessLister) ListProcesses() (string, error) {
-	out, err := exec.Command("ps", "-eo", "pid,args").Output()
+	cmd := exec.Command("ps", "-eo", "pid,args")
+	procgroup.Setup(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to run ps: %w", err)
 	}

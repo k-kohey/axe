@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 // --- Build ---
@@ -18,11 +20,11 @@ import (
 type Build struct{}
 
 func (r *Build) FetchBuildSettings(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
 func (r *Build) Build(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
 // --- Toolchain ---
@@ -31,7 +33,7 @@ func (r *Build) Build(ctx context.Context, args []string) ([]byte, error) {
 type Toolchain struct{}
 
 func (r *Toolchain) SDKPath(ctx context.Context, sdk string) (string, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "--sdk", sdk, "--show-sdk-path").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "--sdk", sdk, "--show-sdk-path").Output()
 	if err != nil {
 		return "", err
 	}
@@ -39,15 +41,15 @@ func (r *Toolchain) SDKPath(ctx context.Context, sdk string) (string, error) {
 }
 
 func (r *Toolchain) CompileSwift(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
 func (r *Toolchain) CompileC(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
 func (r *Toolchain) Codesign(ctx context.Context, path string) error {
-	out, err := exec.CommandContext(ctx, "codesign", "--force", "--sign", "-", path).CombinedOutput()
+	out, err := procgroup.Command(ctx, "codesign", "--force", "--sign", "-", path).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, out)
 	}
@@ -67,7 +69,7 @@ func simctlCmd(ctx context.Context, deviceSetPath string, args ...string) *exec.
 	if deviceSetPath != "" {
 		base = append(base, "--set", deviceSetPath)
 	}
-	return exec.CommandContext(ctx, "xcrun", append(base, args...)...)
+	return procgroup.Command(ctx, "xcrun", append(base, args...)...)
 }
 
 func (r *App) Terminate(ctx context.Context, device, bundleID, deviceSetPath string) error {
@@ -108,7 +110,7 @@ func (r *App) Launch(ctx context.Context, device, bundleID, deviceSetPath string
 type FileCopy struct{}
 
 func (r *FileCopy) CopyDir(ctx context.Context, src, dst string) error {
-	out, err := exec.CommandContext(ctx, "cp", "-a", src, dst).CombinedOutput()
+	out, err := procgroup.Command(ctx, "cp", "-a", src, dst).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("copying directory: %w\n%s", err, out)
 	}
@@ -121,7 +123,7 @@ func (r *FileCopy) CopyDir(ctx context.Context, src, dst string) error {
 type SourceList struct{}
 
 func (r *SourceList) SwiftFiles(ctx context.Context, root string) ([]string, error) {
-	out, err := exec.CommandContext(ctx,
+	out, err := procgroup.Command(ctx,
 		"git", "-C", root, "ls-files",
 		"--cached", "--others", "--exclude-standard",
 		"*.swift",
@@ -145,7 +147,7 @@ func (r *SourceList) SwiftFiles(ctx context.Context, root string) ([]string, err
 }
 
 func (r *SourceList) SwiftDirs(ctx context.Context, root string) ([]string, error) {
-	out, err := exec.CommandContext(ctx,
+	out, err := procgroup.Command(ctx,
 		"git", "-C", root, "ls-files",
 		"--cached", "--others", "--exclude-standard",
 		"*.swift",

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 // LLDBRunner abstracts LLDB execution for testability.
@@ -27,6 +29,7 @@ func runLLDBCommand(pid int, commands []string) (string, error) {
 	args = append(args, "-o", "detach", "-o", "quit")
 
 	cmd := exec.Command("lldb", args...)
+	procgroup.Setup(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("lldb failed: %w", err)

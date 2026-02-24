@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 // Commander abstracts exec.Command for testing.
@@ -62,6 +64,7 @@ type defaultCommander struct{}
 
 func (defaultCommander) Command(name string, args ...string) CmdRunner {
 	cmd := exec.Command(name, args...)
+	procgroup.Setup(cmd)
 	// Suppress idb_companion's stderr noise (objc warnings, startup logs).
 	if devNull, err := os.Open(os.DevNull); err == nil {
 		cmd.Stderr = devNull
@@ -145,7 +148,7 @@ func StartWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
 	case port, ok := <-portCh:
 		if !ok || port == "" {
 			if proc := cmd.Process(); proc != nil {
-				_ = proc.Kill()
+				_ = procgroup.KillProcess(proc)
 			}
 			return nil, fmt.Errorf("idb_companion did not output a port")
 		}
@@ -159,7 +162,7 @@ func StartWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
 		return c, nil
 	case <-time.After(10 * time.Second):
 		if proc := cmd.Process(); proc != nil {
-			_ = proc.Kill()
+			_ = procgroup.KillProcess(proc)
 		}
 		return nil, fmt.Errorf("timed out waiting for idb_companion port")
 	}
@@ -201,10 +204,10 @@ func (c *Companion) Stop() error {
 	default:
 	}
 
-	// Send SIGTERM.
-	if err := c.process.Signal(syscall.SIGTERM); err != nil {
+	// Send SIGTERM to the entire process group.
+	if err := procgroup.SignalProcess(c.process, syscall.SIGTERM); err != nil {
 		slog.Debug("SIGTERM failed, trying SIGKILL", "err", err)
-		_ = c.process.Kill()
+		_ = procgroup.KillProcess(c.process)
 		<-c.done // wait for the monitor goroutine to finish
 		return nil
 	}
@@ -215,7 +218,7 @@ func (c *Companion) Stop() error {
 		return nil
 	case <-time.After(5 * time.Second):
 		slog.Debug("idb_companion did not exit after SIGTERM, sending SIGKILL")
-		_ = c.process.Kill()
+		_ = procgroup.KillProcess(c.process)
 		<-c.done // wait for the monitor goroutine to finish
 		return nil
 	}
@@ -268,7 +271,7 @@ func BootHeadlessWith(cmdr Commander, udid, deviceSetPath string) (*Companion, e
 	case _, ok := <-bootCh:
 		if !ok {
 			if proc := cmd.Process(); proc != nil {
-				_ = proc.Kill()
+				_ = procgroup.KillProcess(proc)
 			}
 			return nil, fmt.Errorf("idb_companion boot did not report Booted state")
 		}
@@ -281,7 +284,7 @@ func BootHeadlessWith(cmdr Commander, udid, deviceSetPath string) (*Companion, e
 		return c, nil
 	case <-time.After(120 * time.Second):
 		if proc := cmd.Process(); proc != nil {
-			_ = proc.Kill()
+			_ = procgroup.KillProcess(proc)
 		}
 		return nil, fmt.Errorf("timed out waiting for simulator boot (120s)")
 	}
