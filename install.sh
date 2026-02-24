@@ -41,6 +41,7 @@ curl -fsSL -o "${INSTALL_DIR}/axe" "$URL"
 chmod +x "${INSTALL_DIR}/axe"
 
 echo "Installed axe to ${INSTALL_DIR}/axe"
+echo "Swift CLI tools (axe-parser, axe-index-reader) will be downloaded automatically on first use."
 
 case ":$PATH:" in
   *":${INSTALL_DIR}:"*) ;;

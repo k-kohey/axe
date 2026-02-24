@@ -9,4 +9,20 @@ mkdir -p .output
 LDFLAGS="-X main.version=${AXE_VERSION:-dev}"
 GOOS=darwin GOARCH=arm64 go build -C cmd -ldflags "$LDFLAGS" -o ../.output/axe-darwin-arm64 ./axe
 GOOS=darwin GOARCH=amd64 go build -C cmd -ldflags "$LDFLAGS" -o ../.output/axe-darwin-amd64 ./axe
+
+# Build Swift CLI binaries for both architectures
+SWIFT_PKG="cmd/internal/preview/analysis/swift-analysis"
+PRODUCTS="axe-parser axe-index-reader"
+for product in $PRODUCTS; do
+  for swift_arch in arm64 x86_64; do
+    swift build -c release --product "$product" --package-path "$SWIFT_PKG" --arch "$swift_arch"
+  done
+done
+for product in $PRODUCTS; do
+  arm64_bin=$(swift build -c release --package-path "$SWIFT_PKG" --arch arm64 --show-bin-path)
+  amd64_bin=$(swift build -c release --package-path "$SWIFT_PKG" --arch x86_64 --show-bin-path)
+  cp "$arm64_bin/$product" ".output/${product}-darwin-arm64"
+  cp "$amd64_bin/$product" ".output/${product}-darwin-amd64"
+done
+
 cd vscode-extension && pnpm run compile && npx vsce package -o ../.output/

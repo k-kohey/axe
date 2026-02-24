@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#MISE description="Build Go + Swift CLIs and install to ~/.local/bin"
+#MISE depends=["proto"]
+
+set -euo pipefail
+
+INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
+mkdir -p "$INSTALL_DIR"
+
+# Go CLI
+go build -C cmd -o ../.output/axe ./axe
+cp .output/axe "$INSTALL_DIR/axe"
+echo "Installed axe to $INSTALL_DIR/axe"
+
+# Swift CLIs
+SWIFT_PKG="cmd/internal/preview/analysis/swift-analysis"
+for product in axe-parser axe-index-reader; do
+  swift build --product "$product" --package-path "$SWIFT_PKG"
+  bin=$(swift build --package-path "$SWIFT_PKG" --show-bin-path)
+  cp "$bin/$product" "$INSTALL_DIR/$product"
+  echo "Installed $product to $INSTALL_DIR/$product"
+done

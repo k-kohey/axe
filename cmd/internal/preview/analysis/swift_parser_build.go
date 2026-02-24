@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +21,10 @@ import (
 
 //go:embed swift-analysis/Package.swift swift-analysis/Sources/AxeParser/*.swift swift-analysis/Sources/AxeParserCore/*.swift swift-analysis/Sources/AxeIndexReader/*.swift
 var swiftAnalysisFS embed.FS
+
+// Version is the axe CLI version (e.g. "v1.2.3"), injected by main at startup.
+// Used to download matching pre-built binaries from GitHub Releases.
+var Version string
 
 var (
 	swiftParserOnce sync.Once
@@ -29,23 +36,144 @@ var (
 	indexReaderErr  error
 )
 
-// ensureSwiftParser builds (or locates the cached) axe-parser binary.
-// The binary is cached at ~/Library/Caches/axe/swift-analysis/<hash>/axe-parser.
-// The cache key is a hash of the embedded source + `swift --version` + macOS version.
+// ensureSwiftParser returns the path to the axe-parser binary.
+// Resolution order: pre-installed sibling binary → GitHub Releases download → build from embedded source.
 func ensureSwiftParser() (string, error) {
 	swiftParserOnce.Do(func() {
-		swiftParserPath, swiftParserErr = buildSwiftAnalysisProduct("axe-parser")
+		swiftParserPath, swiftParserErr = resolveSwiftBinary("axe-parser")
 	})
 	return swiftParserPath, swiftParserErr
 }
 
-// ensureIndexReader builds (or locates the cached) axe-index-reader binary.
-// Uses the same cache directory and key as axe-parser (same package source).
+// ensureIndexReader returns the path to the axe-index-reader binary.
+// Resolution order: pre-installed sibling binary → GitHub Releases download → build from embedded source.
 func ensureIndexReader() (string, error) {
 	indexReaderOnce.Do(func() {
-		indexReaderPath, indexReaderErr = buildSwiftAnalysisProduct("axe-index-reader")
+		indexReaderPath, indexReaderErr = resolveSwiftBinary("axe-index-reader")
 	})
 	return indexReaderPath, indexReaderErr
+}
+
+// resolveSwiftBinary locates a Swift CLI binary through a fallback chain:
+//   - Dev builds:     sibling binary (mise deploy) → build from embedded source
+//   - Release builds: download from GitHub Releases  → build from embedded source
+func resolveSwiftBinary(product string) (string, error) {
+	if Version == "dev" {
+		if p := findPreinstalledBinary(product); p != "" {
+			slog.Debug("Found pre-installed binary", "product", product, "path", p)
+			return p, nil
+		}
+	}
+	if p, err := downloadSwiftBinary(product); err != nil {
+		slog.Debug("Download from GitHub Releases failed, falling back to source build", "product", product, "error", err)
+	} else {
+		return p, nil
+	}
+	return buildSwiftAnalysisProduct(product)
+}
+
+// findPreinstalledBinary checks if a pre-built binary exists in the same
+// directory as the running axe executable (e.g. placed by mise deploy).
+// Used only for dev builds; release builds use downloadSwiftBinary instead.
+func findPreinstalledBinary(product string) string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	exe, err = filepath.EvalSymlinks(exe)
+	if err != nil {
+		return ""
+	}
+	return findPreinstalledBinaryInDir(filepath.Dir(exe), product)
+}
+
+// findPreinstalledBinaryInDir checks if an executable binary named product
+// exists in the given directory. Returns the full path or empty string.
+func findPreinstalledBinaryInDir(dir, product string) string {
+	candidate := filepath.Join(dir, product)
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+		return ""
+	}
+	return candidate
+}
+
+const githubRepo = "k-kohey/axe"
+
+// downloadSwiftBinary downloads a pre-built binary from the GitHub Release
+// matching the current axe version. Skipped for dev builds.
+func downloadSwiftBinary(product string) (string, error) {
+	if Version == "" || Version == "dev" {
+		return "", fmt.Errorf("no release version available")
+	}
+
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = filepath.Join(os.Getenv("HOME"), "Library", "Caches")
+	}
+	binDir := filepath.Join(cacheDir, "axe", "swift-analysis", "releases", Version)
+	binPath := filepath.Join(binDir, product)
+
+	// Return cached download if present.
+	if info, err := os.Stat(binPath); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
+		slog.Debug("Using cached downloaded binary", "product", product, "path", binPath)
+		return binPath, nil
+	}
+
+	arch := runtime.GOARCH
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s-darwin-%s", githubRepo, Version, product, arch)
+
+	slog.Debug("Downloading Swift binary from GitHub Releases", "product", product, "url", url)
+	fmt.Fprintf(os.Stderr, "Downloading %s...\n", product)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("creating request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from a hardcoded GitHub repo constant
+	if err != nil {
+		return "", fmt.Errorf("downloading %s: %w", product, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download %s: HTTP %d", product, resp.StatusCode)
+	}
+
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating cache dir: %w", err)
+	}
+
+	// Write to a temp file first, then rename for atomicity.
+	tmp, err := os.CreateTemp(binDir, product+"-*")
+	if err != nil {
+		return "", fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("writing %s: %w", product, err)
+	}
+	if err := tmp.Chmod(0o755); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("setting permissions: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("closing temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, binPath); err != nil {
+		return "", fmt.Errorf("renaming to %s: %w", binPath, err)
+	}
+
+	slog.Debug("Downloaded Swift binary", "product", product, "path", binPath)
+	return binPath, nil
 }
 
 // buildSwiftAnalysisProduct builds a specific product from the SwiftAnalysis package.

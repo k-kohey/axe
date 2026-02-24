@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,7 @@ func main() {
 
 func init() {
 	rootCmd.Version = version
+	analysis.Version = version
 
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVar(&appName, "app", "", "target app process name (overrides .axerc)")
