@@ -62,6 +62,9 @@ func readIndexStore(ctx context.Context, indexStorePath string, sourceRoot strin
 
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	if libPath := xcodeToolchainLibPath(); libPath != "" {
+		if existing := os.Getenv("DYLD_LIBRARY_PATH"); existing != "" {
+			libPath = libPath + ":" + existing
+		}
 		cmd.Env = append(os.Environ(), "DYLD_LIBRARY_PATH="+libPath)
 	}
 	out, err := cmd.Output()
