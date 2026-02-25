@@ -2,6 +2,9 @@ name: Test Go CLI
 
 on:
   push:
+    paths:
+      - "cmd/**"
+      - ".github/workflows/test-go.yml"
 
 jobs:
   test:

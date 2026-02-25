@@ -2,6 +2,9 @@ name: Test VSCode Extension
 
 on:
   push:
+    paths:
+      - "vscode-extension/**"
+      - ".github/workflows/test-vscode.yml"
 
 jobs:
   test:
