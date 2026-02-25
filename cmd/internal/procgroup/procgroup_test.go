@@ -22,19 +22,14 @@ func TestKillProcessGroup(t *testing.T) {
 	defer cancel()
 
 	cmd := procgroup.Command(ctx, "sh", "-c", "sleep 300 & wait")
-	cmd.SysProcAttr.Setpgid = true // already set by Command, but be explicit
-
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
 	pid := cmd.Process.Pid
 
-	// Give the child a moment to spawn.
-	time.Sleep(200 * time.Millisecond)
-
-	// Find the child sleep process in the same process group.
-	childPID := findChildSleep(t, pid)
+	// Poll until the child sleep process appears.
+	childPID := waitForChildSleep(t, pid, 5*time.Second)
 	if childPID == 0 {
 		t.Fatal("could not find child sleep process")
 	}
@@ -48,9 +43,8 @@ func TestKillProcessGroup(t *testing.T) {
 	_ = cmd.Wait()
 
 	// Verify both parent and child are gone.
-	time.Sleep(100 * time.Millisecond)
-	assertProcessDead(t, pid, "parent sh")
-	assertProcessDead(t, childPID, "child sleep")
+	waitForProcessDead(t, pid, "parent sh", 5*time.Second)
+	waitForProcessDead(t, childPID, "child sleep", 5*time.Second)
 }
 
 // TestSetup verifies that Setup sets Setpgid on an existing Cmd.
@@ -81,8 +75,7 @@ func TestSignalProcess(t *testing.T) {
 
 	_ = cmd.Wait()
 
-	time.Sleep(100 * time.Millisecond)
-	assertProcessDead(t, pid, "sleep")
+	waitForProcessDead(t, pid, "sleep", 5*time.Second)
 }
 
 // TestContextCancelKillsGroup verifies that cancelling the context kills the
@@ -96,9 +89,8 @@ func TestContextCancelKillsGroup(t *testing.T) {
 	}
 
 	pid := cmd.Process.Pid
-	time.Sleep(200 * time.Millisecond)
 
-	childPID := findChildSleep(t, pid)
+	childPID := waitForChildSleep(t, pid, 5*time.Second)
 	if childPID == 0 {
 		t.Fatal("could not find child sleep process")
 	}
@@ -107,10 +99,23 @@ func TestContextCancelKillsGroup(t *testing.T) {
 	cancel()
 
 	_ = cmd.Wait()
-	time.Sleep(100 * time.Millisecond)
 
-	assertProcessDead(t, pid, "parent sh")
-	assertProcessDead(t, childPID, "child sleep")
+	waitForProcessDead(t, pid, "parent sh", 5*time.Second)
+	waitForProcessDead(t, childPID, "child sleep", 5*time.Second)
+}
+
+// waitForChildSleep polls until a "sleep" child process appears in the same
+// process group as parentPID, or until the deadline expires.
+func waitForChildSleep(t *testing.T, parentPID int, timeout time.Duration) int {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if pid := findChildSleep(t, parentPID); pid != 0 {
+			return pid
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return 0
 }
 
 // findChildSleep finds a "sleep" child process whose PGID matches the given parent PID.
@@ -142,14 +147,20 @@ func findChildSleep(t *testing.T, parentPID int) int {
 	return 0
 }
 
-func assertProcessDead(t *testing.T, pid int, label string) {
+// waitForProcessDead polls until the process with the given PID is no longer running.
+func waitForProcessDead(t *testing.T, pid int, label string, timeout time.Duration) {
 	t.Helper()
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return // cannot find → dead
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			return // cannot find → dead
+		}
+		// Signal 0 checks if process exists without actually sending a signal.
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			return // dead
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	// Signal 0 checks if process exists without actually sending a signal.
-	if err := proc.Signal(syscall.Signal(0)); err == nil {
-		t.Errorf("%s (pid %d) is still alive after group kill", label, pid)
-	}
+	t.Errorf("%s (pid %d) is still alive after group kill", label, pid)
 }

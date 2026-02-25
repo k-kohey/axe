@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // Command creates an *exec.Cmd bound to the given context with process-group
@@ -23,6 +24,7 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	cmd.Cancel = func() error {
 		return killProcessGroup(cmd.Process)
 	}
+	cmd.WaitDelay = 5 * time.Second
 	return cmd
 }
 
