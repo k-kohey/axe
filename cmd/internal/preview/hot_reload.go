@@ -155,7 +155,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	trackedFiles := []string{newSourceFile}
 	trackedFiles = append(trackedFiles, depFiles...)
 
-	// 2. Parse source and dependency files, filter private type collisions.
+	// 2. Parse source and dependency files.
 	files, trackedFiles, err := parseAndFilterTrackedFiles(newSourceFile, trackedFiles, cache)
 	if err != nil {
 		return err
@@ -174,12 +174,12 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
 	cfg := compileConfigFromBS(bs)
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile)
+	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile, counter)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -190,7 +190,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = codegen.CompileThunk(ctx, thunkPath, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+		dylibPath, err = codegen.CompileThunk(ctx, thunkPaths, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -260,11 +260,16 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		if err != nil {
 			return fmt.Errorf("parse: %w", err)
 		}
+		var moduleName string
+		if rebuildCache != nil {
+			moduleName = rebuildCache.FileModuleName(sourceFile)
+		}
 		files = append(files, analysis.FileThunkData{
-			FileName: filepath.Base(sourceFile),
-			AbsPath:  sourceFile,
-			Types:    types,
-			Imports:  imports,
+			FileName:   filepath.Base(sourceFile),
+			AbsPath:    sourceFile,
+			Types:      types,
+			Imports:    imports,
+			ModuleName: moduleName,
 		})
 	}
 
@@ -273,12 +278,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, selector, sourceFile)
+	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, selector, sourceFile, counter)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -407,13 +412,22 @@ func handleNextPreviewCmd(
 	}
 }
 
-// cleanOldDylibs removes thunk dylib and object files older than keepAfter.
+// cleanOldDylibs removes thunk dylib, object, and Swift files older than keepAfter.
 func cleanOldDylibs(thunkDir string, keepAfter int) {
 	for i := range keepAfter {
+		// Remove dylib and legacy .o files.
 		for _, ext := range []string{".dylib", ".o"} {
 			p := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d%s", i, ext))
 			if err := os.Remove(p); err == nil {
 				slog.Debug("Cleaned old thunk artifact", "path", p)
+			}
+		}
+		// Remove per-file thunk .swift files (thunk_{counter}_*.swift).
+		pattern := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d_*.swift", i))
+		matches, _ := filepath.Glob(pattern)
+		for _, m := range matches {
+			if err := os.Remove(m); err == nil {
+				slog.Debug("Cleaned old thunk file", "path", m)
 			}
 		}
 	}

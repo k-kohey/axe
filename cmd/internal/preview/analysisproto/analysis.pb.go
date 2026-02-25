@@ -883,6 +883,7 @@ type IndexFileData struct {
 	Types               []*IndexTypeInfo       `protobuf:"bytes,2,rep,name=types,proto3" json:"types,omitempty"`
 	ReferencedTypeNames []string               `protobuf:"bytes,3,rep,name=referenced_type_names,json=referencedTypeNames,proto3" json:"referenced_type_names,omitempty"`
 	DefinedTypeNames    []string               `protobuf:"bytes,4,rep,name=defined_type_names,json=definedTypeNames,proto3" json:"defined_type_names,omitempty"`
+	ModuleName          string                 `protobuf:"bytes,5,opt,name=module_name,json=moduleName,proto3" json:"module_name,omitempty"` // Swift module this file belongs to (e.g. "TodoApp", "DSComponents")
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -943,6 +944,13 @@ func (x *IndexFileData) GetDefinedTypeNames() []string {
 		return x.DefinedTypeNames
 	}
 	return nil
+}
+
+func (x *IndexFileData) GetModuleName() string {
+	if x != nil {
+		return x.ModuleName
+	}
+	return ""
 }
 
 type IndexStoreResult struct {
@@ -1068,12 +1076,14 @@ const file_analysis_proto_rawDesc = "" +
 	"\x0finherited_types\x18\x04 \x03(\tR\x0einheritedTypes\x127\n" +
 	"\amembers\x18\x05 \x03(\v2\x1d.axe.analysis.IndexMemberInfoR\amembers\x12\x12\n" +
 	"\x04line\x18\x06 \x01(\x05R\x04line\x12\x16\n" +
-	"\x06column\x18\a \x01(\x05R\x06column\"\xc1\x01\n" +
+	"\x06column\x18\a \x01(\x05R\x06column\"\xe2\x01\n" +
 	"\rIndexFileData\x12\x1b\n" +
 	"\tfile_path\x18\x01 \x01(\tR\bfilePath\x121\n" +
 	"\x05types\x18\x02 \x03(\v2\x1b.axe.analysis.IndexTypeInfoR\x05types\x122\n" +
 	"\x15referenced_type_names\x18\x03 \x03(\tR\x13referencedTypeNames\x12,\n" +
-	"\x12defined_type_names\x18\x04 \x03(\tR\x10definedTypeNames\"\xda\x01\n" +
+	"\x12defined_type_names\x18\x04 \x03(\tR\x10definedTypeNames\x12\x1f\n" +
+	"\vmodule_name\x18\x05 \x01(\tR\n" +
+	"moduleName\"\xda\x01\n" +
 	"\x10IndexStoreResult\x121\n" +
 	"\x05files\x18\x01 \x03(\v2\x1b.axe.analysis.IndexFileDataR\x05files\x12S\n" +
 	"\rtype_file_map\x18\x02 \x03(\v2/.axe.analysis.IndexStoreResult.TypeFileMapEntryR\vtypeFileMap\x1a>\n" +

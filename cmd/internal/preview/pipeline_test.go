@@ -17,12 +17,10 @@ type fakeToolchainRunner struct {
 	sdkPathErr    error
 
 	compileSwiftErr error
-	linkDylibErr    error
 	compileCErr     error
 	codesignErr     error
 
 	compileSwiftArgs []string
-	linkDylibArgs    []string
 	compileCArgs     []string
 	codesignPath     string
 	callOrder        []string
@@ -40,12 +38,6 @@ func (f *fakeToolchainRunner) CompileSwift(_ context.Context, args []string) ([]
 	f.callOrder = append(f.callOrder, "CompileSwift")
 	f.compileSwiftArgs = args
 	return nil, f.compileSwiftErr
-}
-
-func (f *fakeToolchainRunner) LinkDylib(_ context.Context, args []string) ([]byte, error) {
-	f.callOrder = append(f.callOrder, "LinkDylib")
-	f.linkDylibArgs = args
-	return nil, f.linkDylibErr
 }
 
 func (f *fakeToolchainRunner) CompileC(_ context.Context, args []string) ([]byte, error) {
@@ -360,120 +352,6 @@ struct Model {
 	_, _, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath}, cache)
 	if err == nil {
 		t.Fatal("expected error when sourceFile is not in results")
-	}
-}
-
-func TestParseAndFilterTrackedFiles_CollisionFiltered(t *testing.T) {
-	dir := t.TempDir()
-
-	// Source file with a private View and a non-private View.
-	sourcePath := filepath.Join(dir, "MainView.swift")
-	if err := os.WriteFile(sourcePath, []byte(`import SwiftUI
-
-struct MainView: View {
-    var body: some View {
-        Text("Main")
-    }
-}
-
-private struct SharedName: View {
-    var body: some View {
-        Text("shared in main")
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Dep file with the same private type name AND a non-private type.
-	depPath := filepath.Join(dir, "OtherView.swift")
-	if err := os.WriteFile(depPath, []byte(`import SwiftUI
-
-struct OtherView: View {
-    var body: some View {
-        Text("Other")
-    }
-}
-
-private struct SharedName: View {
-    var body: some View {
-        Text("shared in other")
-    }
-}
-`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	analysis.ResetCache()
-
-	cache := buildTestCache(map[string]*pb.IndexFileData{
-		sourcePath: {
-			Types: []*pb.IndexTypeInfo{
-				{
-					Name: "MainView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Members: []*pb.IndexMemberInfo{
-						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
-					},
-				},
-				{
-					Name: "SharedName", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "private",
-					InheritedTypes: []string{"View"},
-					Members: []*pb.IndexMemberInfo{
-						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 10},
-					},
-				},
-			},
-		},
-		depPath: {
-			Types: []*pb.IndexTypeInfo{
-				{
-					Name: "OtherView", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Members: []*pb.IndexMemberInfo{
-						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
-					},
-				},
-				{
-					Name: "SharedName", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "private",
-					InheritedTypes: []string{"View"},
-					Members: []*pb.IndexMemberInfo{
-						{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 10},
-					},
-				},
-			},
-		},
-	})
-
-	files, tracked, err := parseAndFilterTrackedFiles(sourcePath, []string{sourcePath, depPath}, cache)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Both files should be kept (type-level filtering, not file-level).
-	if len(files) != 2 {
-		t.Fatalf("files count = %d, want 2 (dep kept with colliding type removed)", len(files))
-	}
-
-	// Source file should only have MainView (SharedName removed from ALL files).
-	// With -enable-private-imports, "extension SharedName" is ambiguous.
-	if len(files[0].Types) != 1 {
-		t.Errorf("source types = %d, want 1 (SharedName removed)", len(files[0].Types))
-	}
-	if files[0].Types[0].Name != "MainView" {
-		t.Errorf("source types[0].Name = %q, want MainView", files[0].Types[0].Name)
-	}
-
-	// Dep file should only have OtherView (SharedName removed).
-	if len(files[1].Types) != 1 {
-		t.Errorf("dep types = %d, want 1 (SharedName removed)", len(files[1].Types))
-	}
-	if files[1].Types[0].Name != "OtherView" {
-		t.Errorf("dep types[0].Name = %q, want OtherView", files[1].Types[0].Name)
-	}
-
-	// tracked list should include both files.
-	if len(tracked) != 2 {
-		t.Errorf("tracked = %v, want both files", tracked)
 	}
 }
 

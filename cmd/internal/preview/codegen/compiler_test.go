@@ -15,13 +15,11 @@ type fakeToolchainRunner struct {
 	sdkPathErr    error
 
 	compileSwiftErr error
-	linkDylibErr    error
 	compileCErr     error
 	codesignErr     error
 
 	// Captured args for assertions.
 	compileSwiftArgs []string
-	linkDylibArgs    []string
 	compileCArgs     []string
 	codesignPath     string
 
@@ -41,12 +39,6 @@ func (f *fakeToolchainRunner) CompileSwift(_ context.Context, args []string) ([]
 	f.callOrder = append(f.callOrder, "CompileSwift")
 	f.compileSwiftArgs = args
 	return nil, f.compileSwiftErr
-}
-
-func (f *fakeToolchainRunner) LinkDylib(_ context.Context, args []string) ([]byte, error) {
-	f.callOrder = append(f.callOrder, "LinkDylib")
-	f.linkDylibArgs = args
-	return nil, f.linkDylibErr
 }
 
 func (f *fakeToolchainRunner) CompileC(_ context.Context, args []string) ([]byte, error) {
@@ -77,9 +69,14 @@ func TestCompileThunk_FullFlow(t *testing.T) {
 	thunkDir := filepath.Join(tmpDir, "thunk")
 	buildDir := tmpDir
 
+	thunkPaths := []string{
+		filepath.Join(tmpDir, "thunk_0_HogeView.swift"),
+		filepath.Join(tmpDir, "thunk_0__main.swift"),
+	}
+
 	dylibPath, err := CompileThunk(
 		context.Background(),
-		filepath.Join(tmpDir, "thunk.swift"),
+		thunkPaths,
 		cfg, thunkDir, buildDir, 0, "HogeView.swift",
 		tc,
 	)
@@ -87,8 +84,8 @@ func TestCompileThunk_FullFlow(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify the full call order: SDKPath -> CompileSwift -> LinkDylib -> Codesign.
-	wantOrder := []string{"SDKPath", "CompileSwift", "LinkDylib", "Codesign"}
+	// Verify the call order: SDKPath -> CompileSwift -> Codesign.
+	wantOrder := []string{"SDKPath", "CompileSwift", "Codesign"}
 	if len(tc.callOrder) != len(wantOrder) {
 		t.Fatalf("callOrder = %v, want %v", tc.callOrder, wantOrder)
 	}
@@ -126,9 +123,14 @@ func TestCompileThunk_CompileSwiftArgs(t *testing.T) {
 	thunkDir := filepath.Join(tmpDir, "thunk")
 	buildDir := tmpDir
 
+	thunkPaths := []string{
+		filepath.Join(tmpDir, "thunk_0_HogeView.swift"),
+		filepath.Join(tmpDir, "thunk_0__main.swift"),
+	}
+
 	_, err := CompileThunk(
 		context.Background(),
-		filepath.Join(tmpDir, "thunk.swift"),
+		thunkPaths,
 		cfg, thunkDir, buildDir, 3, "HogeView.swift",
 		tc,
 	)
@@ -138,22 +140,19 @@ func TestCompileThunk_CompileSwiftArgs(t *testing.T) {
 
 	compileArgs := strings.Join(tc.compileSwiftArgs, " ")
 
-	// Verify SDK is passed.
+	// Verify unified compile+link args.
+	if !strings.Contains(compileArgs, "-emit-library") {
+		t.Error("compile args should contain -emit-library")
+	}
 	if !strings.Contains(compileArgs, "-sdk /sdk/iphonesimulator") {
 		t.Error("compile args should contain -sdk")
 	}
-
-	// Verify target includes deployment target.
 	if !strings.Contains(compileArgs, "-target arm64-apple-ios17.0-simulator") {
 		t.Errorf("compile args should contain target, got: %s", compileArgs)
 	}
-
-	// Verify module name uses replacement format.
 	if !strings.Contains(compileArgs, "-module-name TestModule_PreviewReplacement_HogeView_3") {
 		t.Errorf("compile args should contain replacement module name, got: %s", compileArgs)
 	}
-
-	// Verify extra paths are passed.
 	if !strings.Contains(compileArgs, "-I /extra/include") {
 		t.Error("compile args should contain extra include path")
 	}
@@ -163,10 +162,32 @@ func TestCompileThunk_CompileSwiftArgs(t *testing.T) {
 	if !strings.Contains(compileArgs, "-fmodule-map-file=/extra/module.modulemap") {
 		t.Error("compile args should contain extra module map file")
 	}
-
-	// Verify swift-version is trimmed (6.0 -> 6).
 	if !strings.Contains(compileArgs, "-swift-version 6") {
 		t.Errorf("compile args should contain -swift-version 6, got: %s", compileArgs)
+	}
+
+	// Verify -enable-private-imports for per-file @_private scoping.
+	if !strings.Contains(compileArgs, "-enable-private-imports") {
+		t.Error("compile args should contain -enable-private-imports")
+	}
+	if strings.Contains(compileArgs, "-disable-access-control") {
+		t.Error("compile args should NOT contain -disable-access-control")
+	}
+
+	// Verify linker flags are included in the unified invocation.
+	if !strings.Contains(compileArgs, "-flat_namespace") {
+		t.Error("compile args should contain -flat_namespace")
+	}
+	if !strings.Contains(compileArgs, "-L "+cfg.BuiltProductsDir) {
+		t.Error("compile args should contain -L for BuiltProductsDir")
+	}
+
+	// Verify both thunk paths are present.
+	if !strings.Contains(compileArgs, "thunk_0_HogeView.swift") {
+		t.Error("compile args should contain per-file thunk path")
+	}
+	if !strings.Contains(compileArgs, "thunk_0__main.swift") {
+		t.Error("compile args should contain main thunk path")
 	}
 }
 
@@ -200,9 +221,11 @@ func TestCompileThunk_SwiftVersionTrimming(t *testing.T) {
 			thunkDir := filepath.Join(tmpDir, "thunk")
 			buildDir := tmpDir
 
+			thunkPaths := []string{filepath.Join(tmpDir, "thunk.swift")}
+
 			_, err := CompileThunk(
 				context.Background(),
-				filepath.Join(tmpDir, "thunk.swift"),
+				thunkPaths,
 				cfg, thunkDir, buildDir, 0, "HogeView.swift",
 				tc,
 			)
@@ -248,17 +271,8 @@ func TestCompileThunk_ErrorPropagation(t *testing.T) {
 				sdkPathResult:   "/sdk/iphonesimulator",
 				compileSwiftErr: errors.New("compilation error"),
 			},
-			wantError: "compiling thunk.swift -> .o",
+			wantError: "compiling thunk",
 			wantCalls: 2,
-		},
-		{
-			name: "LinkDylib failure",
-			tc: &fakeToolchainRunner{
-				sdkPathResult: "/sdk/iphonesimulator",
-				linkDylibErr:  errors.New("linker error"),
-			},
-			wantError: "linking thunk.o -> .dylib",
-			wantCalls: 3,
 		},
 		{
 			name: "Codesign failure",
@@ -267,7 +281,7 @@ func TestCompileThunk_ErrorPropagation(t *testing.T) {
 				codesignErr:   errors.New("signing error"),
 			},
 			wantError: "codesigning dylib",
-			wantCalls: 4,
+			wantCalls: 3,
 		},
 	}
 
@@ -284,9 +298,11 @@ func TestCompileThunk_ErrorPropagation(t *testing.T) {
 			thunkDir := filepath.Join(tmpDir, "thunk")
 			buildDir := tmpDir
 
+			thunkPaths := []string{filepath.Join(tmpDir, "thunk.swift")}
+
 			_, err := CompileThunk(
 				context.Background(),
-				filepath.Join(tmpDir, "thunk.swift"),
+				thunkPaths,
 				cfg, thunkDir, buildDir, 0, "HogeView.swift",
 				tt.tc,
 			)
@@ -301,51 +317,5 @@ func TestCompileThunk_ErrorPropagation(t *testing.T) {
 					len(tt.tc.callOrder), tt.wantCalls, tt.tc.callOrder)
 			}
 		})
-	}
-}
-
-func TestCompileThunk_LinkArgs(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	tc := &fakeToolchainRunner{sdkPathResult: "/sdk/iphonesimulator"}
-	cfg := CompileConfig{
-		ModuleName:       "TestModule",
-		BuiltProductsDir: filepath.Join(tmpDir, "products"),
-		DeploymentTarget: "17.0",
-	}
-	thunkDir := filepath.Join(tmpDir, "thunk")
-	buildDir := tmpDir
-
-	_, err := CompileThunk(
-		context.Background(),
-		filepath.Join(tmpDir, "thunk.swift"),
-		cfg, thunkDir, buildDir, 2, "HogeView.swift",
-		tc,
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	linkArgs := strings.Join(tc.linkDylibArgs, " ")
-
-	// Verify emit-library flag.
-	if !strings.Contains(linkArgs, "-emit-library") {
-		t.Error("link args should contain -emit-library")
-	}
-
-	// Verify flat_namespace for dynamic replacement.
-	if !strings.Contains(linkArgs, "-flat_namespace") {
-		t.Error("link args should contain -flat_namespace")
-	}
-
-	// Verify output path uses counter.
-	if !strings.Contains(linkArgs, "thunk_2.dylib") {
-		t.Errorf("link args should reference thunk_2.dylib, got: %s", linkArgs)
-	}
-
-	// Verify module-name in link args.
-	if !strings.Contains(linkArgs, "-module-name TestModule_PreviewReplacement_HogeView_2") {
-		t.Errorf("link args should contain replacement module name, got: %s", linkArgs)
 	}
 }

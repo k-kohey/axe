@@ -148,7 +148,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	// Build tracked file list: target + dependencies.
 	trackedFiles := []string{sourceFile}
 	trackedFiles = append(trackedFiles, depFiles...)
-	slog.Debug("Tracked files (before collision check)", "count", len(trackedFiles), "files", trackedFiles)
+	slog.Debug("Tracked files", "count", len(trackedFiles), "files", trackedFiles)
 
 	done = step.begin("Parsing source file...")
 	files, trackedFiles, err := parseAndFilterTrackedFiles(sourceFile, trackedFiles, indexCache.Get())
@@ -157,10 +157,9 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		sendStopped("build_error", err.Error(), "")
 		return err
 	}
-	slog.Debug("Tracked files (after collision filter)", "count", len(trackedFiles), "files", trackedFiles)
 
-	done = step.begin("Generating combined thunk...")
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile)
+	done = step.begin("Generating thunks...")
+	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile, 0)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -168,7 +167,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")

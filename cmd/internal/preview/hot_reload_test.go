@@ -204,12 +204,6 @@ func (e *errToolchainRunner) CompileSwift(ctx context.Context, _ []string) ([]by
 	}
 	return nil, e.err
 }
-func (e *errToolchainRunner) LinkDylib(ctx context.Context, _ []string) ([]byte, error) {
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	return nil, e.err
-}
 func (e *errToolchainRunner) CompileC(ctx context.Context, _ []string) ([]byte, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

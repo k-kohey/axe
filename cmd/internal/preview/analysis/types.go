@@ -37,12 +37,13 @@ func (t TypeInfo) IsView() bool {
 	return false
 }
 
-// FileThunkData holds one file's worth of data for combined thunk generation.
+// FileThunkData holds one file's worth of data for per-file thunk generation.
 type FileThunkData struct {
-	FileName string     // e.g. "ChildView.swift"
-	AbsPath  string     // absolute path to the source file
-	Types    []TypeInfo // types with computed properties/methods
-	Imports  []string   // non-SwiftUI imports
+	FileName   string     // e.g. "ChildView.swift"
+	AbsPath    string     // absolute path to the source file
+	Types      []TypeInfo // types with computed properties/methods
+	Imports    []string   // non-SwiftUI imports
+	ModuleName string     // Swift module this file belongs to (e.g. "DSComponents"); empty = main module
 }
 
 // PreviewBlock describes a #Preview { ... } block in the source.

@@ -112,6 +112,7 @@ message IndexFileData {
   repeated IndexTypeInfo types = 2;
   repeated string referenced_type_names = 3;
   repeated string defined_type_names = 4;
+  string module_name = 5;  // Swift module this file belongs to (e.g. "TodoApp", "DSComponents")
 }
 
 message IndexStoreResult {

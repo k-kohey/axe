@@ -30,577 +30,7 @@ func TestReplacementModuleName(t *testing.T) {
 	}
 }
 
-func TestFilterPrivateCollisions_NoCollision(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "Dep.swift",
-			AbsPath:  "/path/Dep.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 2 {
-		t.Errorf("kept = %d, want 2", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-}
-
-func TestFilterPrivateCollisions_CollisionBetweenDeps(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "DepA.swift",
-			AbsPath:  "/path/DepA.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "DepAView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "SharedHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-		{
-			FileName: "DepB.swift",
-			AbsPath:  "/path/DepB.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "DepBView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "SharedHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	// Type-level filtering: only SharedHelper is removed, not the entire file.
-	if len(kept) != 3 {
-		t.Errorf("kept = %d, want 3 (all files kept, only colliding types removed)", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty (files not excluded, types pruned)", excluded)
-	}
-	// Verify that the colliding type was removed from deps.
-	for _, f := range kept {
-		if f.AbsPath == "/path/Target.swift" {
-			continue
-		}
-		for _, typ := range f.Types {
-			if typ.Name == "SharedHelper" {
-				t.Errorf("SharedHelper should have been removed from %s", f.AbsPath)
-			}
-		}
-		if len(f.Types) != 1 {
-			t.Errorf("%s types = %d, want 1 (only non-colliding type)", f.AbsPath, len(f.Types))
-		}
-	}
-}
-
-func TestFilterPrivateCollisions_CollisionWithTarget(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "Helper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-		{
-			FileName: "Dep.swift",
-			AbsPath:  "/path/Dep.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "Helper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	// Colliding private types removed from ALL files (including target).
-	// With -enable-private-imports, "extension Helper" is ambiguous.
-	if len(kept) != 2 {
-		t.Errorf("kept = %d, want 2", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-	// Target should only have TargetView (Helper removed).
-	if len(kept[0].Types) != 1 || kept[0].Types[0].Name != "TargetView" {
-		t.Errorf("Target types = %v, want [TargetView]", kept[0].Types)
-	}
-	// Dep should only have DepView (Helper removed).
-	if len(kept[1].Types) != 1 || kept[1].Types[0].Name != "DepView" {
-		t.Errorf("Dep types = %v, want [DepView]", kept[1].Types)
-	}
-}
-
-func TestFilterPrivateCollisions_NoPrivateTypes(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "DepA.swift",
-			AbsPath:  "/path/DepA.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "ViewA", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "DepB.swift",
-			AbsPath:  "/path/DepB.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "ViewB", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 3 {
-		t.Errorf("kept = %d, want 3", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-}
-
-func TestFilterPrivateCollisions_PrivateButNoCollision(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "TargetHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-		{
-			FileName: "Dep.swift",
-			AbsPath:  "/path/Dep.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "DepView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "DepHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 2 {
-		t.Errorf("kept = %d, want 2 (different private names → no collision)", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-}
-
-func TestFilterPrivateCollisions_FileprivateCollision(t *testing.T) {
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "MainView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "DepA.swift",
-			AbsPath:  "/path/DepA.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "Label", Kind: "struct", AccessLevel: "fileprivate"},
-			},
-		},
-		{
-			FileName: "DepB.swift",
-			AbsPath:  "/path/DepB.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "Label", Kind: "struct", AccessLevel: "fileprivate"},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 1 {
-		t.Errorf("kept = %d, want 1", len(kept))
-	}
-	if len(excluded) != 2 {
-		t.Errorf("excluded = %d, want 2 (fileprivate collision)", len(excluded))
-	}
-}
-
-func TestFilterPrivateCollisions_TypeLevelPreservesNonColliding(t *testing.T) {
-	// Regression test: private type collision should only remove the specific
-	// colliding types, preserving other types in the same file.
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-			},
-		},
-		{
-			FileName: "ExportView.swift",
-			AbsPath:  "/path/ExportView.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "ExportView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "DataHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-		{
-			FileName: "ShareView.swift",
-			AbsPath:  "/path/ShareView.swift",
-			Types: []analysis.TypeInfo{
-				{Name: "ShareView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
-				{Name: "DataHelper", Kind: "struct", AccessLevel: "private"},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 3 {
-		t.Fatalf("kept = %d, want 3 (all files kept)", len(kept))
-	}
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-
-	// Verify ExportView.swift only has ExportView (DataHelper removed).
-	for _, f := range kept {
-		switch f.AbsPath {
-		case "/path/ExportView.swift":
-			if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
-				t.Errorf("ExportView.swift types = %v, want [ExportView]", f.Types)
-			}
-		case "/path/ShareView.swift":
-			if len(f.Types) != 1 || f.Types[0].Name != "ShareView" {
-				t.Errorf("ShareView.swift types = %v, want [ShareView]", f.Types)
-			}
-		}
-	}
-}
-
-func TestFilterPrivateCollisions_MemberReferencingCollidingType(t *testing.T) {
-	// Regression test: even after removing colliding private type definitions,
-	// members that reference those types (e.g. "var formatter: DataFormatter")
-	// must also be removed. With -enable-private-imports, both private types
-	// are visible, making type references ambiguous.
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"hello\")"},
-					},
-				},
-			},
-		},
-		{
-			FileName: "ExportView.swift",
-			AbsPath:  "/path/ExportView.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "ExportView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"export\")"},
-						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
-					},
-				},
-				{Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
-					Properties: []analysis.PropertyInfo{
-						{Name: "text", TypeExpr: "String", Source: "\"\""},
-					},
-				},
-			},
-		},
-		{
-			FileName: "ShareView.swift",
-			AbsPath:  "/path/ShareView.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "ShareView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"share\")"},
-						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
-					},
-				},
-				{Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
-					Properties: []analysis.PropertyInfo{
-						{Name: "text", TypeExpr: "String", Source: "\"\""},
-					},
-				},
-			},
-		},
-	}
-
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(excluded) != 0 {
-		t.Errorf("excluded = %v, want empty", excluded)
-	}
-	if len(kept) != 3 {
-		t.Fatalf("kept = %d, want 3", len(kept))
-	}
-
-	for _, f := range kept {
-		switch f.AbsPath {
-		case "/path/Target.swift":
-			// Target should be unchanged.
-			if len(f.Types) != 1 {
-				t.Errorf("Target types = %d, want 1", len(f.Types))
-			}
-			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
-				t.Errorf("Target properties = %v, want [body]", f.Types[0].Properties)
-			}
-		case "/path/ExportView.swift":
-			// DataFormatter type removed (Phase 1).
-			// ExportView.formatter removed (Phase 2: TypeExpr references DataFormatter).
-			// ExportView.body kept.
-			if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
-				t.Errorf("ExportView.swift types = %v, want [ExportView]", f.Types)
-			}
-			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
-				t.Errorf("ExportView properties = %v, want [body]", f.Types[0].Properties)
-			}
-		case "/path/ShareView.swift":
-			if len(f.Types) != 1 || f.Types[0].Name != "ShareView" {
-				t.Errorf("ShareView.swift types = %v, want [ShareView]", f.Types)
-			}
-			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
-				t.Errorf("ShareView properties = %v, want [body]", f.Types[0].Properties)
-			}
-		}
-	}
-}
-
-func TestFilterPrivateCollisions_MethodReferencingCollidingType(t *testing.T) {
-	// Methods whose signature references a colliding type should also be filtered.
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"hi\")"},
-					},
-				},
-			},
-		},
-		{
-			FileName: "ViewA.swift",
-			AbsPath:  "/path/ViewA.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "ViewA", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"a\")"},
-					},
-					Methods: []analysis.MethodInfo{
-						{Name: "format", Signature: "(data: Formatter) -> String", Source: "\"\""},
-						{Name: "greet", Signature: "() -> String", Source: "\"hello\""},
-					},
-				},
-				{Name: "Formatter", Kind: "struct", AccessLevel: "private",
-					Properties: []analysis.PropertyInfo{
-						{Name: "value", TypeExpr: "String", Source: "\"\""},
-					},
-				},
-			},
-		},
-		{
-			FileName: "ViewB.swift",
-			AbsPath:  "/path/ViewB.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "ViewB", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"b\")"},
-					},
-					Methods: []analysis.MethodInfo{
-						{Name: "format", Signature: "(input: Formatter) -> Formatter", Source: "Formatter()"},
-					},
-				},
-				{Name: "Formatter", Kind: "struct", AccessLevel: "private",
-					Properties: []analysis.PropertyInfo{
-						{Name: "value", TypeExpr: "String", Source: "\"\""},
-					},
-				},
-			},
-		},
-	}
-
-	kept, _ := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
-	if len(kept) != 3 {
-		t.Fatalf("kept = %d, want 3", len(kept))
-	}
-
-	for _, f := range kept {
-		switch f.AbsPath {
-		case "/path/ViewA.swift":
-			if len(f.Types) != 1 || f.Types[0].Name != "ViewA" {
-				t.Errorf("ViewA types = %v, want [ViewA]", f.Types)
-			}
-			// "format" removed (sig contains "Formatter"), "greet" kept.
-			if len(f.Types[0].Methods) != 1 || f.Types[0].Methods[0].Name != "greet" {
-				t.Errorf("ViewA methods = %v, want [greet]", f.Types[0].Methods)
-			}
-		case "/path/ViewB.swift":
-			if len(f.Types) != 1 || f.Types[0].Name != "ViewB" {
-				t.Errorf("ViewB types = %v, want [ViewB]", f.Types)
-			}
-			// "format" removed (sig contains "Formatter").
-			if len(f.Types[0].Methods) != 0 {
-				t.Errorf("ViewB methods = %v, want empty", f.Types[0].Methods)
-			}
-		}
-	}
-}
-
-func TestFilterPrivateCollisions_AmbiguousNamesFromIndexStore(t *testing.T) {
-	// When the colliding type is only in ONE tracked file but the Index Store
-	// reports it as ambiguous (defined in another non-tracked file), the type
-	// and referencing members must still be filtered.
-	files := []analysis.FileThunkData{
-		{
-			FileName: "ExportView.swift",
-			AbsPath:  "/path/ExportView.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "ExportView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"export\")"},
-						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
-					},
-				},
-				{
-					Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
-					Properties: []analysis.PropertyInfo{
-						{Name: "csvString", TypeExpr: "String", Source: "\"\""},
-					},
-				},
-			},
-		},
-	}
-
-	// Index Store reports DataFormatter is defined in multiple files
-	// (including a non-tracked file like ShareView.swift).
-	ambiguousNames := map[string]bool{"DataFormatter": true}
-
-	kept, _ := analysis.FilterPrivateCollisions(files, "/path/ExportView.swift", ambiguousNames)
-	if len(kept) != 1 {
-		t.Fatalf("kept = %d, want 1", len(kept))
-	}
-
-	// DataFormatter type removed, ExportView.formatter removed.
-	f := kept[0]
-	if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
-		t.Errorf("types = %v, want [ExportView]", f.Types)
-	}
-	if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
-		t.Errorf("properties = %v, want [body]", f.Types[0].Properties)
-	}
-}
-
-func TestFilterPrivateCollisions_WordBoundaryMatching(t *testing.T) {
-	// Verify that word-boundary matching prevents false positives where
-	// a colliding type name is a substring of an unrelated identifier.
-	// e.g. "Item" as a colliding name should NOT match "isItemizable" or "MenuItem".
-	files := []analysis.FileThunkData{
-		{
-			FileName: "Target.swift",
-			AbsPath:  "/path/Target.swift",
-			Types: []analysis.TypeInfo{
-				{
-					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
-					InheritedTypes: []string{"View"},
-					Properties: []analysis.PropertyInfo{
-						{Name: "body", TypeExpr: "some View", Source: "Text(\"hi\")"},
-						{Name: "menuItem", TypeExpr: "MenuItem", Source: "MenuItem()"},
-						{Name: "isItemizable", TypeExpr: "Bool", Source: "true"},
-						{Name: "item", TypeExpr: "Item", Source: "Item()"},
-						{Name: "items", TypeExpr: "[Item]", Source: "[]"},
-					},
-					Methods: []analysis.MethodInfo{
-						{Name: "processItem", Signature: "(item: Item) -> String", Source: "\"\""},
-						{Name: "getMenuItems", Signature: "() -> [MenuItem]", Source: "[]"},
-					},
-				},
-			},
-		},
-	}
-
-	ambiguousNames := map[string]bool{"Item": true}
-	kept, _ := analysis.FilterPrivateCollisions(files, "/path/Target.swift", ambiguousNames)
-	if len(kept) != 1 {
-		t.Fatalf("kept = %d, want 1", len(kept))
-	}
-
-	tv := kept[0].Types[0]
-
-	// "body" kept (no reference to Item).
-	// "menuItem" kept (MenuItem ≠ Item — different word boundary).
-	// "isItemizable" kept (Bool type, no reference).
-	// "item" removed (TypeExpr is exactly "Item").
-	// "items" removed (TypeExpr "[Item]" contains word "Item").
-	var propNames []string
-	for _, p := range tv.Properties {
-		propNames = append(propNames, p.Name)
-	}
-	wantProps := []string{"body", "menuItem", "isItemizable"}
-	if len(propNames) != len(wantProps) {
-		t.Fatalf("properties = %v, want %v", propNames, wantProps)
-	}
-	for i, name := range wantProps {
-		if propNames[i] != name {
-			t.Errorf("property[%d] = %q, want %q", i, propNames[i], name)
-		}
-	}
-
-	// "processItem" removed (signature contains word "Item").
-	// "getMenuItems" kept (MenuItem ≠ Item — different word boundary).
-	var methodNames []string
-	for _, m := range tv.Methods {
-		methodNames = append(methodNames, m.Name)
-	}
-	wantMethods := []string{"getMenuItems"}
-	if len(methodNames) != len(wantMethods) {
-		t.Fatalf("methods = %v, want %v", methodNames, wantMethods)
-	}
-	for i, name := range wantMethods {
-		if methodNames[i] != name {
-			t.Errorf("method[%d] = %q, want %q", i, methodNames[i], name)
-		}
-	}
-}
-
-func TestGenerateCombinedThunk_MultiFile(t *testing.T) {
+func TestGenerateThunks_MultiFile(t *testing.T) {
 	dir := t.TempDir()
 	thunkDir := filepath.Join(dir, "thunk")
 
@@ -667,53 +97,78 @@ struct FugaView: View {
 		},
 	}
 
-	thunkPath, err := GenerateCombinedThunk(files, "MyApp", thunkDir, "", targetPath)
+	thunkPaths, err := GenerateThunks(files, "MyApp", thunkDir, "", targetPath, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(thunkPath)
+	// Expect 3 files: per-file for HogeView, per-file for FugaView, main.
+	if len(thunkPaths) != 3 {
+		t.Fatalf("thunkPaths count = %d, want 3", len(thunkPaths))
+	}
+
+	// Read per-file thunks.
+	hogeThunk, err := os.ReadFile(thunkPaths[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := string(data)
+	hogeContent := string(hogeThunk)
 
-	checks := []string{
-		// Per-file @_private imports
-		`@_private(sourceFile: "HogeView.swift") import MyApp`,
-		`@_private(sourceFile: "FugaView.swift") import MyApp`,
-		`import SwiftUI`,
-		// Both extensions should be present
-		`extension HogeView {`,
-		`extension FugaView {`,
-		// Dynamic replacements for both types
-		`@_dynamicReplacement(for: body) private var __preview__body: some View {`,
-		// #sourceLocation should point to correct file for each type
-		`#sourceLocation(file: "` + targetPath + `"`,
-		`#sourceLocation(file: "` + depPath + `"`,
-		// Preview wrapper should only import target view
-		`import struct MyApp.HogeView`,
-		`struct _AxePreviewWrapper: View {`,
-		`HogeView()`,
-		`@_cdecl("axe_preview_refresh")`,
+	fugaThunk, err := os.ReadFile(thunkPaths[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fugaContent := string(fugaThunk)
+
+	mainThunk, err := os.ReadFile(thunkPaths[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	mainContent := string(mainThunk)
+
+	// Per-file thunk for HogeView should only have HogeView's @_private import.
+	if !strings.Contains(hogeContent, `@_private(sourceFile: "HogeView.swift") import MyApp`) {
+		t.Errorf("HogeView thunk missing its @_private import\n\nGot:\n%s", hogeContent)
+	}
+	if strings.Contains(hogeContent, `@_private(sourceFile: "FugaView.swift")`) {
+		t.Errorf("HogeView thunk should NOT contain FugaView's @_private import\n\nGot:\n%s", hogeContent)
+	}
+	if !strings.Contains(hogeContent, `extension HogeView {`) {
+		t.Errorf("HogeView thunk missing extension\n\nGot:\n%s", hogeContent)
+	}
+	if strings.Contains(hogeContent, `extension FugaView {`) {
+		t.Errorf("HogeView thunk should NOT contain FugaView extension\n\nGot:\n%s", hogeContent)
 	}
 
-	for _, c := range checks {
-		if !strings.Contains(content, c) {
-			t.Errorf("combined thunk missing %q\n\nGot:\n%s", c, content)
-		}
+	// Per-file thunk for FugaView should only have FugaView's @_private import.
+	if !strings.Contains(fugaContent, `@_private(sourceFile: "FugaView.swift") import MyApp`) {
+		t.Errorf("FugaView thunk missing its @_private import\n\nGot:\n%s", fugaContent)
+	}
+	if strings.Contains(fugaContent, `@_private(sourceFile: "HogeView.swift")`) {
+		t.Errorf("FugaView thunk should NOT contain HogeView's @_private import\n\nGot:\n%s", fugaContent)
+	}
+	if !strings.Contains(fugaContent, `extension FugaView {`) {
+		t.Errorf("FugaView thunk missing extension\n\nGot:\n%s", fugaContent)
 	}
 
-	// Verify FugaView is NOT in the preview wrapper imports
-	// (it's a dependency, not the target file)
-	if strings.Contains(content, `import struct MyApp.FugaView`) {
-		t.Errorf("combined thunk should not import FugaView for preview wrapper\n\nGot:\n%s", content)
+	// Main thunk should contain preview wrapper and refresh, but no @_private.
+	if strings.Contains(mainContent, `@_private`) {
+		t.Errorf("main thunk should NOT contain @_private import\n\nGot:\n%s", mainContent)
+	}
+	if !strings.Contains(mainContent, `@testable import MyApp`) {
+		t.Errorf("main thunk missing @testable import\n\nGot:\n%s", mainContent)
+	}
+	if !strings.Contains(mainContent, `struct _AxePreviewWrapper: View {`) {
+		t.Errorf("main thunk missing _AxePreviewWrapper\n\nGot:\n%s", mainContent)
+	}
+	if !strings.Contains(mainContent, `@_cdecl("axe_preview_refresh")`) {
+		t.Errorf("main thunk missing axe_preview_refresh\n\nGot:\n%s", mainContent)
 	}
 }
 
-func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
-	// helper: create dirs and generate a combined thunk from a single fileThunkData.
-	generate := func(t *testing.T, srcFileName, srcContent string, ftd analysis.FileThunkData, moduleName string) string {
+func TestGenerateThunks_SingleFile(t *testing.T) {
+	// helper: create dirs and generate thunks from a single fileThunkData.
+	generate := func(t *testing.T, srcFileName, srcContent string, ftd analysis.FileThunkData, moduleName string) (perFileContent string, mainContent string) {
 		t.Helper()
 		dir := t.TempDir()
 		thunkDir := filepath.Join(dir, "thunk")
@@ -729,20 +184,28 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 		ftd.AbsPath = srcPath
 		files := []analysis.FileThunkData{ftd}
 
-		thunkPath, err := GenerateCombinedThunk(files, moduleName, thunkDir, "", srcPath)
+		thunkPaths, err := GenerateThunks(files, moduleName, thunkDir, "", srcPath, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		data, err := os.ReadFile(thunkPath)
+		if len(thunkPaths) != 2 {
+			t.Fatalf("thunkPaths count = %d, want 2 (per-file + main)", len(thunkPaths))
+		}
+
+		perFile, err := os.ReadFile(thunkPaths[0])
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(data)
+		main, err := os.ReadFile(thunkPaths[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(perFile), string(main)
 	}
 
 	t.Run("Basic", func(t *testing.T) {
-		content := generate(t, "HogeView.swift",
+		perFile, _ := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hello\") }\n}\n",
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
@@ -773,8 +236,8 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			`#sourceLocation()`,
 		}
 		for _, c := range checks {
-			if !strings.Contains(content, c) {
-				t.Errorf("thunk missing %q\n\nGot:\n%s", c, content)
+			if !strings.Contains(perFile, c) {
+				t.Errorf("per-file thunk missing %q\n\nGot:\n%s", c, perFile)
 			}
 		}
 	})
@@ -809,12 +272,12 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			},
 		}
 
-		thunkPath, err := GenerateCombinedThunk(files, "MyApp", thunkDir, "", srcPath)
+		thunkPaths, err := GenerateThunks(files, "MyApp", thunkDir, "", srcPath, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		data, err := os.ReadFile(thunkPath)
+		data, err := os.ReadFile(thunkPaths[0])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -832,7 +295,7 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 	})
 
 	t.Run("MultipleProperties", func(t *testing.T) {
-		content := generate(t, "HogeView.swift",
+		perFile, _ := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hi\") }\n}\n",
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
@@ -851,17 +314,17 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyApp",
 		)
 
-		if !strings.Contains(content, `@_dynamicReplacement(for: backgroundColor) private var __preview__backgroundColor: Color {`) {
-			t.Errorf("thunk missing backgroundColor replacement\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `@_dynamicReplacement(for: backgroundColor) private var __preview__backgroundColor: Color {`) {
+			t.Errorf("thunk missing backgroundColor replacement\n\nGot:\n%s", perFile)
 		}
-		if !strings.Contains(content, `@_dynamicReplacement(for: body) private var __preview__body: some View {`) {
-			t.Errorf("thunk missing body replacement\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `@_dynamicReplacement(for: body) private var __preview__body: some View {`) {
+			t.Errorf("thunk missing body replacement\n\nGot:\n%s", perFile)
 		}
 	})
 
 	t.Run("PreviewWrapper", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n\n#Preview {\n    @Previewable @State var someModel = SomeModel()\n    HogeView()\n        .environment(someModel)\n}\n"
-		content := generate(t, "HogeView.swift", srcContent,
+		_, mainContent := generate(t, "HogeView.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
 				Types: []analysis.TypeInfo{
@@ -889,18 +352,18 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			`import UIKit`,
 		}
 		for _, c := range checks {
-			if !strings.Contains(content, c) {
-				t.Errorf("thunk missing %q\n\nGot:\n%s", c, content)
+			if !strings.Contains(mainContent, c) {
+				t.Errorf("main thunk missing %q\n\nGot:\n%s", c, mainContent)
 			}
 		}
-		if strings.Contains(content, "DebugReplaceableView") {
-			t.Errorf("thunk should not contain DebugReplaceableView\n\nGot:\n%s", content)
+		if strings.Contains(mainContent, "DebugReplaceableView") {
+			t.Errorf("main thunk should not contain DebugReplaceableView\n\nGot:\n%s", mainContent)
 		}
 	})
 
 	t.Run("PreviewBindingConversion", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    @Binding var isOn: Bool\n    var body: some View {\n        Toggle(\"Toggle\", isOn: $isOn)\n    }\n}\n\n#Preview {\n    @Previewable @Binding var isOn = true\n    HogeView(isOn: $isOn)\n}\n"
-		content := generate(t, "HogeView.swift", srcContent,
+		_, mainContent := generate(t, "HogeView.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
 				Types: []analysis.TypeInfo{
@@ -917,17 +380,17 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyApp",
 		)
 
-		if !strings.Contains(content, "@State var isOn = true") {
-			t.Errorf("thunk should convert @Binding to @State\n\nGot:\n%s", content)
+		if !strings.Contains(mainContent, "@State var isOn = true") {
+			t.Errorf("main thunk should convert @Binding to @State\n\nGot:\n%s", mainContent)
 		}
-		if strings.Contains(content, "@Binding") {
-			t.Errorf("thunk should not contain @Binding\n\nGot:\n%s", content)
+		if strings.Contains(mainContent, "@Binding") {
+			t.Errorf("main thunk should not contain @Binding\n\nGot:\n%s", mainContent)
 		}
 	})
 
 	t.Run("NoPreview", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n"
-		content := generate(t, "HogeView.swift", srcContent,
+		_, mainContent := generate(t, "HogeView.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
 				Types: []analysis.TypeInfo{
@@ -944,16 +407,16 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyApp",
 		)
 
-		if strings.Contains(content, "_AxePreviewWrapper") {
-			t.Errorf("thunk should not contain _AxePreviewWrapper without #Preview\n\nGot:\n%s", content)
+		if strings.Contains(mainContent, "_AxePreviewWrapper") {
+			t.Errorf("main thunk should not contain _AxePreviewWrapper without #Preview\n\nGot:\n%s", mainContent)
 		}
-		if !strings.Contains(content, `@_cdecl("axe_preview_refresh")`) {
-			t.Errorf("thunk missing axe_preview_refresh\n\nGot:\n%s", content)
+		if !strings.Contains(mainContent, `@_cdecl("axe_preview_refresh")`) {
+			t.Errorf("main thunk missing axe_preview_refresh\n\nGot:\n%s", mainContent)
 		}
 	})
 
 	t.Run("WithMethods", func(t *testing.T) {
-		content := generate(t, "HogeView.swift",
+		perFile, _ := generate(t, "HogeView.swift",
 			"import SwiftUI\nstruct HogeView: View {\n    var body: some View { Text(\"Hi\") }\n    func greet(name: String) -> String { \"Hello\" }\n}\n",
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
@@ -988,15 +451,15 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			`#sourceLocation()`,
 		}
 		for _, c := range checks {
-			if !strings.Contains(content, c) {
-				t.Errorf("thunk missing %q\n\nGot:\n%s", c, content)
+			if !strings.Contains(perFile, c) {
+				t.Errorf("per-file thunk missing %q\n\nGot:\n%s", c, perFile)
 			}
 		}
 	})
 
 	t.Run("MultipleViews", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        TextField(\"\", text: .constant(\"\"))\n    }\n}\n\nstruct FugaViewView: View {\n    var body: some View {\n        SecureField(\"\", text: .constant(\"\"))\n    }\n}\n\n#Preview(\"title\") {\n    HogeView()\n}\n"
-		content := generate(t, "Views.swift", srcContent,
+		perFile, mainContent := generate(t, "Views.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "Views.swift",
 				Types: []analysis.TypeInfo{
@@ -1021,26 +484,33 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyApp",
 		)
 
-		checks := []string{
+		perFileChecks := []string{
 			`extension HogeView {`,
 			`extension FugaViewView {`,
 			`@_dynamicReplacement(for: body) private var __preview__body: some View {`,
 			`TextField("", text: .constant(""))`,
 			`SecureField("", text: .constant(""))`,
-			`import struct MyApp.HogeView`,
-			`import struct MyApp.FugaViewView`,
+		}
+		for _, c := range perFileChecks {
+			if !strings.Contains(perFile, c) {
+				t.Errorf("per-file thunk missing %q\n\nGot:\n%s", c, perFile)
+			}
+		}
+
+		mainChecks := []string{
+			`@testable import MyApp`,
 			`struct _AxePreviewWrapper: View {`,
 		}
-		for _, c := range checks {
-			if !strings.Contains(content, c) {
-				t.Errorf("thunk missing %q\n\nGot:\n%s", c, content)
+		for _, c := range mainChecks {
+			if !strings.Contains(mainContent, c) {
+				t.Errorf("main thunk missing %q\n\nGot:\n%s", c, mainContent)
 			}
 		}
 	})
 
 	t.Run("NestedViews", func(t *testing.T) {
 		srcContent := "import SwiftUI\n\nstruct OuterView: View {\n    struct InnerView: View {\n        var body: some View {\n            Text(\"Inner\")\n        }\n    }\n    var body: some View {\n        InnerView()\n    }\n}\n\n#Preview {\n    OuterView()\n}\n"
-		content := generate(t, "OuterView.swift", srcContent,
+		perFile, mainContent := generate(t, "OuterView.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "OuterView.swift",
 				Types: []analysis.TypeInfo{
@@ -1065,22 +535,19 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyApp",
 		)
 
-		if !strings.Contains(content, `extension OuterView.InnerView {`) {
-			t.Errorf("thunk missing nested extension\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `extension OuterView.InnerView {`) {
+			t.Errorf("per-file thunk missing nested extension\n\nGot:\n%s", perFile)
 		}
-		if !strings.Contains(content, `extension OuterView {`) {
-			t.Errorf("thunk missing outer extension\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `extension OuterView {`) {
+			t.Errorf("per-file thunk missing outer extension\n\nGot:\n%s", perFile)
 		}
-		if !strings.Contains(content, `import struct MyApp.OuterView`) {
-			t.Errorf("thunk missing top-level import\n\nGot:\n%s", content)
-		}
-		if strings.Contains(content, `import struct MyApp.OuterView.InnerView`) {
-			t.Errorf("thunk should not contain nested import struct\n\nGot:\n%s", content)
+		if !strings.Contains(mainContent, `@testable import MyApp`) {
+			t.Errorf("main thunk missing @testable import\n\nGot:\n%s", mainContent)
 		}
 	})
 
 	t.Run("ExtraImports", func(t *testing.T) {
-		content := generate(t, "HogeView.swift",
+		perFile, _ := generate(t, "HogeView.swift",
 			"import SwiftUI\nimport SomeFramework\nstruct HogeView: View {\n    var body: some View { Text(\"Hello\") }\n}\n",
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
@@ -1099,13 +566,161 @@ func TestGenerateCombinedThunk_SingleFile(t *testing.T) {
 			"MyModule",
 		)
 
-		if !strings.Contains(content, `import SomeFramework`) {
-			t.Errorf("thunk missing extra import from fileThunkData.Imports\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `import SomeFramework`) {
+			t.Errorf("per-file thunk missing extra import from fileThunkData.Imports\n\nGot:\n%s", perFile)
 		}
-		if !strings.Contains(content, `@_private(sourceFile: "HogeView.swift") import MyModule`) {
-			t.Errorf("thunk missing @_private import\n\nGot:\n%s", content)
+		if !strings.Contains(perFile, `@_private(sourceFile: "HogeView.swift") import MyModule`) {
+			t.Errorf("per-file thunk missing @_private import\n\nGot:\n%s", perFile)
 		}
 	})
+}
+
+func TestGenerateThunks_DuplicateBasenames(t *testing.T) {
+	dir := t.TempDir()
+	thunkDir := filepath.Join(dir, "thunk")
+
+	// Two files with the same basename from different directories.
+	dir1 := filepath.Join(dir, "a")
+	dir2 := filepath.Join(dir, "b")
+	if err := os.MkdirAll(dir1, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	srcContent := "import SwiftUI\nstruct V: View { var body: some View { Text(\"Hi\") } }\n"
+	src1 := filepath.Join(dir1, "V.swift")
+	src2 := filepath.Join(dir2, "V.swift")
+	if err := os.WriteFile(src1, []byte(srcContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src2, []byte(srcContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := []analysis.FileThunkData{
+		{
+			FileName: "V.swift",
+			AbsPath:  src1,
+			Types: []analysis.TypeInfo{
+				{Name: "V1", Kind: "struct", InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{{Name: "body", TypeExpr: "some View", BodyLine: 2, Source: "Text(\"Hi\")"}}},
+			},
+		},
+		{
+			FileName: "V.swift",
+			AbsPath:  src2,
+			Types: []analysis.TypeInfo{
+				{Name: "V2", Kind: "struct", InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{{Name: "body", TypeExpr: "some View", BodyLine: 2, Source: "Text(\"Hi\")"}}},
+			},
+		},
+	}
+
+	thunkPaths, err := GenerateThunks(files, "MyApp", thunkDir, "", src1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2 per-file + 1 main = 3.
+	if len(thunkPaths) != 3 {
+		t.Fatalf("thunkPaths count = %d, want 3", len(thunkPaths))
+	}
+
+	// Verify the filenames are unique.
+	names := make(map[string]bool)
+	for _, p := range thunkPaths {
+		base := filepath.Base(p)
+		if names[base] {
+			t.Errorf("duplicate thunk filename: %s", base)
+		}
+		names[base] = true
+	}
+}
+
+func TestGenerateThunks_CrossModuleDependency(t *testing.T) {
+	dir := t.TempDir()
+	thunkDir := filepath.Join(dir, "thunk")
+
+	// Target file in MainApp
+	targetContent := "import SwiftUI\nstruct HogeView: View {\n    var body: some View { HelperView() }\n}\n#Preview { HogeView() }\n"
+	targetPath := filepath.Join(dir, "HogeView.swift")
+	if err := os.WriteFile(targetPath, []byte(targetContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dependency file in HelperLib (different module)
+	depContent := "import SwiftUI\nstruct HelperView: View {\n    var body: some View { Text(\"Helper\") }\n}\n"
+	depPath := filepath.Join(dir, "HelperView.swift")
+	if err := os.WriteFile(depPath, []byte(depContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := []analysis.FileThunkData{
+		{
+			FileName: "HogeView.swift",
+			AbsPath:  targetPath,
+			// No ModuleName → falls back to global "MainApp"
+			Types: []analysis.TypeInfo{
+				{
+					Name:           "HogeView",
+					Kind:           "struct",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", BodyLine: 3, Source: "        HelperView()"},
+					},
+				},
+			},
+		},
+		{
+			FileName:   "HelperView.swift",
+			AbsPath:    depPath,
+			ModuleName: "HelperLib", // Cross-module dependency
+			Types: []analysis.TypeInfo{
+				{
+					Name:           "HelperView",
+					Kind:           "struct",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", BodyLine: 3, Source: "        Text(\"Helper\")"},
+					},
+				},
+			},
+		},
+	}
+
+	thunkPaths, err := GenerateThunks(files, "MainApp", thunkDir, "", targetPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(thunkPaths) != 3 {
+		t.Fatalf("thunkPaths count = %d, want 3", len(thunkPaths))
+	}
+
+	// Target file thunk should import MainApp (fallback from empty ModuleName).
+	hogeThunk, err := os.ReadFile(thunkPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	hogeContent := string(hogeThunk)
+	if !strings.Contains(hogeContent, `@_private(sourceFile: "HogeView.swift") import MainApp`) {
+		t.Errorf("target thunk should import MainApp\n\nGot:\n%s", hogeContent)
+	}
+
+	// Cross-module dependency thunk should import HelperLib (not MainApp).
+	helperThunk, err := os.ReadFile(thunkPaths[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	helperContent := string(helperThunk)
+	if !strings.Contains(helperContent, `@_private(sourceFile: "HelperView.swift") import HelperLib`) {
+		t.Errorf("cross-module dep thunk should import HelperLib\n\nGot:\n%s", helperContent)
+	}
+	if strings.Contains(helperContent, `import MainApp`) {
+		t.Errorf("cross-module dep thunk should NOT import MainApp\n\nGot:\n%s", helperContent)
+	}
 }
 
 func TestTypeInfo_IsView(t *testing.T) {

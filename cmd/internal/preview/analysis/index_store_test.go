@@ -76,68 +76,29 @@ func TestIndexStoreCache_TypeFileMultiMap(t *testing.T) {
 	}
 }
 
-func TestIndexStoreCache_AmbiguousTypeNames(t *testing.T) {
-	cache := &IndexStoreCache{
-		files: map[string]*pb.IndexFileData{
-			"/project/ExportView.swift": {
-				FilePath: "/project/ExportView.swift",
-				Types: []*pb.IndexTypeInfo{
-					{Name: "ExportView"},
-					{Name: "DataFormatter"},
-				},
-			},
-			"/project/ShareView.swift": {
-				FilePath: "/project/ShareView.swift",
-				Types: []*pb.IndexTypeInfo{
-					{Name: "ShareView"},
-					{Name: "DataFormatter"},
-				},
-			},
-			"/project/TodoItem.swift": {
-				FilePath: "/project/TodoItem.swift",
-				Types: []*pb.IndexTypeInfo{
-					{Name: "TodoItem"},
-				},
-			},
-		},
-		typeMap: map[string][]string{},
-	}
-
-	ambiguous := cache.AmbiguousTypeNames()
-
-	// DataFormatter defined in 2 files → ambiguous.
-	if !ambiguous["DataFormatter"] {
-		t.Error("DataFormatter should be ambiguous")
-	}
-	// Unique types should not be ambiguous.
-	if ambiguous["ExportView"] {
-		t.Error("ExportView should not be ambiguous")
-	}
-	if ambiguous["ShareView"] {
-		t.Error("ShareView should not be ambiguous")
-	}
-	if ambiguous["TodoItem"] {
-		t.Error("TodoItem should not be ambiguous")
-	}
-	if len(ambiguous) != 1 {
-		t.Errorf("ambiguous count = %d, want 1", len(ambiguous))
-	}
-}
-
-func TestIndexStoreCache_AmbiguousTypeNames_Empty(t *testing.T) {
+func TestIndexStoreCache_FileModuleName(t *testing.T) {
 	cache := &IndexStoreCache{
 		files: map[string]*pb.IndexFileData{
 			"/project/A.swift": {
-				FilePath: "/project/A.swift",
-				Types:    []*pb.IndexTypeInfo{{Name: "AType"}},
+				FilePath:   "/project/A.swift",
+				ModuleName: "MainApp",
+			},
+			"/lib/B.swift": {
+				FilePath:   "/lib/B.swift",
+				ModuleName: "HelperLib",
 			},
 		},
 		typeMap: map[string][]string{},
 	}
 
-	ambiguous := cache.AmbiguousTypeNames()
-	if len(ambiguous) != 0 {
-		t.Errorf("ambiguous = %v, want empty", ambiguous)
+	if got := cache.FileModuleName("/project/A.swift"); got != "MainApp" {
+		t.Errorf("FileModuleName(A.swift) = %q, want %q", got, "MainApp")
+	}
+	if got := cache.FileModuleName("/lib/B.swift"); got != "HelperLib" {
+		t.Errorf("FileModuleName(B.swift) = %q, want %q", got, "HelperLib")
+	}
+	if got := cache.FileModuleName("/unknown.swift"); got != "" {
+		t.Errorf("FileModuleName(unknown) = %q, want empty", got)
 	}
 }
 

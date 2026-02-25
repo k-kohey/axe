@@ -17,8 +17,10 @@ func ReplacementModuleName(moduleName, sourceFileName string, counter int) strin
 	return fmt.Sprintf("%s_PreviewReplacement_%s_%d", moduleName, base, counter)
 }
 
-// CompileThunk compiles a thunk Swift file into a signed dylib.
-func CompileThunk(ctx context.Context, thunkPath string, cfg CompileConfig, thunkDir, buildDir string, reloadCounter int, sourceFileName string, tc ToolchainRunner) (string, error) {
+// CompileThunk compiles multiple thunk Swift files into a signed dylib.
+// The compile and link steps are unified into a single swiftc invocation
+// that takes multiple .swift files and produces a .dylib directly.
+func CompileThunk(ctx context.Context, thunkPaths []string, cfg CompileConfig, thunkDir, buildDir string, reloadCounter int, sourceFileName string, tc ToolchainRunner) (string, error) {
 	sdk, err := tc.SDKPath(ctx, "iphonesimulator")
 	if err != nil {
 		return "", fmt.Errorf("getting simulator SDK path: %w", err)
@@ -27,11 +29,10 @@ func CompileThunk(ctx context.Context, thunkPath string, cfg CompileConfig, thun
 
 	replacementModule := ReplacementModuleName(cfg.ModuleName, sourceFileName, reloadCounter)
 
-	objPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d.o", reloadCounter))
 	dylibPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d.dylib", reloadCounter))
 
 	// Compile and link under shared lock (reads BuiltProductsDir).
-	if err := compileAndLink(ctx, cfg, buildDir, sdk, target, replacementModule, thunkPath, objPath, dylibPath, tc); err != nil {
+	if err := compileAndLink(ctx, cfg, buildDir, sdk, target, replacementModule, thunkPaths, dylibPath, tc); err != nil {
 		return "", err
 	}
 
@@ -44,18 +45,21 @@ func CompileThunk(ctx context.Context, thunkPath string, cfg CompileConfig, thun
 	return dylibPath, nil
 }
 
-// compileAndLink runs swiftc compile (.swift → .o) and link (.o → .dylib)
-// under LOCK_SH to protect against concurrent xcodebuild writes to buildDir.
-func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, target, replacementModule, thunkPath, objPath, dylibPath string, tc ToolchainRunner) error {
+// compileAndLink runs a single swiftc invocation that compiles multiple .swift files
+// directly into a .dylib. Uses -enable-private-imports so that per-file thunks can
+// access private members via @_private(sourceFile:) imports. Each per-file thunk
+// scopes its @_private import to a single source file, preventing private type collisions.
+func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, target, replacementModule string, thunkPaths []string, dylibPath string, tc ToolchainRunner) error {
 	lock := buildlock.New(buildDir)
 	if err := lock.RLock(ctx); err != nil {
 		return fmt.Errorf("acquiring read lock: %w", err)
 	}
 	defer lock.RUnlock()
 
-	// .swift -> .o
-	compileArgs := []string{
+	// .swift files -> .dylib (unified compile+link)
+	args := []string{
 		"xcrun", "swiftc",
+		"-emit-library",
 		"-enforce-exclusivity=checked",
 		"-DDEBUG",
 		"-sdk", sdk,
@@ -63,24 +67,28 @@ func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, targe
 		"-enable-testing",
 		"-I", cfg.BuiltProductsDir,
 		"-F", cfg.BuiltProductsDir,
-		"-c", thunkPath,
-		"-o", objPath,
+		"-L", cfg.BuiltProductsDir,
 		"-module-name", replacementModule,
 		"-parse-as-library",
 		"-Onone",
 		"-gline-tables-only",
 		"-Xfrontend", "-disable-previous-implementation-calls-in-dynamic-replacements",
 		"-Xfrontend", "-disable-modules-validate-system-headers",
-		"-Xfrontend", "-disable-access-control",
+		"-Xfrontend", "-enable-private-imports",
+		"-Xlinker", "-undefined",
+		"-Xlinker", "suppress",
+		"-Xlinker", "-flat_namespace",
+		"-o", dylibPath,
 	}
+	args = append(args, thunkPaths...)
 	for _, p := range cfg.ExtraIncludePaths {
-		compileArgs = append(compileArgs, "-I", p)
+		args = append(args, "-I", p)
 	}
 	for _, p := range cfg.ExtraFrameworkPaths {
-		compileArgs = append(compileArgs, "-F", p)
+		args = append(args, "-F", p)
 	}
 	for _, p := range cfg.ExtraModuleMapFiles {
-		compileArgs = append(compileArgs, "-Xcc", "-fmodule-map-file="+p)
+		args = append(args, "-Xcc", "-fmodule-map-file="+p)
 	}
 	if cfg.SwiftVersion != "" {
 		// SWIFT_VERSION may be "6.0" but -swift-version expects "6", "5", "4.2", etc.
@@ -88,32 +96,11 @@ func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, targe
 		if strings.HasSuffix(sv, ".0") && sv != "4.0" {
 			sv = strings.TrimSuffix(sv, ".0")
 		}
-		compileArgs = append(compileArgs, "-swift-version", sv)
+		args = append(args, "-swift-version", sv)
 	}
-	slog.Debug("Compiling thunk .swift -> .o", "args", compileArgs)
-	if out, err := tc.CompileSwift(ctx, compileArgs); err != nil {
-		return fmt.Errorf("compiling thunk.swift -> .o: %w\n%s", err, out)
-	}
-
-	// .o -> .dylib
-	linkArgs := []string{
-		"xcrun", "swiftc",
-		"-emit-library",
-		"-sdk", sdk,
-		"-target", target,
-		"-I", cfg.BuiltProductsDir,
-		"-F", cfg.BuiltProductsDir,
-		"-L", cfg.BuiltProductsDir,
-		"-Xlinker", "-undefined",
-		"-Xlinker", "suppress",
-		"-Xlinker", "-flat_namespace",
-		"-module-name", replacementModule,
-		objPath,
-		"-o", dylibPath,
-	}
-	slog.Debug("Linking thunk .o -> .dylib", "args", linkArgs)
-	if out, err := tc.LinkDylib(ctx, linkArgs); err != nil {
-		return fmt.Errorf("linking thunk.o -> .dylib: %w\n%s", err, out)
+	slog.Debug("Compiling thunk .swift -> .dylib", "args", args)
+	if out, err := tc.CompileSwift(ctx, args); err != nil {
+		return fmt.Errorf("compiling thunk: %w\n%s", err, out)
 	}
 
 	return nil

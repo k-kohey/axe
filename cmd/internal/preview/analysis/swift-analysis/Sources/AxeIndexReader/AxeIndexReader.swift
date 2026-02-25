@@ -41,6 +41,7 @@ struct IndexFileDataOutput: Codable, Sendable {
   let types: [IndexTypeInfoOutput]
   let referencedTypeNames: [String]
   let definedTypeNames: [String]
+  let moduleName: String
 }
 
 struct IndexTypeInfoOutput: Codable, Sendable {
@@ -89,6 +90,7 @@ private struct FileAccumulator {
   var types: [String: TypeBuilder] = [:]  // USR → TypeBuilder
   var referencedTypeNames: Set<String> = []
   var definedTypeNames: Set<String> = []
+  var moduleName: String = ""
 }
 
 // MARK: - Core logic
@@ -145,7 +147,7 @@ func readIndexStore(
     }
 
     if fileAccumulators[mainFile] == nil {
-      fileAccumulators[mainFile] = FileAccumulator()
+      fileAccumulators[mainFile] = FileAccumulator(moduleName: unit.moduleName)
     }
 
     // swift-format-ignore: ReplaceForEachWithForLoop
@@ -283,7 +285,8 @@ func readIndexStore(
         filePath: filePath,
         types: types,
         referencedTypeNames: Array(acc.referencedTypeNames).sorted(),
-        definedTypeNames: Array(acc.definedTypeNames).sorted()
+        definedTypeNames: Array(acc.definedTypeNames).sorted(),
+        moduleName: acc.moduleName
       ))
   }
 
@@ -318,8 +321,8 @@ private func accessLevel(from properties: SymbolProperty) -> String {
   // NOTE: The Index Store SDK does not reliably populate access level
   // properties (rawValue is 0 for most symbols). The access level returned
   // here may be inaccurate — callers should not depend on it for critical
-  // filtering decisions. See FilterPrivateCollisions for an alternative
-  // approach that uses parser-derived access levels.
+  // filtering decisions. The Go-side parser_swift.go supplements this with
+  // parser-derived access levels from type_access_levels.
   if properties.contains(.swiftAccessControlPublic) { return "public" }
   if properties.contains(.swiftAccessControlPackage) { return "package" }
   if properties.contains(.swiftAccessControlInternal) { return "internal" }

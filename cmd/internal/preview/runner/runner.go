@@ -42,10 +42,6 @@ func (r *Toolchain) CompileSwift(ctx context.Context, args []string) ([]byte, er
 	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
-func (r *Toolchain) LinkDylib(ctx context.Context, args []string) ([]byte, error) {
-	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
-}
-
 func (r *Toolchain) CompileC(ctx context.Context, args []string) ([]byte, error) {
 	return exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
 }

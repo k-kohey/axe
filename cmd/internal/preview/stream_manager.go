@@ -456,14 +456,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		return
 	}
 
-	// 9. Generate thunk and compile.
-	thunkPath, err := codegen.GenerateCombinedThunk(files, bs.ModuleName, s.dirs.Thunk, "0", s.file)
+	// 9. Generate thunks and compile.
+	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPath, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return

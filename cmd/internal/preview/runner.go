@@ -16,7 +16,6 @@ type BuildRunner interface {
 type ToolchainRunner interface {
 	SDKPath(ctx context.Context, sdk string) (string, error)
 	CompileSwift(ctx context.Context, args []string) ([]byte, error)
-	LinkDylib(ctx context.Context, args []string) ([]byte, error)
 	CompileC(ctx context.Context, args []string) ([]byte, error)
 	Codesign(ctx context.Context, path string) error
 }

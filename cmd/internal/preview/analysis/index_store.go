@@ -90,33 +90,14 @@ func (c *IndexStoreCache) FileData(path string) *pb.IndexFileData {
 	return c.files[path]
 }
 
-// AmbiguousTypeNames returns type names that are defined in multiple files.
-// In a well-formed Swift module, this only happens for private/fileprivate
-// types. These names will cause "'X' is ambiguous for type lookup" errors
-// when compiled with -enable-private-imports because all private types
-// become visible across files.
-func (c *IndexStoreCache) AmbiguousTypeNames() map[string]bool {
+// FileModuleName returns the Swift module name for the given file path.
+// Returns empty string if the file is not in the cache or has no module info.
+func (c *IndexStoreCache) FileModuleName(path string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-
-	// Collect type names with the set of files they are defined in.
-	nameFiles := make(map[string]map[string]bool)
-	for path, fd := range c.files {
-		for _, t := range fd.GetTypes() {
-			name := t.GetName()
-			if nameFiles[name] == nil {
-				nameFiles[name] = make(map[string]bool)
-			}
-			nameFiles[name][path] = true
-		}
+	fd := c.files[path]
+	if fd == nil {
+		return ""
 	}
-
-	// Names defined in multiple files are ambiguous.
-	ambiguous := make(map[string]bool)
-	for name, paths := range nameFiles {
-		if len(paths) > 1 {
-			ambiguous[name] = true
-		}
-	}
-	return ambiguous
+	return fd.GetModuleName()
 }

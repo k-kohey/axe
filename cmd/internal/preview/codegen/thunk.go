@@ -13,36 +13,23 @@ import (
 
 // thunkFuncMap provides helper functions for thunk templates.
 var thunkFuncMap = template.FuncMap{
-	// topLevelName extracts the top-level type name from a potentially qualified name.
-	// e.g. "HelloView.HogeView" → "HelloView", "SimpleView" → "SimpleView"
-	"topLevelName": func(name string) string {
-		if before, _, ok := strings.Cut(name, "."); ok {
-			return before
-		}
-		return name
-	},
 	// escapeSwiftString escapes backslashes and double quotes for use inside Swift string literals.
 	"escapeSwiftString": func(s string) string {
 		s = strings.ReplaceAll(s, `\`, `\\`)
 		s = strings.ReplaceAll(s, `"`, `\"`)
 		return s
 	},
-	// isView returns true if the typeInfo conforms to View.
-	"isView": func(t analysis.TypeInfo) bool {
-		return t.IsView()
-	},
 }
 
-// ThunkTmpl generates a combined thunk for one or more source files.
-// Each file gets its own @_private import to access private members used in bodies.
-// Files with private type name collisions must be excluded before calling this.
-// Only the target file's #Preview is used for the preview wrapper.
-var ThunkTmpl = template.Must(template.New("thunk").Funcs(thunkFuncMap).Parse(
-	`{{ range .Files }}@_private(sourceFile: "{{ .FileName | escapeSwiftString }}") import {{ $.ModuleName }}
-{{ end }}import SwiftUI
+// PerFileThunkTmpl generates a per-file thunk that imports only its own source file
+// via @_private(sourceFile:). This scoping prevents private type name collisions
+// across files because each thunk only sees the private types from its own file.
+var PerFileThunkTmpl = template.Must(template.New("perFileThunk").Funcs(thunkFuncMap).Parse(
+	`@_private(sourceFile: "{{ .FileName | escapeSwiftString }}") import {{ .ModuleName }}
+import SwiftUI
 {{ range .ExtraImports }}{{ . }}
 {{ end }}
-{{ range .Files }}{{ $filePath := .AbsPath }}{{ range .Types }}extension {{ .Name }} {
+{{ $filePath := .AbsPath }}{{ range .Types }}extension {{ .Name }} {
 {{ range .Properties }}    @_dynamicReplacement(for: {{ .Name }}) private var __preview__{{ .Name }}: {{ .TypeExpr }} {
         #sourceLocation(file: "{{ $filePath | escapeSwiftString }}", line: {{ .BodyLine }})
 {{ .Source }}
@@ -55,11 +42,22 @@ var ThunkTmpl = template.Must(template.New("thunk").Funcs(thunkFuncMap).Parse(
         #sourceLocation()
     }
 {{ end }}}
-{{ end }}{{ end }}
+{{ end }}`))
+
+// MainThunkTmpl generates the main thunk containing the preview wrapper and
+// refresh entry point. It does NOT use @_private import, so it only sees
+// internal/public types.
+//
+// TODO: #Preview blocks that reference private/fileprivate types will fail to
+// compile because @testable import only exposes internal types. To support this,
+// the preview body would need to be emitted into the per-file thunk (which has
+// @_private access), or the main thunk would need its own @_private import for
+// the target file. See TestThunkCompilation_PreviewWithPrivateType.
+var MainThunkTmpl = template.Must(template.New("mainThunk").Funcs(thunkFuncMap).Parse(
+	`import SwiftUI
 {{ if .HasPreview }}
-{{/* TODO: topLevelName may produce duplicate imports when nested views share a parent (e.g. OuterView and OuterView.InnerView both emit "import struct Module.OuterView"). Swift tolerates duplicates, but deduplication would be cleaner. */}}
-{{ range .TargetTypes }}{{ if isView . }}import struct {{ $.ModuleName }}.{{ topLevelName .Name }}
-{{ end }}{{ end }}
+@testable import {{ .ModuleName }}
+
 struct _AxePreviewWrapper: View {
 {{ range .PreviewProps }}    {{ .Source }}
 {{ end }}
@@ -85,58 +83,97 @@ public func _axePreviewRefresh() {
 }
 `))
 
-// ThunkTemplateData holds the data used to render the thunk template.
-type ThunkTemplateData struct {
-	Files        []analysis.FileThunkData
+// PerFileThunkData holds the data used to render a per-file thunk template.
+type PerFileThunkData struct {
+	FileName     string
+	AbsPath      string
 	ModuleName   string
 	ExtraImports []string
+	Types        []analysis.TypeInfo
+}
+
+// MainThunkData holds the data used to render the main thunk template.
+type MainThunkData struct {
+	ModuleName   string
 	HasPreview   bool
-	TargetTypes  []analysis.TypeInfo
 	PreviewProps []analysis.PreviewableProperty
 	PreviewBody  string
 }
 
-// GenerateCombinedThunk generates a single thunk.swift covering multiple source files.
-// The targetSourceFile is the file whose #Preview is used.
-func GenerateCombinedThunk(
+// GenerateThunks generates per-file thunks and a main thunk.
+// Each per-file thunk has its own @_private(sourceFile:) import, so private types
+// from different files never collide. The main thunk contains the preview wrapper
+// and refresh entry point.
+//
+// Returns the list of all generated thunk paths (per-file + main).
+func GenerateThunks(
 	files []analysis.FileThunkData,
 	moduleName string,
 	thunkDir string,
 	previewSelector string,
 	targetSourceFile string,
-) (retPath string, retErr error) {
-	slog.Debug("Generating combined thunk")
+	reloadCounter int,
+) (thunkPaths []string, retErr error) {
+	slog.Debug("Generating per-file thunks")
 
 	if err := os.MkdirAll(thunkDir, 0o755); err != nil {
-		return "", fmt.Errorf("creating thunk dir: %w", err)
+		return nil, fmt.Errorf("creating thunk dir: %w", err)
 	}
 
-	// Collect unique extra imports from all files.
-	importSet := make(map[string]bool)
+	// Clean up old thunk files from the current cycle prefix.
+	cleanOldThunkFiles(thunkDir, reloadCounter)
+
+	// Track basename usage to handle duplicate file names.
+	baseNameCount := make(map[string]int)
 	for _, f := range files {
-		for _, imp := range f.Imports {
-			importSet[imp] = true
-		}
+		base := strings.TrimSuffix(filepath.Base(f.AbsPath), filepath.Ext(f.AbsPath))
+		baseNameCount[base]++
 	}
-	var extraImports []string
-	for imp := range importSet {
-		extraImports = append(extraImports, imp)
-	}
+	baseNameSeen := make(map[string]int)
 
-	// Find target types for the preview wrapper import.
-	var targetTypes []analysis.TypeInfo
+	// Generate per-file thunks.
 	for _, f := range files {
-		if f.AbsPath == targetSourceFile {
-			targetTypes = f.Types
-			break
+		base := strings.TrimSuffix(filepath.Base(f.AbsPath), filepath.Ext(f.AbsPath))
+
+		// Handle duplicate basenames by appending an index.
+		fileName := base
+		if baseNameCount[base] > 1 {
+			idx := baseNameSeen[base]
+			baseNameSeen[base]++
+			if idx > 0 {
+				fileName = fmt.Sprintf("%s_%d", base, idx)
+			}
 		}
+
+		thunkFileName := fmt.Sprintf("thunk_%d_%s.swift", reloadCounter, fileName)
+		thunkPath := filepath.Join(thunkDir, thunkFileName)
+
+		// Use per-file module name from index store if available.
+		// Falls back to the main module name when the file's module is unknown
+		// (e.g. index store not loaded or file not in index store).
+		fileModuleName := f.ModuleName
+		if fileModuleName == "" {
+			fileModuleName = moduleName
+		}
+
+		td := PerFileThunkData{
+			FileName:     f.FileName,
+			AbsPath:      f.AbsPath,
+			ModuleName:   fileModuleName,
+			ExtraImports: f.Imports,
+			Types:        f.Types,
+		}
+
+		if err := writeTemplate(thunkPath, PerFileThunkTmpl, td); err != nil {
+			return nil, fmt.Errorf("generating per-file thunk for %s: %w", f.FileName, err)
+		}
+
+		thunkPaths = append(thunkPaths, thunkPath)
 	}
 
-	td := ThunkTemplateData{
-		Files:        files,
-		ModuleName:   moduleName,
-		ExtraImports: extraImports,
-		TargetTypes:  targetTypes,
+	// Build main thunk data.
+	mtd := MainThunkData{
+		ModuleName: moduleName,
 	}
 
 	// Parse #Preview blocks from the target source file.
@@ -148,29 +185,52 @@ func GenerateCombinedThunk(
 	if len(previews) > 0 {
 		selected, err := analysis.SelectPreview(previews, previewSelector)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		tp := analysis.TransformPreviewBlock(selected)
-		td.HasPreview = true
-		td.PreviewProps = tp.Properties
-		td.PreviewBody = tp.BodySource
+		mtd.HasPreview = true
+		mtd.PreviewProps = tp.Properties
+		mtd.PreviewBody = tp.BodySource
 	}
 
-	thunkPath := filepath.Join(thunkDir, "thunk.swift")
-	f, err := os.Create(thunkPath)
+	mainThunkPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d__main.swift", reloadCounter))
+	if err := writeTemplate(mainThunkPath, MainThunkTmpl, mtd); err != nil {
+		return nil, fmt.Errorf("generating main thunk: %w", err)
+	}
+	thunkPaths = append(thunkPaths, mainThunkPath)
+
+	slog.Debug("Generated thunks", "count", len(thunkPaths), "files", len(files))
+	return thunkPaths, nil
+}
+
+// writeTemplate renders a template to a file.
+func writeTemplate(path string, tmpl *template.Template, data any) (retErr error) {
+	f, err := os.Create(path)
 	if err != nil {
-		return "", fmt.Errorf("creating thunk file: %w", err)
+		return fmt.Errorf("creating file: %w", err)
 	}
 	defer func() {
 		if cerr := f.Close(); cerr != nil && retErr == nil {
-			retErr = fmt.Errorf("closing thunk file: %w", cerr)
+			retErr = fmt.Errorf("closing file: %w", cerr)
 		}
 	}()
 
-	if err := ThunkTmpl.Execute(f, td); err != nil {
-		return "", fmt.Errorf("executing thunk template: %w", err)
+	if err := tmpl.Execute(f, data); err != nil {
+		return fmt.Errorf("executing template: %w", err)
 	}
+	return nil
+}
 
-	slog.Debug("Generated combined thunk", "path", thunkPath, "files", len(files))
-	return thunkPath, nil
+// cleanOldThunkFiles removes thunk Swift files from a previous cycle.
+func cleanOldThunkFiles(thunkDir string, currentCounter int) {
+	pattern := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d_*.swift", currentCounter))
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		if err := os.Remove(m); err == nil {
+			slog.Debug("Cleaned old thunk file", "path", m)
+		}
+	}
 }

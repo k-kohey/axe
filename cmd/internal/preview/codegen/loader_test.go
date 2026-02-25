@@ -155,11 +155,6 @@ func (f *fakeLoaderToolchain) CompileSwift(_ context.Context, _ []string) ([]byt
 	return nil, nil
 }
 
-func (f *fakeLoaderToolchain) LinkDylib(_ context.Context, _ []string) ([]byte, error) {
-	f.callOrder = append(f.callOrder, "LinkDylib")
-	return nil, nil
-}
-
 func (f *fakeLoaderToolchain) CompileC(_ context.Context, _ []string) ([]byte, error) {
 	f.callOrder = append(f.callOrder, "CompileC")
 	return nil, f.compileCErr
