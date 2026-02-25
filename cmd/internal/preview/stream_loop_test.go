@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,13 +13,27 @@ import (
 
 // fakeCompanion implements companionProcess for testing.
 type fakeCompanion struct {
-	doneCh chan struct{}
-	err    error
+	doneCh  chan struct{}
+	stopped atomic.Bool
+	err     error
+}
+
+func newFakeCompanion() *fakeCompanion {
+	return &fakeCompanion{doneCh: make(chan struct{})}
 }
 
 func (f *fakeCompanion) Done() <-chan struct{} { return f.doneCh }
 func (f *fakeCompanion) Err() error            { return f.err }
-func (f *fakeCompanion) Stop() error           { return nil }
+func (f *fakeCompanion) Stop() error {
+	f.stopped.Store(true)
+	select {
+	case <-f.doneCh:
+		// Already closed.
+	default:
+		close(f.doneCh)
+	}
+	return nil
+}
 
 // newTestStream creates a stream with initialized channels for testing the event loop.
 func newTestStream(id string) *stream {
