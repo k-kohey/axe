@@ -585,8 +585,11 @@ type ParseResult struct {
 	Previews      []*PreviewBlock        `protobuf:"bytes,3,rep,name=previews,proto3" json:"previews,omitempty"`
 	SkeletonHash  string                 `protobuf:"bytes,4,opt,name=skeleton_hash,json=skeletonHash,proto3" json:"skeleton_hash,omitempty"`
 	MemberSources []*MemberSource        `protobuf:"bytes,7,rep,name=member_sources,json=memberSources,proto3" json:"member_sources,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Parser-derived access levels for type declarations (typeName → "private", "internal", etc.).
+	// Supplements Index Store data which does not reliably report access levels.
+	TypeAccessLevels map[string]string `protobuf:"bytes,8,rep,name=type_access_levels,json=typeAccessLevels,proto3" json:"type_access_levels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ParseResult) Reset() {
@@ -643,6 +646,13 @@ func (x *ParseResult) GetSkeletonHash() string {
 func (x *ParseResult) GetMemberSources() []*MemberSource {
 	if x != nil {
 		return x.MemberSources
+	}
+	return nil
+}
+
+func (x *ParseResult) GetTypeAccessLevels() map[string]string {
+	if x != nil {
+		return x.TypeAccessLevels
 	}
 	return nil
 }
@@ -1027,12 +1037,16 @@ const file_analysis_proto_rawDesc = "" +
 	"\tsignature\x18\x06 \x01(\tR\tsignature\x12\x1a\n" +
 	"\bselector\x18\a \x01(\tR\bselector\x12\x1b\n" +
 	"\tbody_line\x18\b \x01(\x05R\bbodyLine\x12\x16\n" +
-	"\x06source\x18\t \x01(\tR\x06source\"\xd9\x01\n" +
+	"\x06source\x18\t \x01(\tR\x06source\"\xfd\x02\n" +
 	"\vParseResult\x12\x18\n" +
 	"\aimports\x18\x02 \x03(\tR\aimports\x126\n" +
 	"\bpreviews\x18\x03 \x03(\v2\x1a.axe.analysis.PreviewBlockR\bpreviews\x12#\n" +
 	"\rskeleton_hash\x18\x04 \x01(\tR\fskeletonHash\x12A\n" +
-	"\x0emember_sources\x18\a \x03(\v2\x1a.axe.analysis.MemberSourceR\rmemberSourcesJ\x04\b\x01\x10\x02J\x04\b\x05\x10\x06J\x04\b\x06\x10\a\"\x83\x01\n" +
+	"\x0emember_sources\x18\a \x03(\v2\x1a.axe.analysis.MemberSourceR\rmemberSources\x12]\n" +
+	"\x12type_access_levels\x18\b \x03(\v2/.axe.analysis.ParseResult.TypeAccessLevelsEntryR\x10typeAccessLevels\x1aC\n" +
+	"\x15TypeAccessLevelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02J\x04\b\x05\x10\x06J\x04\b\x06\x10\a\"\x83\x01\n" +
 	"\vTypeFileMap\x12:\n" +
 	"\x05types\x18\x01 \x03(\v2$.axe.analysis.TypeFileMap.TypesEntryR\x05types\x1a8\n" +
 	"\n" +
@@ -1098,7 +1112,7 @@ func file_analysis_proto_rawDescGZIP() []byte {
 }
 
 var file_analysis_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_analysis_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_analysis_proto_goTypes = []any{
 	(TypeKind)(0),            // 0: axe.analysis.TypeKind
 	(MemberSourceKind)(0),    // 1: axe.analysis.MemberSourceKind
@@ -1114,8 +1128,9 @@ var file_analysis_proto_goTypes = []any{
 	(*IndexTypeInfo)(nil),    // 11: axe.analysis.IndexTypeInfo
 	(*IndexFileData)(nil),    // 12: axe.analysis.IndexFileData
 	(*IndexStoreResult)(nil), // 13: axe.analysis.IndexStoreResult
-	nil,                      // 14: axe.analysis.TypeFileMap.TypesEntry
-	nil,                      // 15: axe.analysis.IndexStoreResult.TypeFileMapEntry
+	nil,                      // 14: axe.analysis.ParseResult.TypeAccessLevelsEntry
+	nil,                      // 15: axe.analysis.TypeFileMap.TypesEntry
+	nil,                      // 16: axe.analysis.IndexStoreResult.TypeFileMapEntry
 }
 var file_analysis_proto_depIdxs = []int32{
 	0,  // 0: axe.analysis.TypeInfo.kind:type_name -> axe.analysis.TypeKind
@@ -1124,18 +1139,19 @@ var file_analysis_proto_depIdxs = []int32{
 	1,  // 3: axe.analysis.MemberSource.kind:type_name -> axe.analysis.MemberSourceKind
 	6,  // 4: axe.analysis.ParseResult.previews:type_name -> axe.analysis.PreviewBlock
 	7,  // 5: axe.analysis.ParseResult.member_sources:type_name -> axe.analysis.MemberSource
-	14, // 6: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
-	2,  // 7: axe.analysis.IndexMemberInfo.kind:type_name -> axe.analysis.MemberKind
-	0,  // 8: axe.analysis.IndexTypeInfo.kind:type_name -> axe.analysis.TypeKind
-	10, // 9: axe.analysis.IndexTypeInfo.members:type_name -> axe.analysis.IndexMemberInfo
-	11, // 10: axe.analysis.IndexFileData.types:type_name -> axe.analysis.IndexTypeInfo
-	12, // 11: axe.analysis.IndexStoreResult.files:type_name -> axe.analysis.IndexFileData
-	15, // 12: axe.analysis.IndexStoreResult.type_file_map:type_name -> axe.analysis.IndexStoreResult.TypeFileMapEntry
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	14, // 6: axe.analysis.ParseResult.type_access_levels:type_name -> axe.analysis.ParseResult.TypeAccessLevelsEntry
+	15, // 7: axe.analysis.TypeFileMap.types:type_name -> axe.analysis.TypeFileMap.TypesEntry
+	2,  // 8: axe.analysis.IndexMemberInfo.kind:type_name -> axe.analysis.MemberKind
+	0,  // 9: axe.analysis.IndexTypeInfo.kind:type_name -> axe.analysis.TypeKind
+	10, // 10: axe.analysis.IndexTypeInfo.members:type_name -> axe.analysis.IndexMemberInfo
+	11, // 11: axe.analysis.IndexFileData.types:type_name -> axe.analysis.IndexTypeInfo
+	12, // 12: axe.analysis.IndexStoreResult.files:type_name -> axe.analysis.IndexFileData
+	16, // 13: axe.analysis.IndexStoreResult.type_file_map:type_name -> axe.analysis.IndexStoreResult.TypeFileMapEntry
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_analysis_proto_init() }
@@ -1149,7 +1165,7 @@ func file_analysis_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_analysis_proto_rawDesc), len(file_analysis_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

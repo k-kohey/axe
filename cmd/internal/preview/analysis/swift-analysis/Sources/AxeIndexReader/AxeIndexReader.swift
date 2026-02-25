@@ -315,6 +315,11 @@ private func symbolKindToMemberKind(_ kind: SymbolKind) -> Int {
 }
 
 private func accessLevel(from properties: SymbolProperty) -> String {
+  // NOTE: The Index Store SDK does not reliably populate access level
+  // properties (rawValue is 0 for most symbols). The access level returned
+  // here may be inaccurate — callers should not depend on it for critical
+  // filtering decisions. See FilterPrivateCollisions for an alternative
+  // approach that uses parser-derived access levels.
   if properties.contains(.swiftAccessControlPublic) { return "public" }
   if properties.contains(.swiftAccessControlPackage) { return "package" }
   if properties.contains(.swiftAccessControlInternal) { return "internal" }

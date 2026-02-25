@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -170,10 +171,18 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 			typeName = qn
 		}
 
+		// Use parser-derived access level (accurate) over Index Store's (unreliable).
+		// The Index Store SDK does not populate SymbolProperty access control flags
+		// (rawValue is 0 for most symbols), so its access_level is always "internal".
+		accessLevel := idxType.GetAccessLevel()
+		if al, ok := parserResult.GetTypeAccessLevels()[typeName]; ok {
+			accessLevel = al
+		}
+
 		ti := TypeInfo{
 			Name:           typeName,
 			Kind:           protoKindToString[idxType.GetKind()],
-			AccessLevel:    idxType.GetAccessLevel(),
+			AccessLevel:    accessLevel,
 			InheritedTypes: idxType.GetInheritedTypes(),
 		}
 
@@ -335,13 +344,32 @@ func DependencyFile(path string, cache *IndexStoreCache) ([]TypeInfo, []string, 
 	return types, result.GetImports(), nil
 }
 
-// FilterPrivateCollisions removes dependency files whose private type names
-// collide with private type names in other tracked files.
-// The target file (identified by targetPath) is never removed.
-// Removed files should not be tracked for hot-reload; changes to them will
-// trigger a full rebuild via the untracked path.
-func FilterPrivateCollisions(files []FileThunkData, targetPath string) (kept []FileThunkData, excludedPaths []string) {
-	// Collect private view names per file.
+// FilterPrivateCollisions removes ambiguous type definitions and members
+// that reference them from the thunk output.
+//
+// ambiguousNames contains type names defined in multiple files across the
+// entire module (from the Index Store). These are necessarily private/fileprivate
+// types (public/internal names must be unique within a module).
+// This parameter is critical because tracked files are only a subset of the
+// module — a collision may exist with a non-tracked file that is still visible
+// via -enable-private-imports.
+//
+// Additionally, per-file access level checks detect collisions within tracked
+// files as a fallback (e.g. when the Index Store cache is unavailable).
+//
+// Filtering:
+//  1. Type definitions whose name is ambiguous are removed from ALL files.
+//  2. Members whose type annotations reference an ambiguous name are removed.
+//     The original implementation is used instead (no dynamic replacement).
+func FilterPrivateCollisions(files []FileThunkData, targetPath string, ambiguousNames map[string]bool) (kept []FileThunkData, excludedPaths []string) {
+	// Start with module-wide ambiguous names from the Index Store.
+	collidingNames := make(map[string]bool, len(ambiguousNames))
+	for name := range ambiguousNames {
+		collidingNames[name] = true
+	}
+
+	// Also detect collisions within tracked files via access level checks
+	// (fallback for when Index Store data is incomplete).
 	type nameFile struct {
 		name string
 		path string
@@ -354,36 +382,101 @@ func FilterPrivateCollisions(files []FileThunkData, targetPath string) (kept []F
 			}
 		}
 	}
-
-	// Find names that appear in more than one file.
-	namePaths := make(map[string]map[string]bool) // name → set of file paths
+	namePaths := make(map[string]map[string]bool)
 	for _, nf := range privates {
 		if namePaths[nf.name] == nil {
 			namePaths[nf.name] = make(map[string]bool)
 		}
 		namePaths[nf.name][nf.path] = true
 	}
-
-	// Collect non-target file paths that participate in collisions.
-	excludeSet := make(map[string]bool)
 	for name, paths := range namePaths {
-		if len(paths) <= 1 {
-			continue
-		}
-		for p := range paths {
-			if p != targetPath {
-				excludeSet[p] = true
-				slog.Debug("Excluding dependency due to private type collision", "path", p, "type", name)
-			}
+		if len(paths) > 1 {
+			collidingNames[name] = true
 		}
 	}
 
+	if len(collidingNames) == 0 {
+		return files, nil
+	}
+
+	// Phase 1: Remove ambiguous type definitions from ALL files.
+	//          "extension DataFormatter" is ambiguous when both private types
+	//          are visible via -enable-private-imports.
+	// Phase 2: Remove members referencing ambiguous types from ALL files.
 	for _, f := range files {
-		if excludeSet[f.AbsPath] {
+		var filteredTypes []TypeInfo
+		for _, t := range f.Types {
+			// Phase 1: Remove ambiguous type definitions.
+			if collidingNames[t.Name] {
+				isPrivate := t.AccessLevel == "private" || t.AccessLevel == "fileprivate"
+				// Only remove private/fileprivate types or types whose name
+				// matches a module-wide ambiguous name (which must be private).
+				if isPrivate || ambiguousNames[t.Name] {
+					slog.Debug("Excluding ambiguous type",
+						"path", f.AbsPath, "type", t.Name)
+					continue
+				}
+			}
+
+			// Phase 2: Remove members that reference ambiguous type names.
+			hadMembers := len(t.Properties) > 0 || len(t.Methods) > 0
+			t = filterCollidingMembers(t, collidingNames, f.AbsPath)
+			if hadMembers && len(t.Properties) == 0 && len(t.Methods) == 0 {
+				slog.Debug("Excluding type after all members filtered",
+					"path", f.AbsPath, "type", t.Name)
+				continue
+			}
+			filteredTypes = append(filteredTypes, t)
+		}
+
+		if len(filteredTypes) == 0 {
 			excludedPaths = append(excludedPaths, f.AbsPath)
 		} else {
+			f.Types = filteredTypes
 			kept = append(kept, f)
 		}
 	}
 	return kept, excludedPaths
+}
+
+// filterCollidingMembers removes properties and methods from a type whose
+// type expressions or signatures reference any of the colliding type names.
+func filterCollidingMembers(t TypeInfo, collidingNames map[string]bool, path string) TypeInfo {
+	var props []PropertyInfo
+	for _, p := range t.Properties {
+		if referencesCollidingType(p.TypeExpr, collidingNames) {
+			slog.Debug("Excluding property referencing colliding type",
+				"path", path, "type", t.Name, "property", p.Name, "typeExpr", p.TypeExpr)
+			continue
+		}
+		props = append(props, p)
+	}
+	t.Properties = props
+
+	var methods []MethodInfo
+	for _, m := range t.Methods {
+		if referencesCollidingType(m.Signature, collidingNames) {
+			slog.Debug("Excluding method referencing colliding type",
+				"path", path, "type", t.Name, "method", m.Name, "signature", m.Signature)
+			continue
+		}
+		methods = append(methods, m)
+	}
+	t.Methods = methods
+
+	return t
+}
+
+// referencesCollidingType checks if a type expression or signature string
+// contains any of the colliding type names as whole-word matches.
+// Uses word-boundary matching to avoid false positives where a colliding
+// name is a substring of an unrelated identifier (e.g. "View" in "isViewable").
+func referencesCollidingType(expr string, collidingNames map[string]bool) bool {
+	for name := range collidingNames {
+		pattern := `\b` + regexp.QuoteMeta(name) + `\b`
+		if matched, _ := regexp.MatchString(pattern, expr); matched {
+			return true
+		}
+	}
+	return false
 }

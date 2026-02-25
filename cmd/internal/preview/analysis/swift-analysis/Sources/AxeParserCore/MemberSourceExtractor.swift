@@ -16,6 +16,9 @@ final class MemberSourceExtractor: SyntaxVisitor {
   private(set) var memberSources: [MemberSource] = []
   /// Byte ranges of body regions to exclude from skeleton hash.
   private(set) var bodyRanges: [Range<String.Index>] = []
+  /// Parser-derived access levels for type declarations (qualified name → access level string).
+  /// Only populated from type declarations (struct/class/enum/actor), not extensions.
+  private(set) var typeAccessLevels: [String: String] = [:]
 
   /// Stack of enclosing type/extension names. The top element is the direct parent.
   private var typeNameStack: [String] = []
@@ -44,24 +47,28 @@ final class MemberSourceExtractor: SyntaxVisitor {
 
   override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
     pushTypeName(node.name.text)
+    recordAccessLevel(from: node.modifiers)
     return .visitChildren
   }
   override func visitPost(_ node: StructDeclSyntax) { popTypeName() }
 
   override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
     pushTypeName(node.name.text)
+    recordAccessLevel(from: node.modifiers)
     return .visitChildren
   }
   override func visitPost(_ node: ClassDeclSyntax) { popTypeName() }
 
   override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
     pushTypeName(node.name.text)
+    recordAccessLevel(from: node.modifiers)
     return .visitChildren
   }
   override func visitPost(_ node: EnumDeclSyntax) { popTypeName() }
 
   override func visit(_ node: ActorDeclSyntax) -> SyntaxVisitorContinueKind {
     pushTypeName(node.name.text)
+    recordAccessLevel(from: node.modifiers)
     return .visitChildren
   }
   override func visitPost(_ node: ActorDeclSyntax) { popTypeName() }
@@ -71,6 +78,36 @@ final class MemberSourceExtractor: SyntaxVisitor {
     return .visitChildren
   }
   override func visitPost(_ node: ExtensionDeclSyntax) { popTypeName() }
+
+  // MARK: - Access Level Extraction
+
+  /// Records the access level of the current type declaration.
+  /// Only called for type declarations (struct/class/enum/actor), not extensions,
+  /// because extensions don't define a type's access level.
+  private func recordAccessLevel(from modifiers: DeclModifierListSyntax) {
+    guard let typeName = currentTypeName else { return }
+    // First declaration wins (avoid overwriting with extension-merged duplicates).
+    if typeAccessLevels[typeName] == nil {
+      typeAccessLevels[typeName] = extractAccessLevel(from: modifiers)
+    }
+  }
+
+  /// Extracts the access level keyword from a modifier list.
+  /// Returns "internal" (Swift default) if no explicit access modifier is present.
+  private func extractAccessLevel(from modifiers: DeclModifierListSyntax) -> String {
+    for modifier in modifiers {
+      switch modifier.name.tokenKind {
+      case .keyword(.open): return "open"
+      case .keyword(.public): return "public"
+      case .keyword(.package): return "package"
+      case .keyword(.internal): return "internal"
+      case .keyword(.fileprivate): return "fileprivate"
+      case .keyword(.private): return "private"
+      default: continue
+      }
+    }
+    return "internal"
+  }
 
   // MARK: - Property Extraction
 

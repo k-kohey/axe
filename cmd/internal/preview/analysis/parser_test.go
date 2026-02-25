@@ -314,6 +314,68 @@ func TestCombineWithIndexStore_InheritedTypes(t *testing.T) {
 	}
 }
 
+func TestCombineWithIndexStore_ParserAccessLevelOverridesIndexStore(t *testing.T) {
+	// Index Store reports "internal" (broken), but parser knows the type is "private".
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "DataFormatter",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "internal", // Index Store always reports this
+				Members: []*pb.IndexMemberInfo{
+					{Name: "format", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 3},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "DataFormatter", Line: 3, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "format", Source: `"formatted"`},
+		},
+		TypeAccessLevels: map[string]string{
+			"DataFormatter": "private",
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if types[0].AccessLevel != "private" {
+		t.Errorf("AccessLevel = %q, want %q (parser should override Index Store)", types[0].AccessLevel, "private")
+	}
+}
+
+func TestCombineWithIndexStore_FallbackToIndexStoreAccessLevel(t *testing.T) {
+	// When parser doesn't have access level info, fall back to Index Store's value.
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "SomeView",
+				Kind:        pb.TypeKind_TYPE_KIND_STRUCT,
+				AccessLevel: "public",
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "SomeView", Line: 4, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, Name: "body", Source: "Text(\"\")"},
+		},
+		// No TypeAccessLevels — fallback to Index Store.
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	if types[0].AccessLevel != "public" {
+		t.Errorf("AccessLevel = %q, want %q (should fallback to Index Store)", types[0].AccessLevel, "public")
+	}
+}
+
 // --- SourceFile / DependencyFile integration tests ---
 // These require the axe-parser binary. They are integration tests that actually
 // parse Swift files and combine with a mock IndexStoreCache.

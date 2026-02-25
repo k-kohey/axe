@@ -18,6 +18,10 @@ import (
 // in the source file are expected and should not be fatal.
 // Callers that need stricter behavior (Run, switchFile) should check the result
 // for sourceFile presence after calling this function.
+//
+// Private type collision filtering (FilterPrivateCollisions) is always applied
+// to prevent compiler ambiguity errors in the generated thunk. This ensures
+// all code paths (initial setup, hot-reload, rebuild) are protected.
 func parseTrackedFiles(sourceFile string, trackedFiles []string, cache *analysis.IndexStoreCache) []analysis.FileThunkData {
 	var files []analysis.FileThunkData
 	for _, tf := range trackedFiles {
@@ -43,6 +47,16 @@ func parseTrackedFiles(sourceFile string, trackedFiles []string, cache *analysis
 			Imports:  imports,
 		})
 	}
+
+	// Apply type-level collision filtering to prevent compiler ambiguity
+	// errors from private type name collisions across dependency files.
+	// Use module-wide ambiguous names from the Index Store to detect
+	// collisions with non-tracked files (visible via -enable-private-imports).
+	var ambiguousNames map[string]bool
+	if cache != nil {
+		ambiguousNames = cache.AmbiguousTypeNames()
+	}
+	files, _ = analysis.FilterPrivateCollisions(files, sourceFile, ambiguousNames)
 	return files
 }
 
@@ -56,10 +70,14 @@ func hasFile(files []analysis.FileThunkData, absPath string) bool {
 	return false
 }
 
-// parseAndFilterTrackedFiles parses tracked files and removes private type
-// name collisions. Used by Run() and switchFile() where collision filtering
-// is needed. Returns the filtered files, the filtered trackedFiles list, and
-// an error if the sourceFile could not be parsed.
+// parseAndFilterTrackedFiles parses tracked files (with collision filtering)
+// and syncs the trackedFiles list to match. Files that were fully excluded
+// (e.g. all types removed by collision filtering or no types found) are
+// removed from trackedFiles so that changes to them trigger a full rebuild
+// via the untracked dependency path.
+//
+// Returns the filtered files, the synced trackedFiles list, and an error if
+// the sourceFile could not be parsed.
 func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string, cache *analysis.IndexStoreCache) (
 	[]analysis.FileThunkData, []string, error,
 ) {
@@ -68,21 +86,18 @@ func parseAndFilterTrackedFiles(sourceFile string, trackedFiles []string, cache 
 		return nil, nil, fmt.Errorf("no types found in %s", sourceFile)
 	}
 
-	files, excludedPaths := analysis.FilterPrivateCollisions(files, sourceFile)
-	if len(excludedPaths) > 0 {
-		excludeSet := make(map[string]bool, len(excludedPaths))
-		for _, p := range excludedPaths {
-			excludeSet[p] = true
-		}
-		var filtered []string
-		for _, tf := range trackedFiles {
-			if !excludeSet[tf] {
-				filtered = append(filtered, tf)
-			}
-		}
-		trackedFiles = filtered
+	// Sync trackedFiles with the files that survived parsing and filtering.
+	keptPaths := make(map[string]bool, len(files))
+	for _, f := range files {
+		keptPaths[f.AbsPath] = true
 	}
-	return files, trackedFiles, nil
+	var filtered []string
+	for _, tf := range trackedFiles {
+		if keptPaths[tf] {
+			filtered = append(filtered, tf)
+		}
+	}
+	return files, filtered, nil
 }
 
 // compilePipeline runs the parse → thunk → compile pipeline and returns the

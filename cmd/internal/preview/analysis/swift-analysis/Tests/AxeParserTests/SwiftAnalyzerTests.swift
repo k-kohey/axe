@@ -522,6 +522,114 @@ struct SkeletonHashTests {
   }
 }
 
+@Suite("Type access level extraction")
+struct TypeAccessLevelTests {
+  @Test("Default access level is internal")
+  func defaultInternal() {
+    let source = """
+      struct HogeView: View {
+          var body: some View { Text("") }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["HogeView"] == "internal")
+  }
+
+  @Test("Private struct")
+  func privateStruct() {
+    let source = """
+      private struct DataFormatter {
+          var formatted: String { "ok" }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["DataFormatter"] == "private")
+  }
+
+  @Test("Fileprivate class")
+  func fileprivateClass() {
+    let source = """
+      fileprivate class HogeHelper {
+          func help() { print("help") }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["HogeHelper"] == "fileprivate")
+  }
+
+  @Test("Public enum")
+  func publicEnum() {
+    let source = """
+      public enum HogeKind {
+          var label: String { "kind" }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["HogeKind"] == "public")
+  }
+
+  @Test("Actor access level")
+  func actorAccessLevel() {
+    let source = """
+      private actor HogeManager {
+          var status: String { "ready" }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["HogeManager"] == "private")
+  }
+
+  @Test("Nested type gets qualified name as key")
+  func nestedTypeKey() {
+    let source = """
+      struct Outer {
+          private struct Inner {
+              var computed: String { "hello" }
+          }
+          var prop: Int { 42 }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["Outer"] == "internal")
+    #expect(result.typeAccessLevels["Outer.Inner"] == "private")
+  }
+
+  @Test("Extension does not override type access level")
+  func extensionDoesNotOverride() {
+    let source = """
+      private struct HogeModel {
+          var computed: String { "hello" }
+      }
+
+      extension HogeModel {
+          var another: String { "world" }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    // The type declaration's access level should be preserved.
+    #expect(result.typeAccessLevels["HogeModel"] == "private")
+  }
+
+  @Test("Multiple types with different access levels")
+  func multipleTypes() {
+    let source = """
+      public struct PublicView: View {
+          var body: some View { Text("") }
+      }
+      private struct PrivateHelper {
+          var value: String { "ok" }
+      }
+      struct InternalModel {
+          var data: String { "data" }
+      }
+      """
+    let result = SwiftAnalyzer(source: source).analyze()
+    #expect(result.typeAccessLevels["PublicView"] == "public")
+    #expect(result.typeAccessLevels["PrivateHelper"] == "private")
+    #expect(result.typeAccessLevels["InternalModel"] == "internal")
+  }
+}
+
 @Suite("Crash regression")
 struct CrashRegressionTests {
   @Test("File ending without trailing newline")

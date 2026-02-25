@@ -37,6 +37,9 @@ public struct ParseResult: Codable, Equatable, Sendable {
   public var imports: [String]
   public var previews: [PreviewBlock]
   public var skeletonHash: String
+  /// Parser-derived access levels for type declarations (typeName → "private", "internal", etc.).
+  /// Supplements Index Store data which does not reliably report access levels.
+  public var typeAccessLevels: [String: String]
 }
 
 public struct PreviewBlock: Codable, Equatable, Sendable {

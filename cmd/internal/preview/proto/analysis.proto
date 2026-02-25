@@ -66,6 +66,9 @@ message ParseResult {
   repeated PreviewBlock previews = 3;
   string skeleton_hash = 4;
   repeated MemberSource member_sources = 7;
+  // Parser-derived access levels for type declarations (typeName → "private", "internal", etc.).
+  // Supplements Index Store data which does not reliably report access levels.
+  map<string, string> type_access_levels = 8;
 }
 
 // --- axe-index-reader output ---

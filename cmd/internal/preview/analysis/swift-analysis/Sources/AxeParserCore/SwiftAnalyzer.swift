@@ -35,7 +35,8 @@ public struct SwiftAnalyzer {
       memberSources: memberExtractor.memberSources,
       imports: importCollector.imports,
       previews: previewExtractor.previews,
-      skeletonHash: skeletonHash
+      skeletonHash: skeletonHash,
+      typeAccessLevels: memberExtractor.typeAccessLevels
     )
   }
 

@@ -48,7 +48,7 @@ func TestFilterPrivateCollisions_NoCollision(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
 	if len(kept) != 2 {
 		t.Errorf("kept = %d, want 2", len(kept))
 	}
@@ -84,15 +84,27 @@ func TestFilterPrivateCollisions_CollisionBetweenDeps(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
-	if len(kept) != 1 {
-		t.Errorf("kept = %d, want 1 (target only)", len(kept))
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
+	// Type-level filtering: only SharedHelper is removed, not the entire file.
+	if len(kept) != 3 {
+		t.Errorf("kept = %d, want 3 (all files kept, only colliding types removed)", len(kept))
 	}
-	if kept[0].AbsPath != "/path/Target.swift" {
-		t.Errorf("kept[0] = %q, want Target.swift", kept[0].AbsPath)
+	if len(excluded) != 0 {
+		t.Errorf("excluded = %v, want empty (files not excluded, types pruned)", excluded)
 	}
-	if len(excluded) != 2 {
-		t.Errorf("excluded = %d, want 2, got %v", len(excluded), excluded)
+	// Verify that the colliding type was removed from deps.
+	for _, f := range kept {
+		if f.AbsPath == "/path/Target.swift" {
+			continue
+		}
+		for _, typ := range f.Types {
+			if typ.Name == "SharedHelper" {
+				t.Errorf("SharedHelper should have been removed from %s", f.AbsPath)
+			}
+		}
+		if len(f.Types) != 1 {
+			t.Errorf("%s types = %d, want 1 (only non-colliding type)", f.AbsPath, len(f.Types))
+		}
 	}
 }
 
@@ -116,16 +128,22 @@ func TestFilterPrivateCollisions_CollisionWithTarget(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
-	// Target should be kept, Dep should be excluded
-	if len(kept) != 1 {
-		t.Errorf("kept = %d, want 1", len(kept))
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
+	// Colliding private types removed from ALL files (including target).
+	// With -enable-private-imports, "extension Helper" is ambiguous.
+	if len(kept) != 2 {
+		t.Errorf("kept = %d, want 2", len(kept))
 	}
-	if kept[0].AbsPath != "/path/Target.swift" {
-		t.Errorf("kept[0] = %q, want Target.swift", kept[0].AbsPath)
+	if len(excluded) != 0 {
+		t.Errorf("excluded = %v, want empty", excluded)
 	}
-	if len(excluded) != 1 || excluded[0] != "/path/Dep.swift" {
-		t.Errorf("excluded = %v, want [/path/Dep.swift]", excluded)
+	// Target should only have TargetView (Helper removed).
+	if len(kept[0].Types) != 1 || kept[0].Types[0].Name != "TargetView" {
+		t.Errorf("Target types = %v, want [TargetView]", kept[0].Types)
+	}
+	// Dep should only have DepView (Helper removed).
+	if len(kept[1].Types) != 1 || kept[1].Types[0].Name != "DepView" {
+		t.Errorf("Dep types = %v, want [DepView]", kept[1].Types)
 	}
 }
 
@@ -154,7 +172,7 @@ func TestFilterPrivateCollisions_NoPrivateTypes(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
 	if len(kept) != 3 {
 		t.Errorf("kept = %d, want 3", len(kept))
 	}
@@ -183,7 +201,7 @@ func TestFilterPrivateCollisions_PrivateButNoCollision(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
 	if len(kept) != 2 {
 		t.Errorf("kept = %d, want 2 (different private names → no collision)", len(kept))
 	}
@@ -217,12 +235,368 @@ func TestFilterPrivateCollisions_FileprivateCollision(t *testing.T) {
 		},
 	}
 
-	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift")
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
 	if len(kept) != 1 {
 		t.Errorf("kept = %d, want 1", len(kept))
 	}
 	if len(excluded) != 2 {
 		t.Errorf("excluded = %d, want 2 (fileprivate collision)", len(excluded))
+	}
+}
+
+func TestFilterPrivateCollisions_TypeLevelPreservesNonColliding(t *testing.T) {
+	// Regression test: private type collision should only remove the specific
+	// colliding types, preserving other types in the same file.
+	files := []analysis.FileThunkData{
+		{
+			FileName: "Target.swift",
+			AbsPath:  "/path/Target.swift",
+			Types: []analysis.TypeInfo{
+				{Name: "TargetView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
+			},
+		},
+		{
+			FileName: "ExportView.swift",
+			AbsPath:  "/path/ExportView.swift",
+			Types: []analysis.TypeInfo{
+				{Name: "ExportView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
+				{Name: "DataHelper", Kind: "struct", AccessLevel: "private"},
+			},
+		},
+		{
+			FileName: "ShareView.swift",
+			AbsPath:  "/path/ShareView.swift",
+			Types: []analysis.TypeInfo{
+				{Name: "ShareView", Kind: "struct", AccessLevel: "internal", InheritedTypes: []string{"View"}},
+				{Name: "DataHelper", Kind: "struct", AccessLevel: "private"},
+			},
+		},
+	}
+
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
+	if len(kept) != 3 {
+		t.Fatalf("kept = %d, want 3 (all files kept)", len(kept))
+	}
+	if len(excluded) != 0 {
+		t.Errorf("excluded = %v, want empty", excluded)
+	}
+
+	// Verify ExportView.swift only has ExportView (DataHelper removed).
+	for _, f := range kept {
+		switch f.AbsPath {
+		case "/path/ExportView.swift":
+			if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
+				t.Errorf("ExportView.swift types = %v, want [ExportView]", f.Types)
+			}
+		case "/path/ShareView.swift":
+			if len(f.Types) != 1 || f.Types[0].Name != "ShareView" {
+				t.Errorf("ShareView.swift types = %v, want [ShareView]", f.Types)
+			}
+		}
+	}
+}
+
+func TestFilterPrivateCollisions_MemberReferencingCollidingType(t *testing.T) {
+	// Regression test: even after removing colliding private type definitions,
+	// members that reference those types (e.g. "var formatter: DataFormatter")
+	// must also be removed. With -enable-private-imports, both private types
+	// are visible, making type references ambiguous.
+	files := []analysis.FileThunkData{
+		{
+			FileName: "Target.swift",
+			AbsPath:  "/path/Target.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"hello\")"},
+					},
+				},
+			},
+		},
+		{
+			FileName: "ExportView.swift",
+			AbsPath:  "/path/ExportView.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "ExportView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"export\")"},
+						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
+					},
+				},
+				{Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
+					Properties: []analysis.PropertyInfo{
+						{Name: "text", TypeExpr: "String", Source: "\"\""},
+					},
+				},
+			},
+		},
+		{
+			FileName: "ShareView.swift",
+			AbsPath:  "/path/ShareView.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "ShareView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"share\")"},
+						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
+					},
+				},
+				{Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
+					Properties: []analysis.PropertyInfo{
+						{Name: "text", TypeExpr: "String", Source: "\"\""},
+					},
+				},
+			},
+		},
+	}
+
+	kept, excluded := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
+	if len(excluded) != 0 {
+		t.Errorf("excluded = %v, want empty", excluded)
+	}
+	if len(kept) != 3 {
+		t.Fatalf("kept = %d, want 3", len(kept))
+	}
+
+	for _, f := range kept {
+		switch f.AbsPath {
+		case "/path/Target.swift":
+			// Target should be unchanged.
+			if len(f.Types) != 1 {
+				t.Errorf("Target types = %d, want 1", len(f.Types))
+			}
+			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
+				t.Errorf("Target properties = %v, want [body]", f.Types[0].Properties)
+			}
+		case "/path/ExportView.swift":
+			// DataFormatter type removed (Phase 1).
+			// ExportView.formatter removed (Phase 2: TypeExpr references DataFormatter).
+			// ExportView.body kept.
+			if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
+				t.Errorf("ExportView.swift types = %v, want [ExportView]", f.Types)
+			}
+			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
+				t.Errorf("ExportView properties = %v, want [body]", f.Types[0].Properties)
+			}
+		case "/path/ShareView.swift":
+			if len(f.Types) != 1 || f.Types[0].Name != "ShareView" {
+				t.Errorf("ShareView.swift types = %v, want [ShareView]", f.Types)
+			}
+			if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
+				t.Errorf("ShareView properties = %v, want [body]", f.Types[0].Properties)
+			}
+		}
+	}
+}
+
+func TestFilterPrivateCollisions_MethodReferencingCollidingType(t *testing.T) {
+	// Methods whose signature references a colliding type should also be filtered.
+	files := []analysis.FileThunkData{
+		{
+			FileName: "Target.swift",
+			AbsPath:  "/path/Target.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"hi\")"},
+					},
+				},
+			},
+		},
+		{
+			FileName: "ViewA.swift",
+			AbsPath:  "/path/ViewA.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "ViewA", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"a\")"},
+					},
+					Methods: []analysis.MethodInfo{
+						{Name: "format", Signature: "(data: Formatter) -> String", Source: "\"\""},
+						{Name: "greet", Signature: "() -> String", Source: "\"hello\""},
+					},
+				},
+				{Name: "Formatter", Kind: "struct", AccessLevel: "private",
+					Properties: []analysis.PropertyInfo{
+						{Name: "value", TypeExpr: "String", Source: "\"\""},
+					},
+				},
+			},
+		},
+		{
+			FileName: "ViewB.swift",
+			AbsPath:  "/path/ViewB.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "ViewB", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"b\")"},
+					},
+					Methods: []analysis.MethodInfo{
+						{Name: "format", Signature: "(input: Formatter) -> Formatter", Source: "Formatter()"},
+					},
+				},
+				{Name: "Formatter", Kind: "struct", AccessLevel: "private",
+					Properties: []analysis.PropertyInfo{
+						{Name: "value", TypeExpr: "String", Source: "\"\""},
+					},
+				},
+			},
+		},
+	}
+
+	kept, _ := analysis.FilterPrivateCollisions(files, "/path/Target.swift", nil)
+	if len(kept) != 3 {
+		t.Fatalf("kept = %d, want 3", len(kept))
+	}
+
+	for _, f := range kept {
+		switch f.AbsPath {
+		case "/path/ViewA.swift":
+			if len(f.Types) != 1 || f.Types[0].Name != "ViewA" {
+				t.Errorf("ViewA types = %v, want [ViewA]", f.Types)
+			}
+			// "format" removed (sig contains "Formatter"), "greet" kept.
+			if len(f.Types[0].Methods) != 1 || f.Types[0].Methods[0].Name != "greet" {
+				t.Errorf("ViewA methods = %v, want [greet]", f.Types[0].Methods)
+			}
+		case "/path/ViewB.swift":
+			if len(f.Types) != 1 || f.Types[0].Name != "ViewB" {
+				t.Errorf("ViewB types = %v, want [ViewB]", f.Types)
+			}
+			// "format" removed (sig contains "Formatter").
+			if len(f.Types[0].Methods) != 0 {
+				t.Errorf("ViewB methods = %v, want empty", f.Types[0].Methods)
+			}
+		}
+	}
+}
+
+func TestFilterPrivateCollisions_AmbiguousNamesFromIndexStore(t *testing.T) {
+	// When the colliding type is only in ONE tracked file but the Index Store
+	// reports it as ambiguous (defined in another non-tracked file), the type
+	// and referencing members must still be filtered.
+	files := []analysis.FileThunkData{
+		{
+			FileName: "ExportView.swift",
+			AbsPath:  "/path/ExportView.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "ExportView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"export\")"},
+						{Name: "formatter", TypeExpr: "DataFormatter", Source: "DataFormatter()"},
+					},
+				},
+				{
+					Name: "DataFormatter", Kind: "struct", AccessLevel: "private",
+					Properties: []analysis.PropertyInfo{
+						{Name: "csvString", TypeExpr: "String", Source: "\"\""},
+					},
+				},
+			},
+		},
+	}
+
+	// Index Store reports DataFormatter is defined in multiple files
+	// (including a non-tracked file like ShareView.swift).
+	ambiguousNames := map[string]bool{"DataFormatter": true}
+
+	kept, _ := analysis.FilterPrivateCollisions(files, "/path/ExportView.swift", ambiguousNames)
+	if len(kept) != 1 {
+		t.Fatalf("kept = %d, want 1", len(kept))
+	}
+
+	// DataFormatter type removed, ExportView.formatter removed.
+	f := kept[0]
+	if len(f.Types) != 1 || f.Types[0].Name != "ExportView" {
+		t.Errorf("types = %v, want [ExportView]", f.Types)
+	}
+	if len(f.Types[0].Properties) != 1 || f.Types[0].Properties[0].Name != "body" {
+		t.Errorf("properties = %v, want [body]", f.Types[0].Properties)
+	}
+}
+
+func TestFilterPrivateCollisions_WordBoundaryMatching(t *testing.T) {
+	// Verify that word-boundary matching prevents false positives where
+	// a colliding type name is a substring of an unrelated identifier.
+	// e.g. "Item" as a colliding name should NOT match "isItemizable" or "MenuItem".
+	files := []analysis.FileThunkData{
+		{
+			FileName: "Target.swift",
+			AbsPath:  "/path/Target.swift",
+			Types: []analysis.TypeInfo{
+				{
+					Name: "TargetView", Kind: "struct", AccessLevel: "internal",
+					InheritedTypes: []string{"View"},
+					Properties: []analysis.PropertyInfo{
+						{Name: "body", TypeExpr: "some View", Source: "Text(\"hi\")"},
+						{Name: "menuItem", TypeExpr: "MenuItem", Source: "MenuItem()"},
+						{Name: "isItemizable", TypeExpr: "Bool", Source: "true"},
+						{Name: "item", TypeExpr: "Item", Source: "Item()"},
+						{Name: "items", TypeExpr: "[Item]", Source: "[]"},
+					},
+					Methods: []analysis.MethodInfo{
+						{Name: "processItem", Signature: "(item: Item) -> String", Source: "\"\""},
+						{Name: "getMenuItems", Signature: "() -> [MenuItem]", Source: "[]"},
+					},
+				},
+			},
+		},
+	}
+
+	ambiguousNames := map[string]bool{"Item": true}
+	kept, _ := analysis.FilterPrivateCollisions(files, "/path/Target.swift", ambiguousNames)
+	if len(kept) != 1 {
+		t.Fatalf("kept = %d, want 1", len(kept))
+	}
+
+	tv := kept[0].Types[0]
+
+	// "body" kept (no reference to Item).
+	// "menuItem" kept (MenuItem ≠ Item — different word boundary).
+	// "isItemizable" kept (Bool type, no reference).
+	// "item" removed (TypeExpr is exactly "Item").
+	// "items" removed (TypeExpr "[Item]" contains word "Item").
+	var propNames []string
+	for _, p := range tv.Properties {
+		propNames = append(propNames, p.Name)
+	}
+	wantProps := []string{"body", "menuItem", "isItemizable"}
+	if len(propNames) != len(wantProps) {
+		t.Fatalf("properties = %v, want %v", propNames, wantProps)
+	}
+	for i, name := range wantProps {
+		if propNames[i] != name {
+			t.Errorf("property[%d] = %q, want %q", i, propNames[i], name)
+		}
+	}
+
+	// "processItem" removed (signature contains word "Item").
+	// "getMenuItems" kept (MenuItem ≠ Item — different word boundary).
+	var methodNames []string
+	for _, m := range tv.Methods {
+		methodNames = append(methodNames, m.Name)
+	}
+	wantMethods := []string{"getMenuItems"}
+	if len(methodNames) != len(wantMethods) {
+		t.Fatalf("methods = %v, want %v", methodNames, wantMethods)
+	}
+	for i, name := range wantMethods {
+		if methodNames[i] != name {
+			t.Errorf("method[%d] = %q, want %q", i, methodNames[i], name)
+		}
 	}
 }
 
