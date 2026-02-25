@@ -1,0 +1,20 @@
+name: Test Swift CLI
+
+on:
+  push:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: cmd/internal/preview/analysis/swift-analysis/.build
+          key: swift-analysis-${{ hashFiles('cmd/internal/preview/analysis/swift-analysis/Package.resolved') }}
+          restore-keys: swift-analysis-
+
+      - name: Run Swift tests
+        run: swift test --package-path cmd/internal/preview/analysis/swift-analysis
