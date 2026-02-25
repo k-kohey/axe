@@ -2,8 +2,10 @@ package view
 
 import (
 	"bytes"
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/k-kohey/axe/internal/procgroup"
 )
@@ -21,9 +23,11 @@ func demangleNames(names []string) map[string]string {
 		return nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	input := strings.Join(names, "\n") + "\n"
-	cmd := exec.Command(path, "demangle")
-	procgroup.Setup(cmd)
+	cmd := procgroup.Command(ctx, path, "demangle")
 	cmd.Stdin = strings.NewReader(input)
 	var out bytes.Buffer
 	cmd.Stdout = &out

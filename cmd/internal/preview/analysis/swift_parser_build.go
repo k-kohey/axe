@@ -1,9 +1,11 @@
 package analysis
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -157,7 +159,8 @@ func downloadSwiftBinary(product string) (string, error) {
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, hasher), resp.Body); err != nil {
 		_ = tmp.Close()
 		return "", fmt.Errorf("writing %s: %w", product, err)
 	}
@@ -169,12 +172,78 @@ func downloadSwiftBinary(product string) (string, error) {
 		return "", fmt.Errorf("closing temp file: %w", err)
 	}
 
+	// Verify checksum against checksums.txt from the same release.
+	binaryName := fmt.Sprintf("%s-darwin-%s", product, arch)
+	actualHash := hex.EncodeToString(hasher.Sum(nil))
+	if err := verifyChecksum(ctx, binaryName, actualHash); err != nil {
+		return "", err
+	}
+
 	if err := os.Rename(tmpPath, binPath); err != nil {
 		return "", fmt.Errorf("renaming to %s: %w", binPath, err)
 	}
 
 	slog.Debug("Downloaded Swift binary", "product", product, "path", binPath)
 	return binPath, nil
+}
+
+// verifyChecksum downloads checksums.txt from the GitHub release and verifies
+// that the binary hash matches. Skips verification for old releases without checksums.txt.
+func verifyChecksum(ctx context.Context, binaryName, actualHash string) error {
+	checksumsURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/checksums.txt", githubRepo, Version)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumsURL, nil)
+	if err != nil {
+		return fmt.Errorf("checksum verification failed: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is constructed from a hardcoded GitHub repo constant
+	if err != nil {
+		return fmt.Errorf("checksum verification failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Old releases without checksums.txt: skip verification with a warning.
+		slog.Warn("checksums.txt not found for this release, skipping verification", "version", Version)
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("downloading checksums.txt: HTTP %d", resp.StatusCode)
+	}
+
+	expected, err := parseChecksumFor(resp.Body, binaryName)
+	if err != nil {
+		return err
+	}
+
+	if actualHash != expected {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", binaryName, expected, actualHash)
+	}
+
+	slog.Debug("Checksum verified", "binary", binaryName)
+	return nil
+}
+
+// parseChecksumFor reads a checksums.txt formatted body and returns
+// the expected hash for the given binary name.
+func parseChecksumFor(r io.Reader, binaryName string) (string, error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		// Format: "<hash>  <filename>" (shasum -a 256 output uses two spaces)
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[1] == binaryName {
+			return fields[0], nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("reading checksums.txt: %w", err)
+	}
+	return "", fmt.Errorf("no checksum found for %s in checksums.txt", binaryName)
 }
 
 // buildSwiftAnalysisProduct builds a specific product from the SwiftAnalysis package.

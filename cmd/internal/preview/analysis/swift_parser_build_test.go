@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +67,65 @@ func TestResolveSwiftBinary_DevUsesPreinstalled(t *testing.T) {
 	if got := findPreinstalledBinaryInDir(dir, "axe-parser"); got != bin {
 		t.Errorf("expected %q, got %q", bin, got)
 	}
+}
+
+func TestParseChecksumFor(t *testing.T) {
+	t.Parallel()
+
+	checksums := "abc123def456  axe-parser-darwin-arm64\n" +
+		"789abc012def  axe-parser-darwin-amd64\n" +
+		"111222333444  axe-index-reader-darwin-arm64\n"
+
+	t.Run("finds matching binary", func(t *testing.T) {
+		t.Parallel()
+		got, err := parseChecksumFor(strings.NewReader(checksums), "axe-parser-darwin-arm64")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "abc123def456" {
+			t.Errorf("expected abc123def456, got %q", got)
+		}
+	})
+
+	t.Run("returns error for missing binary", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseChecksumFor(strings.NewReader(checksums), "axe-nonexistent-darwin-arm64")
+		if err == nil {
+			t.Fatal("expected error for missing binary")
+		}
+	})
+
+	t.Run("handles empty input", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseChecksumFor(strings.NewReader(""), "axe-parser-darwin-arm64")
+		if err == nil {
+			t.Fatal("expected error for empty checksums")
+		}
+	})
+
+	t.Run("ignores blank lines", func(t *testing.T) {
+		t.Parallel()
+		input := "\n\nabc123  target-binary\n\n"
+		got, err := parseChecksumFor(strings.NewReader(input), "target-binary")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "abc123" {
+			t.Errorf("expected abc123, got %q", got)
+		}
+	})
+
+	t.Run("ignores malformed lines", func(t *testing.T) {
+		t.Parallel()
+		input := "malformed-line\nabc123  target-binary\n"
+		got, err := parseChecksumFor(strings.NewReader(input), "target-binary")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "abc123" {
+			t.Errorf("expected abc123, got %q", got)
+		}
+	})
 }
 
 // TestDownloadSwiftBinary is not parallel because it mutates the global Version variable.
