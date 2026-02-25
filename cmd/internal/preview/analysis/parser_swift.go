@@ -117,10 +117,11 @@ type memberKey struct {
 	name     string
 }
 
-// nameKey identifies a member source by type name and member name only.
+// nameKey identifies a member source by type name, member name, and kind.
 type nameKey struct {
 	typeName string
 	name     string
+	kind     pb.MemberSourceKind
 }
 
 // combineWithIndexStore combines Index Store member metadata with parser source text
@@ -151,12 +152,17 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 		sourceMap[key] = ms
 	}
 
-	// Also build a name-only fallback map: (typeName, name) → MemberSource
+	// Also build a fallback map: (typeName, name, kind) → MemberSource
 	// Used when line numbers don't match exactly (e.g. minor offset differences).
+	//
+	// TODO: fallback は (typeName, name, kind) あたり最初の1件しか保持しない。
+	// 同一型にオーバーロードされたメソッド（例: fetch(id:) と fetch(query:)）が
+	// ある場合、行番号ずれ時に誤った MemberSource を返す可能性がある。
+	// 現実的には行番号が一致する exact match で解決されるため実害は薄いが、
+	// 根本的に解決するなら fallback をリスト化して selector 等で絞り込む必要がある。
 	fallbackMap := make(map[nameKey]*pb.MemberSource, len(parserResult.GetMemberSources()))
 	for _, ms := range parserResult.GetMemberSources() {
-		key := nameKey{typeName: ms.GetTypeName(), name: ms.GetName()}
-		// Only store the first occurrence per (typeName, name) to avoid ambiguity.
+		key := nameKey{typeName: ms.GetTypeName(), name: ms.GetName(), kind: ms.GetKind()}
 		if _, exists := fallbackMap[key]; !exists {
 			fallbackMap[key] = ms
 		}
@@ -192,7 +198,7 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 				if !idxMember.GetIsComputed() {
 					continue // stored property — skip
 				}
-				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember, pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY)
 				if ms == nil {
 					slog.Debug("No parser source for computed property",
 						"type", typeName, "member", idxMember.GetName(),
@@ -207,7 +213,7 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 				})
 
 			case pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD:
-				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember, pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD)
 				if ms == nil {
 					slog.Debug("No parser source for instance method",
 						"type", typeName, "member", idxMember.GetName(),
@@ -237,23 +243,26 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 }
 
 // lookupMemberSource tries to find a MemberSource by (typeName, line, name),
-// falling back to (typeName, name) if the exact line match is not found.
+// falling back to (typeName, name, kind) if the exact line match is not found.
+// expectedKind ensures that a property lookup never accidentally returns a
+// method source (or vice versa) when different members share the same name.
 func lookupMemberSource(
 	sourceMap map[memberKey]*pb.MemberSource,
 	fallbackMap map[nameKey]*pb.MemberSource,
 	typeName string,
 	idxMember *pb.IndexMemberInfo,
+	expectedKind pb.MemberSourceKind,
 ) *pb.MemberSource {
 	memberName := idxMember.GetName()
 
-	// Try exact match first (typeName + line + name).
+	// Try exact match first (typeName + line + name), then validate kind.
 	key := memberKey{typeName: typeName, line: idxMember.GetLine(), name: memberName}
-	if ms, ok := sourceMap[key]; ok {
+	if ms, ok := sourceMap[key]; ok && ms.GetKind() == expectedKind {
 		return ms
 	}
 
-	// Fallback: match by (typeName, name) only.
-	nk := nameKey{typeName: typeName, name: memberName}
+	// Fallback: match by (typeName, name, kind).
+	nk := nameKey{typeName: typeName, name: memberName, kind: expectedKind}
 	if ms, ok := fallbackMap[nk]; ok {
 		return ms
 	}
