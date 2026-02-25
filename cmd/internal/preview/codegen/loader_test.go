@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoaderCacheKey_IncludesAllInputs(t *testing.T) {
@@ -80,7 +81,7 @@ func TestSendReloadCommand_OK(t *testing.T) {
 		_, _ = conn.Write([]byte("OK\n"))
 	}()
 
-	err = SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err = SendReloadCommand(context.Background(), sockPath, "/tmp/thunk_0.dylib")
 	if err != nil {
 		t.Fatalf("SendReloadCommand returned error: %v", err)
 	}
@@ -112,7 +113,7 @@ func TestSendReloadCommand_Error(t *testing.T) {
 		_, _ = conn.Write([]byte("ERR:dlopen failed: symbol not found\n"))
 	}()
 
-	err = SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err = SendReloadCommand(context.Background(), sockPath, "/tmp/thunk_0.dylib")
 	if err == nil {
 		t.Fatal("expected error for ERR response")
 	}
@@ -128,9 +129,86 @@ func TestSendReloadCommand_NoSocket(t *testing.T) {
 	// Remove socket file to make sure it doesn't exist
 	_ = os.Remove(sockPath)
 
-	err := SendReloadCommand(sockPath, "/tmp/thunk_0.dylib")
+	err := SendReloadCommand(context.Background(), sockPath, "/tmp/thunk_0.dylib")
 	if err == nil {
 		t.Fatal("expected error when socket does not exist")
+	}
+}
+
+func TestWaitForReady_OK(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "test.sock")
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	// Accept and immediately close (simulating loader behavior on disconnect).
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+
+	if err := WaitForReady(context.Background(), sockPath); err != nil {
+		t.Fatalf("WaitForReady returned error: %v", err)
+	}
+}
+
+func TestWaitForReady_NoSocket(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "nonexistent.sock")
+
+	err := WaitForReady(context.Background(), sockPath)
+	if err == nil {
+		t.Fatal("expected error when socket does not exist")
+	}
+}
+
+func TestWaitForReady_ContextCancelled(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "nonexistent.sock")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately.
+
+	err := WaitForReady(ctx, sockPath)
+	if err == nil {
+		t.Fatal("expected error when context is cancelled")
+	}
+	if !strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("error = %q, want to contain 'context canceled'", err.Error())
+	}
+}
+
+func TestWaitForReady_Retry(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "test.sock")
+
+	// Start the listener after a short delay so the first dial attempt fails.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		ln, err := net.Listen("unix", sockPath)
+		if err != nil {
+			return
+		}
+		defer func() { _ = ln.Close() }()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := WaitForReady(ctx, sockPath); err != nil {
+		t.Fatalf("WaitForReady returned error: %v", err)
 	}
 }
 

@@ -97,24 +97,46 @@ func CompileLoader(ctx context.Context, loaderDir, deploymentTarget string, tc T
 	return dylibPath, nil
 }
 
+// dialWithRetry connects to a Unix domain socket with exponential backoff.
+// It respects context cancellation between retries.
+func dialWithRetry(ctx context.Context, socketPath string) (net.Conn, error) {
+	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+	var lastErr error
+	for _, d := range backoffs {
+		conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		slog.Debug("Socket not ready, retrying", "backoff", d, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("connecting to loader socket: %w (last dial error: %w)", ctx.Err(), lastErr)
+		case <-time.After(d):
+		}
+	}
+	return nil, fmt.Errorf("connecting to loader socket: %w", lastErr)
+}
+
+// WaitForReady connects to the loader socket to verify the app runtime is
+// ready, then immediately disconnects. This is safe because the loader's
+// read() returns 0 bytes on disconnect and simply continues accepting.
+func WaitForReady(ctx context.Context, socketPath string) error {
+	conn, err := dialWithRetry(ctx, socketPath)
+	if err != nil {
+		return fmt.Errorf("waiting for loader ready: %w", err)
+	}
+	_ = conn.Close()
+	return nil
+}
+
 // SendReloadCommand connects to the loader's Unix domain socket and sends
 // a dylib path for hot-reload. It retries with exponential backoff if the
 // socket is not yet ready.
-func SendReloadCommand(socketPath, dylibPath string) error {
-	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
-
-	var conn net.Conn
-	var lastErr error
-	for _, d := range backoffs {
-		conn, lastErr = net.DialTimeout("unix", socketPath, 1*time.Second)
-		if lastErr == nil {
-			break
-		}
-		slog.Debug("Socket not ready, retrying", "backoff", d, "err", lastErr)
-		time.Sleep(d)
-	}
-	if lastErr != nil {
-		return fmt.Errorf("connecting to loader socket: %w", lastErr)
+func SendReloadCommand(ctx context.Context, socketPath, dylibPath string) error {
+	conn, err := dialWithRetry(ctx, socketPath)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = conn.Close() }()
 

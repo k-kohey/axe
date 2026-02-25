@@ -30,6 +30,10 @@ var previewCmd = &cobra.Command{
 	compiles it into a dylib, and launches the app on a headless simulator with the dylib injected.
 	The simulator is managed automatically in axe's dedicated device set and shut down on exit.
 
+	By default (no --watch), the command runs in oneshot mode: build, launch, verify the
+	runtime is ready via loader socket, then clean up and exit. Exit 0 on success, exit 1 on failure.
+	With --watch, the command stays running and hot-reloads on file changes.
+
 	With --serve, the command runs as a multi-stream IDE backend. No source file argument is needed;
 	streams are managed via JSON Lines commands on stdin (AddStream/RemoveStream), and events
 	(Frame/StreamStarted/StreamStopped/StreamStatus) are emitted on stdout.

@@ -72,6 +72,8 @@ axe preview MyView.swift --watch
 ### `axe preview`
 
 Launch a SwiftUI preview on a headless iOS Simulator.
+By default, builds and launches the preview, verifies the runtime is ready, then exits (exit 0 on success, exit 1 on failure).
+Use `--watch` to keep running with hot-reload.
 
 ```bash
 axe preview <source-file.swift> [flags]
