@@ -1,0 +1,38 @@
+name: Check
+
+on:
+  push:
+    paths:
+      - "cmd/**"
+      - "vscode-extension/**"
+      - ".github/workflows/check.yml"
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ hashFiles('cmd/go.sum') }}
+          restore-keys: go-
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store/v3
+          key: pnpm-${{ hashFiles('vscode-extension/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - run: mise run proto
+
+      - run: mise check
+
+      - name: Verify no formatting changes
+        run: git diff --exit-code
