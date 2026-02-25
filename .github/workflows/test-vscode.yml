@@ -1,0 +1,25 @@
+name: Test VSCode Extension
+
+on:
+  push:
+    paths:
+      - "vscode-extension/**"
+      - ".github/workflows/test-vscode.yml"
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store/v3
+          key: pnpm-${{ hashFiles('vscode-extension/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - name: Run VSCode Extension tests
+        run: cd vscode-extension && pnpm install --frozen-lockfile && pnpm run compile && pnpm test

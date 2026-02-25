@@ -1,0 +1,37 @@
+name: Test Go CLI
+
+on:
+  push:
+    paths:
+      - "cmd/**"
+      - ".github/workflows/test-go.yml"
+
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ hashFiles('cmd/go.sum') }}
+          restore-keys: go-
+
+      - uses: actions/cache@v4
+        with:
+          path: cmd/internal/preview/analysis/swift-analysis/.build
+          key: swift-analysis-${{ hashFiles('cmd/internal/preview/analysis/swift-analysis/Package.resolved') }}
+          restore-keys: swift-analysis-
+
+      - run: mise run proto
+
+      - name: Run Go tests
+        run: |
+          go test -C cmd -run=TestParseSourceFile -count=1 -timeout 20m ./internal/preview/analysis/
+          go test -C cmd ./... -cover -timeout 15m
