@@ -376,6 +376,122 @@ func TestCombineWithIndexStore_FallbackToIndexStoreAccessLevel(t *testing.T) {
 	}
 }
 
+func TestCombineWithIndexStore_SameNamePropertyAndMethod(t *testing.T) {
+	// When a class has both a stored property and a protocol conformance method
+	// with the same name (e.g. "handleError"), the Index Store reports the
+	// stored property as INSTANCE_PROPERTY with isComputed=true.
+	// The kind-aware fallback lookup must prevent cross-contamination: the
+	// property MemberSource must go to Properties, the method MemberSource to
+	// Methods.
+	//
+	// Line numbers are intentionally mismatched between Index Store and parser
+	// to exercise the fallback path (name+kind lookup), which is where the
+	// original bug manifested.
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:           "HogeViewModel",
+				Kind:           pb.TypeKind_TYPE_KIND_CLASS,
+				AccessLevel:    "internal",
+				InheritedTypes: []string{"ObservableObject"},
+				Members: []*pb.IndexMemberInfo{
+					// Index Store reports the stored closure property as computed.
+					{Name: "handleError", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 50},
+					// Protocol conformance method with the same name.
+					{Name: "handleError", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 80},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{
+				TypeName: "HogeViewModel", Line: 5,
+				Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY,
+				Name: "handleError", TypeExpr: "((Error) -> Void)?",
+				BodyLine: 5, Source: "nil",
+			},
+			{
+				TypeName: "HogeViewModel", Line: 8,
+				Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD,
+				Name: "handleError", Selector: "handleError(error:)",
+				Signature: "(error: Error)", BodyLine: 9,
+				Source: "print(error)",
+			},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+	ti := types[0]
+
+	// Property slot must contain the property source, not the method source.
+	if len(ti.Properties) != 1 {
+		t.Fatalf("Properties count = %d, want 1", len(ti.Properties))
+	}
+	if ti.Properties[0].TypeExpr != "((Error) -> Void)?" {
+		t.Errorf("Property.TypeExpr = %q, want ((Error) -> Void)?", ti.Properties[0].TypeExpr)
+	}
+
+	// Method slot must contain the method source, not the property source.
+	if len(ti.Methods) != 1 {
+		t.Fatalf("Methods count = %d, want 1", len(ti.Methods))
+	}
+	if ti.Methods[0].Selector != "handleError(error:)" {
+		t.Errorf("Method.Selector = %q, want handleError(error:)", ti.Methods[0].Selector)
+	}
+	if ti.Methods[0].Signature != "(error: Error)" {
+		t.Errorf("Method.Signature = %q, want (error: Error)", ti.Methods[0].Signature)
+	}
+}
+
+func TestCombineWithIndexStore_OverloadedMethodFallbackLimit(t *testing.T) {
+	// Documents a known limitation: when overloaded methods (same name, different
+	// params) both fall back to name+kind lookup, only the first registered
+	// MemberSource is returned. In practice this is mitigated by exact match
+	// (line numbers usually match), but the fallback path cannot distinguish
+	// overloads.
+	indexData := &pb.IndexFileData{
+		Types: []*pb.IndexTypeInfo{
+			{
+				Name:        "HogeService",
+				Kind:        pb.TypeKind_TYPE_KIND_CLASS,
+				AccessLevel: "internal",
+				Members: []*pb.IndexMemberInfo{
+					// Line numbers intentionally mismatched to force fallback.
+					{Name: "fetch", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 90},
+					{Name: "fetch", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD, Line: 95},
+				},
+			},
+		},
+	}
+	parserResult := &pb.ParseResult{
+		MemberSources: []*pb.MemberSource{
+			{TypeName: "HogeService", Line: 3, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "fetch", Selector: "fetch(id:)", Signature: "(id: Int) -> String", BodyLine: 4, Source: `""`},
+			{TypeName: "HogeService", Line: 7, Kind: pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, Name: "fetch", Selector: "fetch(query:)", Signature: "(query: String) -> String", BodyLine: 8, Source: `""`},
+		},
+	}
+
+	types := combineWithIndexStore(indexData, parserResult)
+	if len(types) != 1 {
+		t.Fatalf("types count = %d, want 1", len(types))
+	}
+
+	// Both Index Store members fall back to the same (name, kind) key,
+	// so both resolve to the first registered MemberSource (fetch(id:)).
+	// This means fetch(query:) is lost — a known limitation.
+	if len(types[0].Methods) != 2 {
+		t.Fatalf("Methods count = %d, want 2", len(types[0].Methods))
+	}
+	for i, m := range types[0].Methods {
+		if m.Selector != "fetch(id:)" {
+			t.Errorf("Methods[%d].Selector = %q, want fetch(id:) (fallback returns first registered)", i, m.Selector)
+		}
+	}
+}
+
 // --- SourceFile / DependencyFile integration tests ---
 // These require the axe-parser binary. They are integration tests that actually
 // parse Swift files and combine with a mock IndexStoreCache.
