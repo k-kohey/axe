@@ -21,7 +21,5 @@ jobs:
           key: pnpm-${{ hashFiles('vscode-extension/pnpm-lock.yaml') }}
           restore-keys: pnpm-
 
-      - run: mise run proto
-
       - name: Run VSCode Extension tests
         run: cd vscode-extension && pnpm install --frozen-lockfile && pnpm run compile && pnpm test
