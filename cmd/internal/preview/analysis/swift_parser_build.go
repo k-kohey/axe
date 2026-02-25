@@ -10,13 +10,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 //go:embed swift-analysis/Package.swift swift-analysis/Sources/AxeParser/*.swift swift-analysis/Sources/AxeParserCore/*.swift swift-analysis/Sources/AxeIndexReader/*.swift
@@ -208,7 +209,7 @@ func buildSwiftAnalysisProduct(product string) (string, error) {
 	// swift --version
 	swiftVerCtx, swiftVerCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer swiftVerCancel()
-	swiftVer, err := exec.CommandContext(swiftVerCtx, "swift", "--version").Output()
+	swiftVer, err := procgroup.Command(swiftVerCtx, "swift", "--version").Output()
 	if err != nil {
 		return "", fmt.Errorf("getting swift version: %w", err)
 	}
@@ -217,7 +218,7 @@ func buildSwiftAnalysisProduct(product string) (string, error) {
 	// macOS version
 	macVerCtx, macVerCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer macVerCancel()
-	macVer, _ := exec.CommandContext(macVerCtx, "sw_vers", "-productVersion").Output()
+	macVer, _ := procgroup.Command(macVerCtx, "sw_vers", "-productVersion").Output()
 	h.Write(macVer)
 
 	cacheKey := fmt.Sprintf("%x", h.Sum(nil))
@@ -271,7 +272,7 @@ func buildSwiftAnalysisProduct(product string) (string, error) {
 
 	buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer buildCancel()
-	cmd := exec.CommandContext(buildCtx, "swift", "build", "-c", "release", "--product", product, "--package-path", pkgPath)
+	cmd := procgroup.Command(buildCtx, "swift", "build", "-c", "release", "--product", product, "--package-path", pkgPath)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("building %s: %w", product, err)

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os/exec"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 // demangleNames pipes the given names through `swift demangle` and returns
@@ -21,6 +23,7 @@ func demangleNames(names []string) map[string]string {
 
 	input := strings.Join(names, "\n") + "\n"
 	cmd := exec.Command(path, "demangle")
+	procgroup.Setup(cmd)
 	cmd.Stdin = strings.NewReader(input)
 	var out bytes.Buffer
 	cmd.Stdout = &out

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
+	"github.com/k-kohey/axe/internal/procgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -61,7 +62,7 @@ func swiftParse(path string) (*pb.ParseResult, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binPath, "parse", path)
+	cmd := procgroup.Command(ctx, binPath, "parse", path)
 	out, err := cmd.Output()
 	if err != nil {
 		var ee *exec.ExitError

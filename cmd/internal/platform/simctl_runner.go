@@ -3,8 +3,9 @@ package platform
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/k-kohey/axe/internal/procgroup"
 )
 
 // SimctlRunner abstracts xcrun simctl operations for testability.
@@ -28,7 +29,7 @@ type SimctlRunner interface {
 type RealSimctlRunner struct{}
 
 func (r *RealSimctlRunner) ListDevices(ctx context.Context, setPath string) ([]simDevice, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath, "list", "devices", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "list", "devices", "--json").Output()
 	if err != nil {
 		return nil, fmt.Errorf("simctl list devices in set: %w", err)
 	}
@@ -36,7 +37,7 @@ func (r *RealSimctlRunner) ListDevices(ctx context.Context, setPath string) ([]s
 }
 
 func (r *RealSimctlRunner) Clone(ctx context.Context, sourceUDID, name, setPath string) (string, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath, "clone", sourceUDID, name).CombinedOutput()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "clone", sourceUDID, name).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("simctl clone: %w\n%s", err, out)
 	}
@@ -44,7 +45,7 @@ func (r *RealSimctlRunner) Clone(ctx context.Context, sourceUDID, name, setPath 
 }
 
 func (r *RealSimctlRunner) Create(ctx context.Context, name, deviceType, runtime, setPath string) (string, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath,
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath,
 		"create", name, deviceType, runtime,
 	).CombinedOutput()
 	if err != nil {
@@ -54,7 +55,7 @@ func (r *RealSimctlRunner) Create(ctx context.Context, name, deviceType, runtime
 }
 
 func (r *RealSimctlRunner) Shutdown(ctx context.Context, udid, setPath string) error {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath, "shutdown", udid).CombinedOutput()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "shutdown", udid).CombinedOutput()
 	if err != nil {
 		// "Unable to shutdown device in current state: Shutdown" means the device
 		// is already shut down — treat as success.
@@ -67,7 +68,7 @@ func (r *RealSimctlRunner) Shutdown(ctx context.Context, udid, setPath string) e
 }
 
 func (r *RealSimctlRunner) Delete(ctx context.Context, udid, setPath string) error {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "--set", setPath, "delete", udid).CombinedOutput()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "delete", udid).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("simctl delete: %w\n%s", err, out)
 	}
@@ -80,7 +81,7 @@ func (r *RealSimctlRunner) ListAllDevices(ctx context.Context, onlyAvailable boo
 		args = append(args, "available")
 	}
 	args = append(args, "--json")
-	out, err := exec.CommandContext(ctx, "xcrun", args...).Output()
+	out, err := procgroup.Command(ctx, "xcrun", args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("simctl list devices: %w", err)
 	}
@@ -88,7 +89,7 @@ func (r *RealSimctlRunner) ListAllDevices(ctx context.Context, onlyAvailable boo
 }
 
 func (r *RealSimctlRunner) ListRuntimes(ctx context.Context) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "runtimes", "available", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "runtimes", "available", "--json").Output()
 	if err != nil {
 		return nil, fmt.Errorf("simctl list runtimes: %w", err)
 	}
@@ -96,7 +97,7 @@ func (r *RealSimctlRunner) ListRuntimes(ctx context.Context) ([]byte, error) {
 }
 
 func (r *RealSimctlRunner) ListDeviceTypes(ctx context.Context) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").Output()
 	if err != nil {
 		return nil, fmt.Errorf("simctl list devicetypes: %w", err)
 	}

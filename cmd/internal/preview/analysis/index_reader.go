@@ -13,6 +13,7 @@ import (
 	"time"
 
 	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
+	"github.com/k-kohey/axe/internal/procgroup"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -29,7 +30,7 @@ func xcodeToolchainLibPath() string {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		out, err := exec.CommandContext(ctx, "xcode-select", "-p").Output()
+		out, err := procgroup.Command(ctx, "xcode-select", "-p").Output()
 		if err != nil {
 			slog.Debug("xcode-select -p failed; DYLD_LIBRARY_PATH will not be set", "error", err)
 			return
@@ -60,7 +61,7 @@ func readIndexStore(ctx context.Context, indexStorePath string, sourceRoot strin
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, binPath, args...)
+	cmd := procgroup.Command(ctx, binPath, args...)
 	if libPath := xcodeToolchainLibPath(); libPath != "" {
 		if existing := os.Getenv("DYLD_LIBRARY_PATH"); existing != "" {
 			libPath = libPath + ":" + existing
