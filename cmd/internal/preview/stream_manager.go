@@ -406,7 +406,9 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 			// Warm device's boot companion already exited; release and fall back.
 			slog.Info("Warm device boot companion dead, falling back to fresh boot", "udid", udid)
 			releaseCtx, releaseCancel := context.WithTimeout(ctx, 30*time.Second)
-			_ = sm.pool.Release(releaseCtx, udid)
+			if err := sm.pool.Release(releaseCtx, udid); err != nil {
+				slog.Warn("Failed to release dead warm device", "udid", udid, "err", err)
+			}
 			releaseCancel()
 			udid = ""
 		default:

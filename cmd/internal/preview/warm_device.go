@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const warmDeviceTimeout = 10 * time.Minute
+const warmDeviceTimeout = 30 * time.Minute
 
 type warmDeviceKey struct {
 	deviceType string
@@ -95,11 +95,14 @@ func (sm *StreamManager) shutdownWarmDevices() {
 	for _, wd := range devices {
 		wd.cancel()
 	}
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
 	for _, wd := range devices {
 		select {
 		case <-wd.done:
-		case <-time.After(30 * time.Second):
+		case <-deadline.C:
 			slog.Error("Warm device shutdown timed out", "udid", wd.udid)
+			return
 		}
 	}
 }
@@ -110,8 +113,11 @@ func (sm *StreamManager) shutdownWarmDevices() {
 func (sm *StreamManager) warmShutdownLoop(ctx context.Context, wd *warmDevice, key warmDeviceKey) {
 	defer close(wd.done)
 
+	timer := time.NewTimer(warmDeviceTimeout)
+	defer timer.Stop()
+
 	select {
-	case <-time.After(warmDeviceTimeout):
+	case <-timer.C:
 		slog.Info("Warm device timeout expired, shutting down", "udid", wd.udid)
 	case <-ctx.Done():
 		// Fast path: if claimed, the new stream takes ownership.
