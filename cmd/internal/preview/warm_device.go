@@ -21,7 +21,7 @@ type warmDevice struct {
 	bootCompanion companionProcess
 	cancel        context.CancelFunc
 	done          chan struct{} // closed when goroutine exits
-	claimed       atomic.Bool  // true if consumed by a new stream
+	claimed       atomic.Bool   // true if consumed by a new stream
 }
 
 // parkDevice stores a booted device for warm reuse. The device's boot companion

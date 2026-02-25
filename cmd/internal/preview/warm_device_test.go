@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -64,13 +65,7 @@ func TestWarmDevice_ParkDuplicateKey(t *testing.T) {
 
 	// Pool should have released the first device.
 	pool.mu.Lock()
-	var found bool
-	for _, r := range pool.released {
-		if r == "UDID-1" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(pool.released, "UDID-1")
 	pool.mu.Unlock()
 	if !found {
 		t.Error("expected UDID-1 to be released")

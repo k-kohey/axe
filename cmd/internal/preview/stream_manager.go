@@ -129,9 +129,9 @@ type StreamManager struct {
 func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister) *StreamManager {
 	sm := &StreamManager{
-		streams:     make(map[string]*stream),
-		warmDevices: make(map[warmDeviceKey]*warmDevice),
-		pool:        pool,
+		streams:       make(map[string]*stream),
+		warmDevices:   make(map[warmDeviceKey]*warmDevice),
+		pool:          pool,
 		ew:            ew,
 		pc:            pc,
 		deviceSetPath: deviceSetPath,
