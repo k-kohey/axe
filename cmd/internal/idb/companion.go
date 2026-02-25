@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -60,14 +61,30 @@ func (c *Companion) Err() error {
 	return c.exitErr
 }
 
+var (
+	devNullOnce sync.Once
+	devNull     *os.File
+)
+
+func getDevNull() *os.File {
+	devNullOnce.Do(func() {
+		var err error
+		devNull, err = os.Open(os.DevNull)
+		if err != nil {
+			devNull = nil
+		}
+	})
+	return devNull
+}
+
 type defaultCommander struct{}
 
 func (defaultCommander) Command(name string, args ...string) CmdRunner {
 	cmd := exec.Command(name, args...)
 	procgroup.Setup(cmd)
 	// Suppress idb_companion's stderr noise (objc warnings, startup logs).
-	if devNull, err := os.Open(os.DevNull); err == nil {
-		cmd.Stderr = devNull
+	if f := getDevNull(); f != nil {
+		cmd.Stderr = f
 	}
 	return &execCmdRunner{cmd: cmd}
 }

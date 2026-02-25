@@ -1,9 +1,10 @@
 package platform
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/k-kohey/axe/internal/procgroup"
 )
@@ -22,14 +23,16 @@ func (r *RealLLDBRunner) Run(pid int, commands []string) (string, error) {
 
 // runLLDBCommand executes lldb in batch mode, attaching to the given PID and running the specified commands.
 func runLLDBCommand(pid int, commands []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	args := []string{"-p", strconv.Itoa(pid), "--batch"}
 	for _, c := range commands {
 		args = append(args, "-o", c)
 	}
 	args = append(args, "-o", "detach", "-o", "quit")
 
-	cmd := exec.Command("lldb", args...)
-	procgroup.Setup(cmd)
+	cmd := procgroup.Command(ctx, "lldb", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("lldb failed: %w", err)
