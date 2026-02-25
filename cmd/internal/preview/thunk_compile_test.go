@@ -547,10 +547,9 @@ struct CollisionViewB: View {
 }
 `
 
-// Limitation fixture: #Preview referencing a private type.
-// The main thunk uses @testable import (not @_private), so private/fileprivate
-// types are not visible. If a #Preview body directly references a private type,
-// the generated main thunk will fail to compile.
+// Case E: #Preview referencing a private type.
+// The main thunk uses @_private(sourceFile:) import for the target file,
+// so private types defined in that file are visible in the preview wrapper.
 const fixturePreviewWithPrivateType = `import SwiftUI
 
 private struct PrivateContent: View {
@@ -699,6 +698,11 @@ func TestThunkCompilation(t *testing.T) {
 			},
 			target: "CollisionViewA.swift",
 		},
+		{
+			name:    "PreviewWithPrivateType",
+			sources: map[string]string{"WrapperView.swift": fixturePreviewWithPrivateType},
+			target:  "WrapperView.swift",
+		},
 	}
 
 	for _, tt := range tests {
@@ -826,83 +830,4 @@ func TestThunkCompilation_PathEscaping(t *testing.T) {
 	}
 
 	typecheckGeneratedThunks(t, thunkPaths, moduleDir, compileTestModuleName, sdk)
-}
-
-// TestThunkCompilation_PreviewWithPrivateType verifies that a #Preview block
-// referencing a private type causes a typecheck failure in the main thunk.
-//
-// TODO: The main thunk uses @testable import which only exposes internal/public
-// types. If a #Preview body references a private/fileprivate type, the generated
-// _AxePreviewWrapper fails to compile. To fix this, the main thunk would need
-// @_private(sourceFile:) import for the target file, or the #Preview body would
-// need to be emitted into the per-file thunk instead of the main thunk.
-func TestThunkCompilation_PreviewWithPrivateType(t *testing.T) {
-	sdk := simulatorSDKPath(t)
-
-	parseDir := t.TempDir()
-	moduleSrcDir := t.TempDir()
-
-	writeFixtureFile(t, parseDir, "WrapperView.swift", fixturePreviewWithPrivateType)
-
-	stripped := stripPreviewBlocks(fixturePreviewWithPrivateType)
-	moduleSrcPath := writeFixtureFile(t, moduleSrcDir, "WrapperView.swift", stripped)
-	moduleDir, cache := buildFixtureModule(t, []string{moduleSrcPath}, compileTestModuleName, sdk)
-
-	targetPath := filepath.Join(parseDir, "WrapperView.swift")
-	dirs := previewDirs{Thunk: filepath.Join(t.TempDir(), "thunk")}
-
-	remappedFiles := make(map[string]*pb.IndexFileData)
-	if data := cache.FileData(moduleSrcPath); data != nil {
-		remappedFiles[targetPath] = data
-	}
-	remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
-
-	types, imports, err := analysis.SourceFile(targetPath, remappedCache)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	files := []analysis.FileThunkData{
-		{
-			FileName:   "WrapperView.swift",
-			AbsPath:    targetPath,
-			Types:      types,
-			Imports:    imports,
-			ModuleName: remappedCache.FileModuleName(targetPath),
-		},
-	}
-	thunkPaths, err := codegen.GenerateThunks(files, compileTestModuleName, dirs.Thunk, "", targetPath, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The main thunk uses @testable import, so PrivateContent is not visible.
-	// Typecheck is expected to fail.
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	args := []string{
-		"xcrun", "swiftc",
-		"-typecheck",
-		"-sdk", sdk,
-		"-target", compileTestTarget,
-		"-enable-testing",
-		"-I", moduleDir,
-		"-module-name", compileTestModuleName + "_PreviewReplacement_Test_0",
-		"-parse-as-library",
-		"-Xfrontend", "-disable-previous-implementation-calls-in-dynamic-replacements",
-		"-Xfrontend", "-enable-private-imports",
-	}
-	args = append(args, thunkPaths...)
-
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatal("expected typecheck to fail for #Preview referencing private type, but it succeeded")
-	}
-
-	// Verify the error mentions the private type.
-	if !strings.Contains(string(out), "PrivateContent") {
-		t.Errorf("expected error to mention PrivateContent, got:\n%s", out)
-	}
 }

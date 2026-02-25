@@ -45,18 +45,14 @@ import SwiftUI
 {{ end }}`))
 
 // MainThunkTmpl generates the main thunk containing the preview wrapper and
-// refresh entry point. It does NOT use @_private import, so it only sees
-// internal/public types.
-//
-// TODO: #Preview blocks that reference private/fileprivate types will fail to
-// compile because @testable import only exposes internal types. To support this,
-// the preview body would need to be emitted into the per-file thunk (which has
-// @_private access), or the main thunk would need its own @_private import for
-// the target file. See TestThunkCompilation_PreviewWithPrivateType.
+// refresh entry point. It uses @_private(sourceFile:) import for the target file
+// so that #Preview blocks can reference private/fileprivate types defined in
+// that file.
 var MainThunkTmpl = template.Must(template.New("mainThunk").Funcs(thunkFuncMap).Parse(
 	`import SwiftUI
-{{ if .HasPreview }}
-@testable import {{ .ModuleName }}
+{{ range .ExtraImports }}{{ . }}
+{{ end }}{{ if .HasPreview }}
+@_private(sourceFile: "{{ .TargetFileName | escapeSwiftString }}") import {{ .ModuleName }}
 
 struct _AxePreviewWrapper: View {
 {{ range .PreviewProps }}    {{ .Source }}
@@ -94,10 +90,12 @@ type PerFileThunkData struct {
 
 // MainThunkData holds the data used to render the main thunk template.
 type MainThunkData struct {
-	ModuleName   string
-	HasPreview   bool
-	PreviewProps []analysis.PreviewableProperty
-	PreviewBody  string
+	ModuleName     string
+	TargetFileName string   // base name of the target source file (e.g. "ContentView.swift")
+	ExtraImports   []string // imports from the target source file (e.g. "import DSTheme")
+	HasPreview     bool
+	PreviewProps   []analysis.PreviewableProperty
+	PreviewBody    string
 }
 
 // GenerateThunks generates per-file thunks and a main thunk.
@@ -171,9 +169,22 @@ func GenerateThunks(
 		thunkPaths = append(thunkPaths, thunkPath)
 	}
 
+	// Collect extra imports from the target source file.
+	// The #Preview body is written in the target file's context and may reference
+	// types from its imports (e.g. DSTheme.Colors.primary).
+	var targetImports []string
+	for _, f := range files {
+		if f.AbsPath == targetSourceFile {
+			targetImports = f.Imports
+			break
+		}
+	}
+
 	// Build main thunk data.
 	mtd := MainThunkData{
-		ModuleName: moduleName,
+		ModuleName:     moduleName,
+		TargetFileName: filepath.Base(targetSourceFile),
+		ExtraImports:   targetImports,
 	}
 
 	// Parse #Preview blocks from the target source file.

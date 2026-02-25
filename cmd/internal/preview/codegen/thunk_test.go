@@ -151,12 +151,16 @@ struct FugaView: View {
 		t.Errorf("FugaView thunk missing extension\n\nGot:\n%s", fugaContent)
 	}
 
-	// Main thunk should contain preview wrapper and refresh, but no @_private.
-	if strings.Contains(mainContent, `@_private`) {
-		t.Errorf("main thunk should NOT contain @_private import\n\nGot:\n%s", mainContent)
+	// Main thunk should use @_private import for the target file (not @testable).
+	if !strings.Contains(mainContent, `@_private(sourceFile: "HogeView.swift") import MyApp`) {
+		t.Errorf("main thunk missing @_private import for target file\n\nGot:\n%s", mainContent)
 	}
-	if !strings.Contains(mainContent, `@testable import MyApp`) {
-		t.Errorf("main thunk missing @testable import\n\nGot:\n%s", mainContent)
+	if strings.Contains(mainContent, `@testable import`) {
+		t.Errorf("main thunk should NOT contain @testable import\n\nGot:\n%s", mainContent)
+	}
+	// Main thunk should NOT have @_private for dependency files.
+	if strings.Contains(mainContent, `@_private(sourceFile: "FugaView.swift")`) {
+		t.Errorf("main thunk should NOT contain @_private for dependency files\n\nGot:\n%s", mainContent)
 	}
 	if !strings.Contains(mainContent, `struct _AxePreviewWrapper: View {`) {
 		t.Errorf("main thunk missing _AxePreviewWrapper\n\nGot:\n%s", mainContent)
@@ -323,7 +327,7 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 	})
 
 	t.Run("PreviewWrapper", func(t *testing.T) {
-		srcContent := "import SwiftUI\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n\n#Preview {\n    @Previewable @State var someModel = SomeModel()\n    HogeView()\n        .environment(someModel)\n}\n"
+		srcContent := "import SwiftUI\nimport SomeTheme\n\nstruct HogeView: View {\n    var body: some View {\n        Text(\"Hello\")\n    }\n}\n\n#Preview {\n    @Previewable @State var someModel = SomeModel()\n    HogeView()\n        .environment(someModel)\n}\n"
 		_, mainContent := generate(t, "HogeView.swift", srcContent,
 			analysis.FileThunkData{
 				FileName: "HogeView.swift",
@@ -337,6 +341,7 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 						},
 					},
 				},
+				Imports: []string{"import SomeTheme"},
 			},
 			"MyModule",
 		)
@@ -350,6 +355,9 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 			`UIHostingController(rootView: AnyView(_AxePreviewWrapper()))`,
 			`window.rootViewController = hc`,
 			`import UIKit`,
+			// Extra imports from target file should be in main thunk so that
+			// #Preview bodies can reference types from those modules.
+			`import SomeTheme`,
 		}
 		for _, c := range checks {
 			if !strings.Contains(mainContent, c) {
@@ -498,7 +506,7 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 		}
 
 		mainChecks := []string{
-			`@testable import MyApp`,
+			`@_private(sourceFile: "Views.swift") import MyApp`,
 			`struct _AxePreviewWrapper: View {`,
 		}
 		for _, c := range mainChecks {
@@ -541,8 +549,8 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 		if !strings.Contains(perFile, `extension OuterView {`) {
 			t.Errorf("per-file thunk missing outer extension\n\nGot:\n%s", perFile)
 		}
-		if !strings.Contains(mainContent, `@testable import MyApp`) {
-			t.Errorf("main thunk missing @testable import\n\nGot:\n%s", mainContent)
+		if !strings.Contains(mainContent, `@_private(sourceFile: "OuterView.swift") import MyApp`) {
+			t.Errorf("main thunk missing @_private import\n\nGot:\n%s", mainContent)
 		}
 	})
 
