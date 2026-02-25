@@ -130,7 +130,7 @@ func compilePipeline(
 
 // deploy attempts hot-reload via socket, falling back to full app relaunch.
 func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
-	if err := codegen.SendReloadCommand(dirs.Socket, dylibPath); err != nil {
+	if err := codegen.SendReloadCommand(ctx, dirs.Socket, dylibPath); err != nil {
 		slog.Warn("Hot-reload failed, falling back to full relaunch", "err", err)
 		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
 		if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {

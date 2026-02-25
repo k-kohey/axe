@@ -336,16 +336,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
 	}
 
-	// Non-watch mode: wait for signal or boot companion crash.
-	fmt.Fprintln(os.Stderr, "Preview launched successfully.")
-	select {
-	case <-ctx.Done():
-		return nil
-	case <-bootCompanion.Done():
-		msg := fmt.Sprintf("simulator crashed unexpectedly: %v", bootCompanion.Err())
-		sendStopped("runtime_error", msg, "")
-		return fmt.Errorf("%s", msg)
+	// Default mode (no --watch): verify runtime is ready, then exit silently.
+	// Cleanup (terminate app, stop simulator, remove socket) runs via defer.
+	if err := codegen.WaitForReady(ctx, dirs.Socket); err != nil {
+		sendStopped("runtime_error", err.Error(), "")
+		return err
 	}
+	return nil
 }
 
 // hasPreviousBuild checks whether a .app bundle exists in the build products directory.
