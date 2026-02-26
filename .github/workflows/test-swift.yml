@@ -5,6 +5,10 @@ on:
     paths:
       - "cmd/internal/preview/analysis/swift-analysis/**"
       - ".github/workflows/test-swift.yml"
+  pull_request:
+    paths:
+      - "cmd/internal/preview/analysis/swift-analysis/**"
+      - ".github/workflows/test-swift.yml"
 
 jobs:
   test:

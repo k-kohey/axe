@@ -5,6 +5,10 @@ on:
     paths:
       - "vscode-extension/**"
       - ".github/workflows/test-vscode.yml"
+  pull_request:
+    paths:
+      - "vscode-extension/**"
+      - ".github/workflows/test-vscode.yml"
 
 jobs:
   test:

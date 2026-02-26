@@ -6,6 +6,11 @@ on:
       - "cmd/**"
       - "vscode-extension/**"
       - ".github/workflows/check.yml"
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "vscode-extension/**"
+      - ".github/workflows/check.yml"
 
 jobs:
   check:
