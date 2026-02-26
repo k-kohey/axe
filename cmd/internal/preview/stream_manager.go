@@ -479,7 +479,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		res := bootResult{companion: bootCompanion}
 		if res.companion == nil {
 			var err error
-			res.companion, err = idb.BootHeadless(udid, sm.deviceSetPath)
+			res.companion, err = bootHeadlessWithRetry(launcherCtx, udid, sm.deviceSetPath)
 			if err != nil {
 				res.err = fmt.Errorf("booting simulator: %w", err)
 			}
