@@ -38,6 +38,7 @@ type Command struct {
 	//	*Command_SwitchFile
 	//	*Command_NextPreview
 	//	*Command_Input
+	//	*Command_ForceRebuild
 	Payload       isCommand_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -132,6 +133,15 @@ func (x *Command) GetInput() *Input {
 	return nil
 }
 
+func (x *Command) GetForceRebuild() *ForceRebuild {
+	if x != nil {
+		if x, ok := x.Payload.(*Command_ForceRebuild); ok {
+			return x.ForceRebuild
+		}
+	}
+	return nil
+}
+
 type isCommand_Payload interface {
 	isCommand_Payload()
 }
@@ -156,6 +166,10 @@ type Command_Input struct {
 	Input *Input `protobuf:"bytes,6,opt,name=input,proto3,oneof"`
 }
 
+type Command_ForceRebuild struct {
+	ForceRebuild *ForceRebuild `protobuf:"bytes,7,opt,name=force_rebuild,json=forceRebuild,proto3,oneof"`
+}
+
 func (*Command_AddStream) isCommand_Payload() {}
 
 func (*Command_RemoveStream) isCommand_Payload() {}
@@ -165,6 +179,8 @@ func (*Command_SwitchFile) isCommand_Payload() {}
 func (*Command_NextPreview) isCommand_Payload() {}
 
 func (*Command_Input) isCommand_Payload() {}
+
+func (*Command_ForceRebuild) isCommand_Payload() {}
 
 // AddStream creates a new preview stream.
 // The CLI allocates a simulator from the device pool based on device_type + runtime.
@@ -347,6 +363,43 @@ func (*NextPreview) Descriptor() ([]byte, []int) {
 	return file_preview_proto_rawDescGZIP(), []int{4}
 }
 
+// ForceRebuild triggers a full rebuild + relaunch for the current stream.
+type ForceRebuild struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ForceRebuild) Reset() {
+	*x = ForceRebuild{}
+	mi := &file_preview_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ForceRebuild) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ForceRebuild) ProtoMessage() {}
+
+func (x *ForceRebuild) ProtoReflect() protoreflect.Message {
+	mi := &file_preview_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ForceRebuild.ProtoReflect.Descriptor instead.
+func (*ForceRebuild) Descriptor() ([]byte, []int) {
+	return file_preview_proto_rawDescGZIP(), []int{5}
+}
+
 // Input forwards user interaction (touch/text) to the simulator.
 type Input struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -363,7 +416,7 @@ type Input struct {
 
 func (x *Input) Reset() {
 	*x = Input{}
-	mi := &file_preview_proto_msgTypes[5]
+	mi := &file_preview_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +428,7 @@ func (x *Input) String() string {
 func (*Input) ProtoMessage() {}
 
 func (x *Input) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[5]
+	mi := &file_preview_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +441,7 @@ func (x *Input) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Input.ProtoReflect.Descriptor instead.
 func (*Input) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{5}
+	return file_preview_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Input) GetEvent() isInput_Event {
@@ -472,7 +525,7 @@ type TouchEvent struct {
 
 func (x *TouchEvent) Reset() {
 	*x = TouchEvent{}
-	mi := &file_preview_proto_msgTypes[6]
+	mi := &file_preview_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -484,7 +537,7 @@ func (x *TouchEvent) String() string {
 func (*TouchEvent) ProtoMessage() {}
 
 func (x *TouchEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[6]
+	mi := &file_preview_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -497,7 +550,7 @@ func (x *TouchEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TouchEvent.ProtoReflect.Descriptor instead.
 func (*TouchEvent) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{6}
+	return file_preview_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TouchEvent) GetX() float64 {
@@ -523,7 +576,7 @@ type TextEvent struct {
 
 func (x *TextEvent) Reset() {
 	*x = TextEvent{}
-	mi := &file_preview_proto_msgTypes[7]
+	mi := &file_preview_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -535,7 +588,7 @@ func (x *TextEvent) String() string {
 func (*TextEvent) ProtoMessage() {}
 
 func (x *TextEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[7]
+	mi := &file_preview_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -548,7 +601,7 @@ func (x *TextEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TextEvent.ProtoReflect.Descriptor instead.
 func (*TextEvent) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{7}
+	return file_preview_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *TextEvent) GetValue() string {
@@ -578,7 +631,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_preview_proto_msgTypes[8]
+	mi := &file_preview_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -590,7 +643,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[8]
+	mi := &file_preview_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -603,7 +656,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{8}
+	return file_preview_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Event) GetStreamId() string {
@@ -726,7 +779,7 @@ type Frame struct {
 
 func (x *Frame) Reset() {
 	*x = Frame{}
-	mi := &file_preview_proto_msgTypes[9]
+	mi := &file_preview_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -738,7 +791,7 @@ func (x *Frame) String() string {
 func (*Frame) ProtoMessage() {}
 
 func (x *Frame) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[9]
+	mi := &file_preview_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -751,7 +804,7 @@ func (x *Frame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Frame.ProtoReflect.Descriptor instead.
 func (*Frame) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{9}
+	return file_preview_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Frame) GetDevice() string {
@@ -785,7 +838,7 @@ type StreamStarted struct {
 
 func (x *StreamStarted) Reset() {
 	*x = StreamStarted{}
-	mi := &file_preview_proto_msgTypes[10]
+	mi := &file_preview_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -797,7 +850,7 @@ func (x *StreamStarted) String() string {
 func (*StreamStarted) ProtoMessage() {}
 
 func (x *StreamStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[10]
+	mi := &file_preview_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -810,7 +863,7 @@ func (x *StreamStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamStarted.ProtoReflect.Descriptor instead.
 func (*StreamStarted) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{10}
+	return file_preview_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *StreamStarted) GetPreviewCount() int32 {
@@ -832,7 +885,7 @@ type StreamStopped struct {
 
 func (x *StreamStopped) Reset() {
 	*x = StreamStopped{}
-	mi := &file_preview_proto_msgTypes[11]
+	mi := &file_preview_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -844,7 +897,7 @@ func (x *StreamStopped) String() string {
 func (*StreamStopped) ProtoMessage() {}
 
 func (x *StreamStopped) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[11]
+	mi := &file_preview_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -857,7 +910,7 @@ func (x *StreamStopped) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamStopped.ProtoReflect.Descriptor instead.
 func (*StreamStopped) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{11}
+	return file_preview_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StreamStopped) GetReason() string {
@@ -891,7 +944,7 @@ type StreamStatus struct {
 
 func (x *StreamStatus) Reset() {
 	*x = StreamStatus{}
-	mi := &file_preview_proto_msgTypes[12]
+	mi := &file_preview_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -903,7 +956,7 @@ func (x *StreamStatus) String() string {
 func (*StreamStatus) ProtoMessage() {}
 
 func (x *StreamStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[12]
+	mi := &file_preview_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -916,7 +969,7 @@ func (x *StreamStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamStatus.ProtoReflect.Descriptor instead.
 func (*StreamStatus) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{12}
+	return file_preview_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *StreamStatus) GetPhase() string {
@@ -937,7 +990,7 @@ type ProtocolError struct {
 
 func (x *ProtocolError) Reset() {
 	*x = ProtocolError{}
-	mi := &file_preview_proto_msgTypes[13]
+	mi := &file_preview_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -949,7 +1002,7 @@ func (x *ProtocolError) String() string {
 func (*ProtocolError) ProtoMessage() {}
 
 func (x *ProtocolError) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[13]
+	mi := &file_preview_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -962,7 +1015,7 @@ func (x *ProtocolError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolError.ProtoReflect.Descriptor instead.
 func (*ProtocolError) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{13}
+	return file_preview_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ProtocolError) GetMessage() string {
@@ -983,7 +1036,7 @@ type Hello struct {
 
 func (x *Hello) Reset() {
 	*x = Hello{}
-	mi := &file_preview_proto_msgTypes[14]
+	mi := &file_preview_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -995,7 +1048,7 @@ func (x *Hello) String() string {
 func (*Hello) ProtoMessage() {}
 
 func (x *Hello) ProtoReflect() protoreflect.Message {
-	mi := &file_preview_proto_msgTypes[14]
+	mi := &file_preview_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1008,7 +1061,7 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Hello.ProtoReflect.Descriptor instead.
 func (*Hello) Descriptor() ([]byte, []int) {
-	return file_preview_proto_rawDescGZIP(), []int{14}
+	return file_preview_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *Hello) GetProtocolVersion() int32 {
@@ -1022,7 +1075,7 @@ var File_preview_proto protoreflect.FileDescriptor
 
 const file_preview_proto_rawDesc = "" +
 	"\n" +
-	"\rpreview.proto\x12\vaxe.preview\"\xd3\x02\n" +
+	"\rpreview.proto\x12\vaxe.preview\"\x95\x03\n" +
 	"\aCommand\x12\x1b\n" +
 	"\tstream_id\x18\x01 \x01(\tR\bstreamId\x127\n" +
 	"\n" +
@@ -1031,7 +1084,8 @@ const file_preview_proto_rawDesc = "" +
 	"\vswitch_file\x18\x04 \x01(\v2\x17.axe.preview.SwitchFileH\x00R\n" +
 	"switchFile\x12=\n" +
 	"\fnext_preview\x18\x05 \x01(\v2\x18.axe.preview.NextPreviewH\x00R\vnextPreview\x12*\n" +
-	"\x05input\x18\x06 \x01(\v2\x12.axe.preview.InputH\x00R\x05inputB\t\n" +
+	"\x05input\x18\x06 \x01(\v2\x12.axe.preview.InputH\x00R\x05input\x12@\n" +
+	"\rforce_rebuild\x18\a \x01(\v2\x19.axe.preview.ForceRebuildH\x00R\fforceRebuildB\t\n" +
 	"\apayload\"Z\n" +
 	"\tAddStream\x12\x12\n" +
 	"\x04file\x18\x01 \x01(\tR\x04file\x12\x1f\n" +
@@ -1042,7 +1096,8 @@ const file_preview_proto_rawDesc = "" +
 	"\n" +
 	"SwitchFile\x12\x12\n" +
 	"\x04file\x18\x01 \x01(\tR\x04file\"\r\n" +
-	"\vNextPreview\"\xe8\x01\n" +
+	"\vNextPreview\"\x0e\n" +
+	"\fForceRebuild\"\xe8\x01\n" +
 	"\x05Input\x128\n" +
 	"\n" +
 	"touch_down\x18\x01 \x01(\v2\x17.axe.preview.TouchEventH\x00R\ttouchDown\x128\n" +
@@ -1097,45 +1152,47 @@ func file_preview_proto_rawDescGZIP() []byte {
 	return file_preview_proto_rawDescData
 }
 
-var file_preview_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_preview_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_preview_proto_goTypes = []any{
 	(*Command)(nil),       // 0: axe.preview.Command
 	(*AddStream)(nil),     // 1: axe.preview.AddStream
 	(*RemoveStream)(nil),  // 2: axe.preview.RemoveStream
 	(*SwitchFile)(nil),    // 3: axe.preview.SwitchFile
 	(*NextPreview)(nil),   // 4: axe.preview.NextPreview
-	(*Input)(nil),         // 5: axe.preview.Input
-	(*TouchEvent)(nil),    // 6: axe.preview.TouchEvent
-	(*TextEvent)(nil),     // 7: axe.preview.TextEvent
-	(*Event)(nil),         // 8: axe.preview.Event
-	(*Frame)(nil),         // 9: axe.preview.Frame
-	(*StreamStarted)(nil), // 10: axe.preview.StreamStarted
-	(*StreamStopped)(nil), // 11: axe.preview.StreamStopped
-	(*StreamStatus)(nil),  // 12: axe.preview.StreamStatus
-	(*ProtocolError)(nil), // 13: axe.preview.ProtocolError
-	(*Hello)(nil),         // 14: axe.preview.Hello
+	(*ForceRebuild)(nil),  // 5: axe.preview.ForceRebuild
+	(*Input)(nil),         // 6: axe.preview.Input
+	(*TouchEvent)(nil),    // 7: axe.preview.TouchEvent
+	(*TextEvent)(nil),     // 8: axe.preview.TextEvent
+	(*Event)(nil),         // 9: axe.preview.Event
+	(*Frame)(nil),         // 10: axe.preview.Frame
+	(*StreamStarted)(nil), // 11: axe.preview.StreamStarted
+	(*StreamStopped)(nil), // 12: axe.preview.StreamStopped
+	(*StreamStatus)(nil),  // 13: axe.preview.StreamStatus
+	(*ProtocolError)(nil), // 14: axe.preview.ProtocolError
+	(*Hello)(nil),         // 15: axe.preview.Hello
 }
 var file_preview_proto_depIdxs = []int32{
 	1,  // 0: axe.preview.Command.add_stream:type_name -> axe.preview.AddStream
 	2,  // 1: axe.preview.Command.remove_stream:type_name -> axe.preview.RemoveStream
 	3,  // 2: axe.preview.Command.switch_file:type_name -> axe.preview.SwitchFile
 	4,  // 3: axe.preview.Command.next_preview:type_name -> axe.preview.NextPreview
-	5,  // 4: axe.preview.Command.input:type_name -> axe.preview.Input
-	6,  // 5: axe.preview.Input.touch_down:type_name -> axe.preview.TouchEvent
-	6,  // 6: axe.preview.Input.touch_move:type_name -> axe.preview.TouchEvent
-	6,  // 7: axe.preview.Input.touch_up:type_name -> axe.preview.TouchEvent
-	7,  // 8: axe.preview.Input.text:type_name -> axe.preview.TextEvent
-	9,  // 9: axe.preview.Event.frame:type_name -> axe.preview.Frame
-	10, // 10: axe.preview.Event.stream_started:type_name -> axe.preview.StreamStarted
-	11, // 11: axe.preview.Event.stream_stopped:type_name -> axe.preview.StreamStopped
-	12, // 12: axe.preview.Event.stream_status:type_name -> axe.preview.StreamStatus
-	13, // 13: axe.preview.Event.protocol_error:type_name -> axe.preview.ProtocolError
-	14, // 14: axe.preview.Event.hello:type_name -> axe.preview.Hello
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	6,  // 4: axe.preview.Command.input:type_name -> axe.preview.Input
+	5,  // 5: axe.preview.Command.force_rebuild:type_name -> axe.preview.ForceRebuild
+	7,  // 6: axe.preview.Input.touch_down:type_name -> axe.preview.TouchEvent
+	7,  // 7: axe.preview.Input.touch_move:type_name -> axe.preview.TouchEvent
+	7,  // 8: axe.preview.Input.touch_up:type_name -> axe.preview.TouchEvent
+	8,  // 9: axe.preview.Input.text:type_name -> axe.preview.TextEvent
+	10, // 10: axe.preview.Event.frame:type_name -> axe.preview.Frame
+	11, // 11: axe.preview.Event.stream_started:type_name -> axe.preview.StreamStarted
+	12, // 12: axe.preview.Event.stream_stopped:type_name -> axe.preview.StreamStopped
+	13, // 13: axe.preview.Event.stream_status:type_name -> axe.preview.StreamStatus
+	14, // 14: axe.preview.Event.protocol_error:type_name -> axe.preview.ProtocolError
+	15, // 15: axe.preview.Event.hello:type_name -> axe.preview.Hello
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_preview_proto_init() }
@@ -1149,14 +1206,15 @@ func file_preview_proto_init() {
 		(*Command_SwitchFile)(nil),
 		(*Command_NextPreview)(nil),
 		(*Command_Input)(nil),
+		(*Command_ForceRebuild)(nil),
 	}
-	file_preview_proto_msgTypes[5].OneofWrappers = []any{
+	file_preview_proto_msgTypes[6].OneofWrappers = []any{
 		(*Input_TouchDown)(nil),
 		(*Input_TouchMove)(nil),
 		(*Input_TouchUp)(nil),
 		(*Input_Text)(nil),
 	}
-	file_preview_proto_msgTypes[8].OneofWrappers = []any{
+	file_preview_proto_msgTypes[9].OneofWrappers = []any{
 		(*Event_Frame)(nil),
 		(*Event_StreamStarted)(nil),
 		(*Event_StreamStopped)(nil),
@@ -1170,7 +1228,7 @@ func file_preview_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_preview_proto_rawDesc), len(file_preview_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -144,6 +144,7 @@
       </div>
       <div class="card-actions">
         <button class="btn-device">Device</button>
+        <button class="btn-rebuild">Rebuild</button>
         <!-- Hidden by default; shown via showNextButton message when previewCount > 1. -->
         <button class="btn-next" style="display:none">Next</button>
         <button class="btn-remove">&times;</button>
@@ -270,6 +271,9 @@
       });
       card.querySelector('.btn-device').addEventListener('click', () => {
         vscode.postMessage({ type: 'changeDevice', streamId });
+      });
+      card.querySelector('.btn-rebuild').addEventListener('click', () => {
+        vscode.postMessage({ type: 'forceRebuild', streamId });
       });
       card.querySelector('.btn-next').addEventListener('click', () => {
         vscode.postMessage({ type: 'nextPreview', streamId });

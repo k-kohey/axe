@@ -477,6 +477,38 @@ suite("PreviewManager", () => {
 		assert.deepStrictEqual(parsed.nextPreview, {});
 	});
 
+	test("forceRebuild writes Command JSON to stdin with streamId", async () => {
+		const fakeProc = createFakeProcess();
+		const chunks: string[] = [];
+		fakeProc.stdin = new Writable({
+			write(chunk, _enc, cb) {
+				chunks.push(chunk.toString());
+				cb();
+			},
+		});
+
+		const spawnFn: SpawnFn = () => fakeProc;
+		const output = createFakeOutputChannel();
+		const statusBar = createFakeStatusBar();
+
+		const manager = new PreviewManager(output, statusBar, {
+			spawn: spawnFn,
+			getConfig: () => DEFAULT_CONFIG,
+		});
+
+		await manager.addStream(
+			"stream-a",
+			"/path/to/HogeView.swift",
+			"iPhone16,1",
+			"iOS-18-0",
+		);
+		manager.forceRebuild("stream-a");
+
+		const parsed = JSON.parse(chunks[1].trim());
+		assert.strictEqual(parsed.streamId, "stream-a");
+		assert.deepStrictEqual(parsed.forceRebuild, {});
+	});
+
 	test("sendInput writes Command JSON with streamId from message", async () => {
 		const fakeProc = createFakeProcess();
 		const chunks: string[] = [];
@@ -1035,6 +1067,20 @@ suite("PreviewManager", () => {
 
 		// Should not throw
 		manager.nextPreview("stream-a");
+		assert.strictEqual(manager.isRunning, false);
+	});
+
+	test("forceRebuild is no-op when no process", () => {
+		const output = createFakeOutputChannel();
+		const statusBar = createFakeStatusBar();
+
+		const manager = new PreviewManager(output, statusBar, {
+			spawn: () => createFakeProcess(),
+			getConfig: () => DEFAULT_CONFIG,
+		});
+
+		// Should not throw
+		manager.forceRebuild("stream-a");
 		assert.strictEqual(manager.isRunning, false);
 	});
 

@@ -126,6 +126,15 @@ func TestCommand_UnmarshalRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			name: "ForceRebuild",
+			json: `{"streamId":"stream-1","forceRebuild":{}}`,
+			checkFn: func(t *testing.T, cmd *pb.Command) {
+				if cmd.GetForceRebuild() == nil {
+					t.Fatal("expected ForceRebuild to be non-nil")
+				}
+			},
+		},
+		{
 			name: "Input_TouchDown",
 			json: `{"streamId":"stream-1","input":{"touchDown":{"x":0.5,"y":0.3}}}`,
 			checkFn: func(t *testing.T, cmd *pb.Command) {
@@ -423,8 +432,8 @@ func TestHello_MarshalFields(t *testing.T) {
 }
 
 func TestProtocolVersion_Constant(t *testing.T) {
-	if ProtocolVersion < 1 {
-		t.Errorf("ProtocolVersion = %d, want >= 1", ProtocolVersion)
+	if ProtocolVersion != 1 {
+		t.Errorf("ProtocolVersion = %d, want 1", ProtocolVersion)
 	}
 }
 

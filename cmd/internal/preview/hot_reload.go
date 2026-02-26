@@ -37,6 +37,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	fileChangeCh := make(chan string, 1)
 	switchFileCh := make(chan string, 1)
 	nextPreviewCh := make(chan struct{}, 1)
+	forceRebuildCh := make(chan struct{}, 1)
 	inputCh := make(chan *pb.Input, 1)
 
 	// Register as a listener on the shared watcher.
@@ -47,27 +48,28 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	if wctx.serve {
 		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
-		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	} else {
 		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
-		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
+		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	}
 
 	cfg := &eventLoopConfig{
-		sourceFile:    sourceFile,
-		pc:            pc,
-		bs:            bs,
-		dirs:          dirs,
-		wctx:          wctx,
-		ws:            ws,
-		hid:           hid,
-		fileChangeCh:  fileChangeCh,
-		switchFileCh:  switchFileCh,
-		nextPreviewCh: nextPreviewCh,
-		inputCh:       inputCh,
-		idbErrCh:      idbErrCh,
-		bootDiedCh:    bootDiedCh,
+		sourceFile:     sourceFile,
+		pc:             pc,
+		bs:             bs,
+		dirs:           dirs,
+		wctx:           wctx,
+		ws:             ws,
+		hid:            hid,
+		fileChangeCh:   fileChangeCh,
+		switchFileCh:   switchFileCh,
+		nextPreviewCh:  nextPreviewCh,
+		forceRebuildCh: forceRebuildCh,
+		inputCh:        inputCh,
+		idbErrCh:       idbErrCh,
+		bootDiedCh:     bootDiedCh,
 		onCancel: func() {
 			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
 		},

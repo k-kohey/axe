@@ -46,10 +46,11 @@ type stream struct {
 	done       chan struct{} // closed when stream goroutine exits
 
 	// Per-stream command channels (buffered size 1).
-	switchFileCh  chan string
-	nextPreviewCh chan struct{}
-	inputCh       chan *pb.Input
-	fileChangeCh  chan string // from shared watcher
+	switchFileCh   chan string
+	nextPreviewCh  chan struct{}
+	forceRebuildCh chan struct{}
+	inputCh        chan *pb.Input
+	fileChangeCh   chan string // from shared watcher
 
 	// Runtime state (set during stream initialization in the launcher).
 	dirs          previewDirs
@@ -157,6 +158,8 @@ func (sm *StreamManager) HandleCommand(ctx context.Context, cmd *pb.Command) {
 		sm.handleSwitchFile(cmd.GetStreamId(), cmd.GetSwitchFile())
 	case cmd.GetNextPreview() != nil:
 		sm.handleNextPreview(cmd.GetStreamId())
+	case cmd.GetForceRebuild() != nil:
+		sm.handleForceRebuild(cmd.GetStreamId())
 	case cmd.GetInput() != nil:
 		sm.handleInput(cmd.GetStreamId(), cmd.GetInput())
 	default:
@@ -174,16 +177,17 @@ func (sm *StreamManager) handleAddStream(ctx context.Context, streamID string, a
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	s := &stream{
-		id:            streamID,
-		file:          add.GetFile(),
-		deviceType:    add.GetDeviceType(),
-		runtime:       add.GetRuntime(),
-		cancel:        cancel,
-		done:          make(chan struct{}),
-		switchFileCh:  make(chan string, 1),
-		nextPreviewCh: make(chan struct{}, 1),
-		inputCh:       make(chan *pb.Input, 1),
-		fileChangeCh:  make(chan string, 1),
+		id:             streamID,
+		file:           add.GetFile(),
+		deviceType:     add.GetDeviceType(),
+		runtime:        add.GetRuntime(),
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		switchFileCh:   make(chan string, 1),
+		nextPreviewCh:  make(chan struct{}, 1),
+		forceRebuildCh: make(chan struct{}, 1),
+		inputCh:        make(chan *pb.Input, 1),
+		fileChangeCh:   make(chan string, 1),
 	}
 	sm.streams[streamID] = s
 	sm.mu.Unlock()
@@ -243,6 +247,21 @@ func (sm *StreamManager) handleNextPreview(streamID string) {
 	case s.nextPreviewCh <- struct{}{}:
 	default:
 		slog.Warn("NextPreview command dropped (stream busy)", "streamId", streamID)
+	}
+}
+
+func (sm *StreamManager) handleForceRebuild(streamID string) {
+	sm.mu.Lock()
+	s, ok := sm.streams[streamID]
+	sm.mu.Unlock()
+	if !ok {
+		slog.Warn("ForceRebuild for unknown streamId", "streamId", streamID)
+		return
+	}
+	select {
+	case s.forceRebuildCh <- struct{}{}:
+	default:
+		slog.Warn("ForceRebuild command dropped (stream busy)", "streamId", streamID)
 	}
 }
 

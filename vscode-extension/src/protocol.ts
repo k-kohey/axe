@@ -8,6 +8,7 @@ export type {
 	Command,
 	Event,
 	Frame,
+	ForceRebuild,
 	Hello,
 	Input,
 	NextPreview,
