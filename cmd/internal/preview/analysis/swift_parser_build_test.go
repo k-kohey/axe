@@ -1,6 +1,8 @@
 package analysis
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,6 +130,52 @@ func TestParseChecksumFor(t *testing.T) {
 	})
 }
 
+func TestVerifyCachedBinaryHash(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "axe-parser")
+	binData := []byte("cached-binary")
+	if err := os.WriteFile(binPath, binData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(binData)
+	hashHex := hex.EncodeToString(hash[:])
+
+	t.Run("matches sidecar hash", func(t *testing.T) {
+		if err := os.WriteFile(checksumSidecarPath(binPath), []byte(hashHex+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ok, err := verifyCachedBinaryHash(binPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !ok {
+			t.Fatal("expected hash match")
+		}
+	})
+
+	t.Run("detects mismatch", func(t *testing.T) {
+		if err := os.WriteFile(checksumSidecarPath(binPath), []byte("deadbeef\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ok, err := verifyCachedBinaryHash(binPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ok {
+			t.Fatal("expected hash mismatch")
+		}
+	})
+
+	t.Run("errors when sidecar missing", func(t *testing.T) {
+		_ = os.Remove(checksumSidecarPath(binPath))
+		if _, err := verifyCachedBinaryHash(binPath); err == nil {
+			t.Fatal("expected error when sidecar is missing")
+		}
+	})
+}
+
 // TestDownloadSwiftBinary is not parallel because it mutates the global Version variable.
 func TestDownloadSwiftBinary(t *testing.T) {
 	origVersion := Version
@@ -163,6 +211,11 @@ func TestDownloadSwiftBinary(t *testing.T) {
 		}
 		binPath := filepath.Join(binDir, "axe-parser")
 		if err := os.WriteFile(binPath, []byte("cached-binary"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		hash := sha256.Sum256([]byte("cached-binary"))
+		hashHex := hex.EncodeToString(hash[:])
+		if err := os.WriteFile(checksumSidecarPath(binPath), []byte(hashHex+"\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 

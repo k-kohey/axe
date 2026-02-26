@@ -20,7 +20,11 @@ func saveSnapshotToTemp(pngData []byte, address string) (string, error) {
 	if err := validateAddress(address); err != nil {
 		return "", err
 	}
-	path := filepath.Join(sessionTempDir(), fmt.Sprintf("axe_snapshot_%s.png", address))
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(tempDir, fmt.Sprintf("axe_snapshot_%s.png", address))
 	if err := os.WriteFile(path, pngData, 0o600); err != nil {
 		return "", fmt.Errorf("failed to write snapshot: %w", err)
 	}

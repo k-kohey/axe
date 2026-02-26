@@ -19,19 +19,19 @@ import (
 var (
 	tempDirOnce sync.Once
 	tempDir     string
+	tempDirErr  error
 )
 
 // sessionTempDir returns a per-session temporary directory.
 // Files are isolated from other sessions, preventing TOCTOU and temp file conflicts.
-func sessionTempDir() string {
+func sessionTempDir() (string, error) {
 	tempDirOnce.Do(func() {
-		var err error
-		tempDir, err = os.MkdirTemp("", "axe-view-*")
-		if err != nil {
-			tempDir = os.TempDir() // fallback
-		}
+		tempDir, tempDirErr = os.MkdirTemp("", "axe-view-*")
 	})
-	return tempDir
+	if tempDirErr != nil {
+		return "", fmt.Errorf("creating session temp dir: %w", tempDirErr)
+	}
+	return tempDir, nil
 }
 
 var validAddress = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
@@ -61,7 +61,11 @@ func fetchHierarchy(appName string, device string) (*rawBplistData, error) {
 	}
 	defer cleanup()
 
-	bplistPath := filepath.Join(sessionTempDir(), "axe_fetchViewHierarchy.bplist")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return nil, err
+	}
+	bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
 
 	name, err := platform.ResolveAppName(appName)
 	if err != nil {
@@ -169,7 +173,11 @@ func readSwiftUITreeJSON(jsonPath string, compact bool) ([]SwiftUINode, []byte, 
 // fetchSwiftUITree runs LLDB to fetch the SwiftUI tree JSON for the given view address
 // and parses it into SwiftUINode trees.
 func fetchSwiftUITree(appName string, address string, compact bool, device string) ([]SwiftUINode, []byte, error) {
-	swiftuiJSON := filepath.Join(sessionTempDir(), "axe_swiftui_tree.json")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	swiftuiJSON := filepath.Join(tempDir, "axe_swiftui_tree.json")
 
 	if err := runSwiftUITreeLLDB(appName, address, swiftuiJSON, device); err != nil {
 		return nil, nil, err
@@ -197,8 +205,12 @@ func RunTree(appName string, maxDepth int, frontmost bool, device string) (TreeO
 		}
 		defer cleanup()
 
-		bplistPath := filepath.Join(sessionTempDir(), "axe_fetchViewHierarchy.bplist")
-		frontmostPath := filepath.Join(sessionTempDir(), "axe_frontmost_view.txt")
+		tempDir, err := sessionTempDir()
+		if err != nil {
+			return TreeOutput{}, err
+		}
+		bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
+		frontmostPath := filepath.Join(tempDir, "axe_frontmost_view.txt")
 
 		name, err := platform.ResolveAppName(appName)
 		if err != nil {
@@ -261,7 +273,11 @@ func RunTree(appName string, maxDepth int, frontmost bool, device string) (TreeO
 // RunDetail fetches the detail for a specific view address.
 // swiftUI should be "none", "compact", or "full".
 func RunDetail(appName string, address string, swiftUI string, device string) (DetailOutput, error) {
-	bplistPath := filepath.Join(sessionTempDir(), "axe_fetchViewHierarchy.bplist")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return DetailOutput{}, err
+	}
+	bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
 	cacheMaxAgeMin := 3
 
 	// Check cache: use existing bplist if updated within cacheMaxAgeMin minutes.
@@ -329,7 +345,7 @@ func RunDetail(appName string, address string, swiftUI string, device string) (D
 	// Fetch SwiftUI tree in a separate LLDB session to avoid
 	// ObjC/Swift language-switch issues within a single session.
 	if uikit.IsHostingView && swiftUI != "none" {
-		swiftuiJSON := filepath.Join(sessionTempDir(), "axe_swiftui_tree.json")
+		swiftuiJSON := filepath.Join(tempDir, "axe_swiftui_tree.json")
 		if err := runSwiftUITreeLLDB(appName, address, swiftuiJSON, device); err != nil {
 			slog.Warn("Failed to fetch SwiftUI tree", "error", err)
 			fmt.Fprintln(os.Stderr, "\nNote: SwiftUI tree could not be retrieved. _viewDebugData() may not be supported for this view.")
