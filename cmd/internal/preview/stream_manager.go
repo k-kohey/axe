@@ -481,54 +481,76 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		return
 	}
 
-	// 6. Build the project.
-	sendStatus("building")
-	if err := buildProject(ctx, sm.pc, s.dirs, sm.build); err != nil {
-		s.sendStopped(sm.ew, "build_error", "Build failed", err.Error())
-		return
+	// 6. Optimistic path: reuse existing app build artifacts if available.
+	// If thunk compilation fails, fall back to full build and retry once.
+	builtThisLaunch := false
+	if !hasPreviousBuild(bs, s.dirs) {
+		sendStatus("building")
+		if err := buildProject(ctx, sm.pc, s.dirs, sm.build); err != nil {
+			s.sendStopped(sm.ew, "build_error", "Build failed", err.Error())
+			return
+		}
+		builtThisLaunch = true
+		sm.ensureCompilerPathsExtracted(ctx, bs, s.dirs)
+	} else {
+		sendStatus("reusing_build")
+		slog.Info("Reusing previous app build artifacts for stream launch", "streamId", s.id, "buildDir", s.dirs.Build)
 	}
 
-	// 7. Extract compiler paths from build output (once).
-	sm.ensureCompilerPathsExtracted(ctx, bs, s.dirs)
-
-	// 8. Resolve dependencies using index store for transitive graph.
+	// 7. Prepare dependency graph + compile thunk (shared by optimistic path and fallback retry).
 	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	// Load (or refresh) the shared Index Store cache. The first stream to
-	// build populates it; subsequent streams reuse the same instance.
-	cache, cacheErr := analysis.LoadIndexStore(ctx, s.dirs.IndexStorePath(), projectRoot)
-	if cacheErr != nil && ctx.Err() == nil {
-		slog.Warn("Index store cache unavailable for stream",
-			"streamId", s.id, "err", cacheErr)
-	}
-	sm.indexCache.Set(cache)
+	compileAttempt := func() (*analysis.DependencyGraph, []string, string, error) {
+		sendStatus("compiling_thunk")
+		// Load (or refresh) the shared Index Store cache. The first stream to
+		// build populates it; subsequent streams reuse the same instance.
+		cache, cacheErr := analysis.LoadIndexStore(ctx, s.dirs.IndexStorePath(), projectRoot)
+		if cacheErr != nil && ctx.Err() == nil {
+			slog.Warn("Index store cache unavailable for stream",
+				"streamId", s.id, "err", cacheErr)
+		}
+		sm.indexCache.Set(cache)
 
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, sm.indexCache.Get())
-	if err != nil && ctx.Err() == nil {
-		slog.Warn("Failed to resolve dependencies, proceeding with target only",
-			"streamId", s.id, "err", err)
-	}
-	trackedFiles := append([]string{s.file}, depFiles...)
+		depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, sm.indexCache.Get())
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("Failed to resolve dependencies, proceeding with target only",
+				"streamId", s.id, "err", err)
+		}
+		trackedFiles := append([]string{s.file}, depFiles...)
 
-	files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
+		files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
+		if err != nil {
+			return nil, nil, "", err
+		}
+
+		thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
+		if err != nil {
+			return nil, nil, "", err
+		}
+
+		dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return depGraph, trackedFiles, dylibPath, nil
+	}
+
+	depGraph, trackedFiles, dylibPath, err := compileAttempt()
+	if err != nil && !builtThisLaunch {
+		slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
+		sendStatus("building")
+		if buildErr := buildProject(ctx, sm.pc, s.dirs, sm.build); buildErr != nil {
+			s.sendStopped(sm.ew, "build_error", "Build failed", buildErr.Error())
+			return
+		}
+		sm.ensureCompilerPathsExtracted(ctx, bs, s.dirs)
+		depGraph, trackedFiles, dylibPath, err = compileAttempt()
+	}
 	if err != nil {
 		s.sendStopped(sm.ew, "build_error", err.Error(), "")
 		return
 	}
 
-	// 9. Generate thunks and compile.
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	// 10. Install app and compile loader.
+	// 8. Install app and compile loader.
 	sendStatus("installing")
 	terminateApp(ctx, bs, udid, sm.deviceSetPath, sm.app)
 
@@ -544,14 +566,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 	s.loaderPath = loaderPath
 
-	// 11. Launch app with hot-reload.
+	// 9. Launch app with hot-reload.
 	sendStatus("running")
 	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath, sm.app); err != nil {
 		s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
 		return
 	}
 
-	// 12. Count previews and send StreamStarted.
+	// 10. Count previews and send StreamStarted.
 	previewCount := 0
 	if blocks, parseErr := analysis.PreviewBlocks(s.file); parseErr == nil {
 		previewCount = len(blocks)

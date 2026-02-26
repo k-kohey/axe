@@ -740,7 +740,7 @@ struct MapDepView: View {
 	thunkPaths, moduleDir := generateThunksForTest(t, sdk,
 		map[string]string{
 			"ImportMergeHost.swift": fixtureTarget,
-			"MapDepView.swift":     fixtureDep,
+			"MapDepView.swift":      fixtureDep,
 		},
 		"ImportMergeHost.swift",
 	)

@@ -381,7 +381,7 @@ func TestMultiFile_DepWithNoComputedProperties(t *testing.T) {
 	// The thunk should still compile.
 	thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
 		map[string]string{
-			"Config.swift":         fixtureMultiStoredOnlyDep,
+			"Config.swift":        fixtureMultiStoredOnlyDep,
 			"StoredDepHost.swift": fixtureMultiStoredOnlyTarget,
 		},
 		"StoredDepHost.swift",
@@ -493,8 +493,8 @@ func TestMultiFile_PrivateTypeCollisionAcrossFiles(t *testing.T) {
 	// Per-file thunks isolate private types, so this should compile.
 	runThunkCompileTest(t, sdk,
 		map[string]string{
-			"StyledViewA.swift":      fixtureMultiPrivateCollisionA,
-			"StyledViewB.swift":      fixtureMultiPrivateCollisionB,
+			"StyledViewA.swift":       fixtureMultiPrivateCollisionA,
+			"StyledViewB.swift":       fixtureMultiPrivateCollisionB,
 			"PrivCollisionHost.swift": fixtureMultiPrivateCollisionTarget,
 		},
 		"PrivCollisionHost.swift",
@@ -598,7 +598,7 @@ func TestMultiFile_CrossFileShortNameNoCollision(t *testing.T) {
 	runThunkCompileTest(t, sdk,
 		map[string]string{
 			"CrossShortHost.swift": fixtureMultiCrossShortTarget,
-			"PanelHeader.swift":   fixtureMultiCrossShortDep,
+			"PanelHeader.swift":    fixtureMultiCrossShortDep,
 		},
 		"CrossShortHost.swift",
 	)
