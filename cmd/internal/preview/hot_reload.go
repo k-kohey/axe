@@ -15,6 +15,20 @@ import (
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
+func sendWatchStatus(wctx watchContext, phase string) {
+	if !wctx.serve || wctx.ew == nil {
+		return
+	}
+	if err := wctx.ew.Send(&pb.Event{
+		StreamId: wctx.streamID,
+		Payload: &pb.Event_StreamStatus{
+			StreamStatus: &pb.StreamStatus{Phase: phase},
+		},
+	}); err != nil {
+		slog.Warn("Failed to send StreamStatus in watcher", "phase", phase, "err", err)
+	}
+}
+
 // runWatcher sets up file watching and command dispatching, then delegates
 // to the unified event loop. It uses SharedWatcher for file change detection
 // and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
@@ -37,6 +51,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	fileChangeCh := make(chan string, 1)
 	switchFileCh := make(chan string, 1)
 	nextPreviewCh := make(chan struct{}, 1)
+	forceRebuildCh := make(chan struct{}, 1)
 	inputCh := make(chan *pb.Input, 1)
 
 	// Register as a listener on the shared watcher.
@@ -47,27 +62,28 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	if wctx.serve {
 		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
-		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	} else {
 		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
-		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, inputCh)
+		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	}
 
 	cfg := &eventLoopConfig{
-		sourceFile:    sourceFile,
-		pc:            pc,
-		bs:            bs,
-		dirs:          dirs,
-		wctx:          wctx,
-		ws:            ws,
-		hid:           hid,
-		fileChangeCh:  fileChangeCh,
-		switchFileCh:  switchFileCh,
-		nextPreviewCh: nextPreviewCh,
-		inputCh:       inputCh,
-		idbErrCh:      idbErrCh,
-		bootDiedCh:    bootDiedCh,
+		sourceFile:     sourceFile,
+		pc:             pc,
+		bs:             bs,
+		dirs:           dirs,
+		wctx:           wctx,
+		ws:             ws,
+		hid:            hid,
+		fileChangeCh:   fileChangeCh,
+		switchFileCh:   switchFileCh,
+		nextPreviewCh:  nextPreviewCh,
+		forceRebuildCh: forceRebuildCh,
+		inputCh:        inputCh,
+		idbErrCh:       idbErrCh,
+		bootDiedCh:     bootDiedCh,
 		onCancel: func() {
 			fmt.Fprintln(os.Stderr, "\nStopping watcher...")
 		},
@@ -103,6 +119,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 		cache = ws.indexCache.Get()
 	}
 
+	sendWatchStatus(wctx, "compiling_thunk")
 	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, cache, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -114,6 +131,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
 		return err
 	}
+	sendWatchStatus(wctx, "running")
 
 	ws.mu.Lock()
 	ws.reloadCounter++
@@ -242,6 +260,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	}()
 
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
+	sendWatchStatus(wctx, "building")
 
 	if err := buildProject(ctx, pc, dirs, wctx.build); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
@@ -283,6 +302,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("thunk: %w", err)
 	}
 
+	sendWatchStatus(wctx, "compiling_thunk")
 	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -293,10 +313,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
 
+	sendWatchStatus(wctx, "installing")
 	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath, wctx.app, wctx.copier); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 
+	sendWatchStatus(wctx, "running")
 	if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {
 		return fmt.Errorf("launch: %w", err)
 	}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="Build Go + Swift CLIs and install to ~/.local/bin"
-#MISE depends=["proto"]
+#MISE description="Build Go + Swift CLIs and install to ~/.local/bin, then build and install VSCode extension"
+#MISE depends=["proto", "vscode-deps"]
 
 set -euo pipefail
 
@@ -20,3 +20,14 @@ for product in axe-parser axe-index-reader; do
   cp "$bin/$product" "$INSTALL_DIR/$product"
   echo "Installed $product to $INSTALL_DIR/$product"
 done
+
+# VSCode extension
+cd vscode-extension
+pnpm run compile
+pnpm run package
+NAME=$(node -p "require('./package.json').name")
+VERSION=$(node -p "require('./package.json').version")
+VSIX="${NAME}-${VERSION}.vsix"
+code --install-extension "$VSIX"
+rm -f "$VSIX"
+echo "Installed VSCode extension"

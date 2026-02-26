@@ -114,6 +114,20 @@
     }
     .card .device-name { font-weight: 600; color: #eee; }
     .card .file-name { color: #888; font-size: 11px; }
+    .card .status-mini {
+      color: #a0a0a0;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .card .status-mini.loading {
+      animation: statusPulse 1.1s ease-in-out infinite;
+    }
+    @keyframes statusPulse {
+      0% { opacity: 0.45; }
+      50% { opacity: 1; }
+      100% { opacity: 0.45; }
+    }
     .card .card-actions {
       padding: 4px 12px 8px; display: flex; gap: 8px;
     }
@@ -141,9 +155,11 @@
       <div class="card-info">
         <span class="device-name"></span>
         <span class="file-name"></span>
+        <span class="status-mini loading">INITIALIZING...</span>
       </div>
       <div class="card-actions">
         <button class="btn-device">Device</button>
+        <button class="btn-rebuild">Rebuild</button>
         <!-- Hidden by default; shown via showNextButton message when previewCount > 1. -->
         <button class="btn-next" style="display:none">Next</button>
         <button class="btn-remove">&times;</button>
@@ -184,6 +200,25 @@
       };
     }
 
+    function phaseLabel(phase) {
+      switch (phase) {
+        case 'booting': return 'Booting simulator...';
+        case 'reusing_build': return 'Reusing previous build...';
+        case 'compiling_thunk': return 'Compiling preview thunk...';
+        case 'building': return 'Building project...';
+        case 'installing': return 'Installing app...';
+        case 'running': return 'Launching app...';
+        default: return phase || 'Initializing...';
+      }
+    }
+
+    function ensureStableButtons(streamId) {
+      const rebuild = queryCard(streamId, '.btn-rebuild');
+      if (rebuild) rebuild.style.display = '';
+      const device = queryCard(streamId, '.btn-device');
+      if (device) device.style.display = '';
+    }
+
     window.addEventListener('message', (e) => {
       const msg = e.data;
       switch (msg.type) {
@@ -195,6 +230,7 @@
           card.querySelector('.file-name').textContent = msg.fileName || '';
           grid.appendChild(card);
           setupCardEvents(card, msg.streamId);
+          ensureStableButtons(msg.streamId);
           break;
         }
         case 'removeCard': {
@@ -211,16 +247,33 @@
             if (frame) frame.style.display = '';
             const overlay = queryCard(msg.streamId, '.status-overlay');
             if (overlay) overlay.style.display = 'none';
+            const mini = queryCard(msg.streamId, '.status-mini');
+            if (mini && mini.textContent === 'Launching app...') {
+              mini.textContent = 'LIVE';
+              mini.classList.remove('loading');
+            }
+            ensureStableButtons(msg.streamId);
           }
           break;
         }
         case 'status': {
+          const label = phaseLabel(msg.phase);
           const frame = queryCard(msg.streamId, '.device-frame');
           if (frame) frame.style.display = 'none';
           const text = queryCard(msg.streamId, '.status-text');
-          if (text) text.textContent = msg.phase;
+          if (text) text.textContent = label;
           const overlay = queryCard(msg.streamId, '.status-overlay');
           if (overlay) overlay.style.display = '';
+          const mini = queryCard(msg.streamId, '.status-mini');
+          if (mini) {
+            mini.textContent = label;
+            if (label === 'LIVE') {
+              mini.classList.remove('loading');
+            } else {
+              mini.classList.add('loading');
+            }
+          }
+          ensureStableButtons(msg.streamId);
           break;
         }
         case 'showNextButton': {
@@ -270,6 +323,9 @@
       });
       card.querySelector('.btn-device').addEventListener('click', () => {
         vscode.postMessage({ type: 'changeDevice', streamId });
+      });
+      card.querySelector('.btn-rebuild').addEventListener('click', () => {
+        vscode.postMessage({ type: 'forceRebuild', streamId });
       });
       card.querySelector('.btn-next').addEventListener('click', () => {
         vscode.postMessage({ type: 'nextPreview', streamId });

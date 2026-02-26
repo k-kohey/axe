@@ -178,6 +178,14 @@ suite("Protocol", () => {
 			assert.deepStrictEqual(parsed.nextPreview, {});
 		});
 
+		test("serializes ForceRebuild command", () => {
+			const cmd: Command = { streamId: "s1", forceRebuild: {} };
+			const json = serializeCommand(cmd);
+			const parsed = JSON.parse(json);
+			assert.strictEqual(parsed.streamId, "s1");
+			assert.deepStrictEqual(parsed.forceRebuild, {});
+		});
+
 		test("serializes Input command with TouchDown", () => {
 			const cmd: Command = {
 				streamId: "s1",
@@ -208,6 +216,7 @@ suite("Protocol", () => {
 			assert.ok(!json.includes("removeStream"));
 			assert.ok(!json.includes("switchFile"));
 			assert.ok(!json.includes("nextPreview"));
+			assert.ok(!json.includes("forceRebuild"));
 			assert.ok(!json.includes("input"));
 		});
 

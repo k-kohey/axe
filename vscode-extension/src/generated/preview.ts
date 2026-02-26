@@ -19,6 +19,7 @@ export interface Command {
   switchFile?: SwitchFile | undefined;
   nextPreview?: NextPreview | undefined;
   input?: Input | undefined;
+  forceRebuild?: ForceRebuild | undefined;
 }
 
 /**
@@ -45,6 +46,10 @@ export interface SwitchFile {
 
 /** NextPreview cycles to the next #Preview block in the current file. */
 export interface NextPreview {
+}
+
+/** ForceRebuild triggers a full rebuild + relaunch for the current stream. */
+export interface ForceRebuild {
 }
 
 /** Input forwards user interaction (touch/text) to the simulator. */

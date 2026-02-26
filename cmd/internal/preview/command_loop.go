@@ -81,7 +81,7 @@ func readProtocolCommands(ctx context.Context, ew *protocol.EventWriter, ch chan
 // Commands that require multi-step HID operations (tap, swipe) are handled
 // directly via the HIDHandler since they cannot be represented as pb.Input.
 func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *protocol.HIDHandler,
-	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, inputCh chan<- *pb.Input) {
+	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, forceRebuildCh chan<- struct{}, inputCh chan<- *pb.Input) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -99,6 +99,11 @@ func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *
 			case "nextPreview":
 				select {
 				case nextPreviewCh <- struct{}{}:
+				default:
+				}
+			case "forceRebuild":
+				select {
+				case forceRebuildCh <- struct{}{}:
 				default:
 				}
 			case "tap":
@@ -132,7 +137,7 @@ func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *
 
 // dispatchProtocolCommands reads protocol Commands and dispatches them to typed channels.
 func dispatchProtocolCommands(ctx context.Context, protoCmdCh <-chan *pb.Command, hid *protocol.HIDHandler,
-	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, inputCh chan<- *pb.Input) {
+	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, forceRebuildCh chan<- struct{}, inputCh chan<- *pb.Input) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -150,6 +155,11 @@ func dispatchProtocolCommands(ctx context.Context, protoCmdCh <-chan *pb.Command
 			case cmd.GetNextPreview() != nil:
 				select {
 				case nextPreviewCh <- struct{}{}:
+				default:
+				}
+			case cmd.GetForceRebuild() != nil:
+				select {
+				case forceRebuildCh <- struct{}{}:
 				default:
 				}
 			case cmd.GetInput() != nil:

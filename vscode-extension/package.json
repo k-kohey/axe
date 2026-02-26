@@ -30,6 +30,10 @@
       {
         "command": "axe.nextPreview",
         "title": "axe: Next Preview"
+      },
+      {
+        "command": "axe.rebuildPreview",
+        "title": "axe: Rebuild Preview"
       }
     ],
     "configuration": {

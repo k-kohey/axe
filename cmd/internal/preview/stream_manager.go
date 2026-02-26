@@ -46,10 +46,11 @@ type stream struct {
 	done       chan struct{} // closed when stream goroutine exits
 
 	// Per-stream command channels (buffered size 1).
-	switchFileCh  chan string
-	nextPreviewCh chan struct{}
-	inputCh       chan *pb.Input
-	fileChangeCh  chan string // from shared watcher
+	switchFileCh   chan string
+	nextPreviewCh  chan struct{}
+	forceRebuildCh chan struct{}
+	inputCh        chan *pb.Input
+	fileChangeCh   chan string // from shared watcher
 
 	// Runtime state (set during stream initialization in the launcher).
 	dirs          previewDirs
@@ -157,6 +158,8 @@ func (sm *StreamManager) HandleCommand(ctx context.Context, cmd *pb.Command) {
 		sm.handleSwitchFile(cmd.GetStreamId(), cmd.GetSwitchFile())
 	case cmd.GetNextPreview() != nil:
 		sm.handleNextPreview(cmd.GetStreamId())
+	case cmd.GetForceRebuild() != nil:
+		sm.handleForceRebuild(cmd.GetStreamId())
 	case cmd.GetInput() != nil:
 		sm.handleInput(cmd.GetStreamId(), cmd.GetInput())
 	default:
@@ -174,16 +177,17 @@ func (sm *StreamManager) handleAddStream(ctx context.Context, streamID string, a
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	s := &stream{
-		id:            streamID,
-		file:          add.GetFile(),
-		deviceType:    add.GetDeviceType(),
-		runtime:       add.GetRuntime(),
-		cancel:        cancel,
-		done:          make(chan struct{}),
-		switchFileCh:  make(chan string, 1),
-		nextPreviewCh: make(chan struct{}, 1),
-		inputCh:       make(chan *pb.Input, 1),
-		fileChangeCh:  make(chan string, 1),
+		id:             streamID,
+		file:           add.GetFile(),
+		deviceType:     add.GetDeviceType(),
+		runtime:        add.GetRuntime(),
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		switchFileCh:   make(chan string, 1),
+		nextPreviewCh:  make(chan struct{}, 1),
+		forceRebuildCh: make(chan struct{}, 1),
+		inputCh:        make(chan *pb.Input, 1),
+		fileChangeCh:   make(chan string, 1),
 	}
 	sm.streams[streamID] = s
 	sm.mu.Unlock()
@@ -243,6 +247,21 @@ func (sm *StreamManager) handleNextPreview(streamID string) {
 	case s.nextPreviewCh <- struct{}{}:
 	default:
 		slog.Warn("NextPreview command dropped (stream busy)", "streamId", streamID)
+	}
+}
+
+func (sm *StreamManager) handleForceRebuild(streamID string) {
+	sm.mu.Lock()
+	s, ok := sm.streams[streamID]
+	sm.mu.Unlock()
+	if !ok {
+		slog.Warn("ForceRebuild for unknown streamId", "streamId", streamID)
+		return
+	}
+	select {
+	case s.forceRebuildCh <- struct{}{}:
+	default:
+		slog.Warn("ForceRebuild command dropped (stream busy)", "streamId", streamID)
 	}
 }
 
@@ -435,81 +454,182 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 	s.dirs = dirs
 
-	// 3. Boot simulator headlessly via idb_companion (skipped if reusing warm device).
-	if bootCompanion == nil {
-		var err error
-		bootCompanion, err = idb.BootHeadless(udid, sm.deviceSetPath)
+	launcherCtx, launcherCancel := context.WithCancel(ctx)
+	defer launcherCancel()
+
+	type bootResult struct {
+		companion companionProcess
+		err       error
+	}
+	type compileResult struct {
+		bs           *buildSettings
+		depGraph     *analysis.DependencyGraph
+		trackedFiles []string
+		dylibPath    string
+		buildFailed  bool
+		buildDiag    string
+		err          error
+	}
+
+	bootResCh := make(chan bootResult, 1)
+	compileResCh := make(chan compileResult, 1)
+
+	// 3. Boot simulator in parallel with build/compile preparation.
+	go func() {
+		res := bootResult{companion: bootCompanion}
+		if res.companion == nil {
+			var err error
+			res.companion, err = bootHeadlessWithRetry(launcherCtx, udid, sm.deviceSetPath)
+			if err != nil {
+				res.err = fmt.Errorf("booting simulator: %w", err)
+			}
+		}
+		bootResCh <- res
+	}()
+
+	// 4. Build + compile path (runs in parallel with boot).
+	go func() {
+		res := compileResult{}
+		bs, err := sm.ensureBuildSettings(launcherCtx, s.dirs)
 		if err != nil {
-			s.sendStopped(sm.ew, "boot_error", fmt.Sprintf("booting simulator: %v", err), "")
+			res.err = err
+			compileResCh <- res
 			return
 		}
-	}
-	s.bootCompanion = bootCompanion
+		res.bs = bs
 
-	// 4. Verify the simulator didn't crash immediately after boot.
+		// Optimistic path: reuse existing app build artifacts if available.
+		// If thunk compilation fails, fall back to full build and retry once.
+		builtThisLaunch := false
+		if !hasPreviousBuild(bs, s.dirs) {
+			sendStatus("building")
+			if err := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); err != nil {
+				res.buildFailed = true
+				res.buildDiag = err.Error()
+				res.err = fmt.Errorf("build failed")
+				compileResCh <- res
+				return
+			}
+			builtThisLaunch = true
+			sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
+		} else {
+			sendStatus("reusing_build")
+			slog.Info("Reusing previous app build artifacts for stream launch", "streamId", s.id, "buildDir", s.dirs.Build)
+		}
+
+		projectRoot := filepath.Dir(sm.pc.primaryPath())
+		compileAttempt := func() (*analysis.DependencyGraph, []string, string, error) {
+			sendStatus("compiling_thunk")
+			// Load (or refresh) the shared Index Store cache. The first stream to
+			// build populates it; subsequent streams reuse the same instance.
+			cache, cacheErr := analysis.LoadIndexStore(launcherCtx, s.dirs.IndexStorePath(), projectRoot)
+			if cacheErr != nil && launcherCtx.Err() == nil {
+				slog.Warn("Index store cache unavailable for stream",
+					"streamId", s.id, "err", cacheErr)
+			}
+			sm.indexCache.Set(cache)
+
+			depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(launcherCtx, s.file, sm.indexCache.Get())
+			if err != nil && launcherCtx.Err() == nil {
+				slog.Warn("Failed to resolve dependencies, proceeding with target only",
+					"streamId", s.id, "err", err)
+			}
+			trackedFiles := append([]string{s.file}, depFiles...)
+
+			files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
+			if err != nil {
+				return nil, nil, "", err
+			}
+
+			thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
+			if err != nil {
+				return nil, nil, "", err
+			}
+
+			dylibPath, err := codegen.CompileThunk(launcherCtx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+			if err != nil {
+				return nil, nil, "", err
+			}
+			return depGraph, trackedFiles, dylibPath, nil
+		}
+
+		res.depGraph, res.trackedFiles, res.dylibPath, err = compileAttempt()
+		if err != nil && !builtThisLaunch {
+			slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
+			sendStatus("building")
+			if buildErr := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); buildErr != nil {
+				res.buildFailed = true
+				res.buildDiag = buildErr.Error()
+				res.err = fmt.Errorf("build failed")
+				compileResCh <- res
+				return
+			}
+			sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
+			res.depGraph, res.trackedFiles, res.dylibPath, err = compileAttempt()
+		}
+		if err != nil {
+			res.err = err
+		}
+		compileResCh <- res
+	}()
+
+	var (
+		bootRes    bootResult
+		compileRes compileResult
+		bootDone   bool
+		compDone   bool
+	)
+	for !bootDone || !compDone {
+		select {
+		case br := <-bootResCh:
+			bootRes = br
+			bootDone = true
+			if br.err != nil {
+				launcherCancel()
+			}
+		case cr := <-compileResCh:
+			compileRes = cr
+			compDone = true
+			if cr.err != nil {
+				launcherCancel()
+			}
+		}
+	}
+	if bootRes.err != nil || compileRes.err != nil {
+		launcherCancel()
+		if bootRes.companion != nil {
+			if stopErr := bootRes.companion.Stop(); stopErr != nil {
+				slog.Debug("Failed to stop boot companion after parallel launch failure", "streamId", s.id, "err", stopErr)
+			}
+		}
+		if bootRes.err != nil {
+			s.sendStopped(sm.ew, "boot_error", bootRes.err.Error(), "")
+			return
+		}
+		if compileRes.buildFailed {
+			s.sendStopped(sm.ew, "build_error", "Build failed", compileRes.buildDiag)
+			return
+		}
+		s.sendStopped(sm.ew, "build_error", compileRes.err.Error(), "")
+		return
+	}
+
+	s.bootCompanion = bootRes.companion
+	bs := compileRes.bs
+	depGraph := compileRes.depGraph
+	trackedFiles := compileRes.trackedFiles
+	dylibPath := compileRes.dylibPath
+
+	// Verify the simulator didn't crash immediately after boot.
 	select {
-	case <-bootCompanion.Done():
+	case <-s.bootCompanion.Done():
 		s.sendStopped(sm.ew, "boot_error",
-			fmt.Sprintf("simulator crashed immediately after boot: %v", bootCompanion.Err()), "")
+			fmt.Sprintf("simulator crashed immediately after boot: %v", s.bootCompanion.Err()), "")
 		return
 	default:
 	}
 
-	// 5. Fetch build settings (lazy, shared across streams).
-	bs, err := sm.ensureBuildSettings(ctx, s.dirs)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	// 6. Build the project.
-	sendStatus("building")
-	if err := buildProject(ctx, sm.pc, s.dirs, sm.build); err != nil {
-		s.sendStopped(sm.ew, "build_error", "Build failed", err.Error())
-		return
-	}
-
-	// 7. Extract compiler paths from build output (once).
-	sm.ensureCompilerPathsExtracted(ctx, bs, s.dirs)
-
-	// 8. Resolve dependencies using index store for transitive graph.
-	projectRoot := filepath.Dir(sm.pc.primaryPath())
-	// Load (or refresh) the shared Index Store cache. The first stream to
-	// build populates it; subsequent streams reuse the same instance.
-	cache, cacheErr := analysis.LoadIndexStore(ctx, s.dirs.IndexStorePath(), projectRoot)
-	if cacheErr != nil && ctx.Err() == nil {
-		slog.Warn("Index store cache unavailable for stream",
-			"streamId", s.id, "err", cacheErr)
-	}
-	sm.indexCache.Set(cache)
-
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, s.file, sm.indexCache.Get())
-	if err != nil && ctx.Err() == nil {
-		slog.Warn("Failed to resolve dependencies, proceeding with target only",
-			"streamId", s.id, "err", err)
-	}
-	trackedFiles := append([]string{s.file}, depFiles...)
-
-	files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	// 9. Generate thunks and compile.
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-
-	// 10. Install app and compile loader.
+	// 8. Install app and compile loader.
 	sendStatus("installing")
 	terminateApp(ctx, bs, udid, sm.deviceSetPath, sm.app)
 
@@ -525,14 +645,14 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 	s.loaderPath = loaderPath
 
-	// 11. Launch app with hot-reload.
+	// 9. Launch app with hot-reload.
 	sendStatus("running")
 	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath, sm.app); err != nil {
 		s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
 		return
 	}
 
-	// 12. Count previews and send StreamStarted.
+	// 10. Count previews and send StreamStarted.
 	previewCount := 0
 	if blocks, parseErr := analysis.PreviewBlocks(s.file); parseErr == nil {
 		previewCount = len(blocks)
