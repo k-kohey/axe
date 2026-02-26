@@ -119,6 +119,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 		cache = ws.indexCache.Get()
 	}
 
+	sendWatchStatus(wctx, "compiling_thunk")
 	dylibPath, err := compilePipeline(ctx, sourceFile, tracked, cache, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -130,6 +131,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
 		return err
 	}
+	sendWatchStatus(wctx, "running")
 
 	ws.mu.Lock()
 	ws.reloadCounter++
