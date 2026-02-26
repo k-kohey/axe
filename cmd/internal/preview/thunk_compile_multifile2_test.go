@@ -25,34 +25,8 @@ import (
 // The main thunk only includes target's imports → Map() is unknown.
 // ============================================================
 
-const fixtureMulti2ImportMergingTarget = `import SwiftUI
-
-struct ImportMergeHost: View {
-    var body: some View {
-        MapDepView()
-    }
-}
-
-#Preview {
-    VStack {
-        ImportMergeHost()
-        Map()
-    }
-}
-`
-
-const fixtureMulti2ImportMergingDep = `import SwiftUI
-import MapKit
-
-struct MapDepView: View {
-    var body: some View {
-        Map()
-    }
-}
-`
-
 // Multi2-1: Preview body references type from dependency's import — known bug.
-// Moved to thunk_compile_known_bugs_test.go (TestKnownBug_DepOnlyImport).
+// Fixtures and test moved to thunk_compile_known_bugs_test.go (TestKnownBug_DepOnlyImport).
 func TestMultiFile2_PreviewUsesDepOnlyImport(t *testing.T) {
 	t.Skip("Known bug: moved to TestKnownBug_DepOnlyImport")
 }
@@ -145,6 +119,7 @@ func TestMultiFile2_SameTypeExtendedInMultipleFiles(t *testing.T) {
 // differently than expected.
 // ============================================================
 
+//nolint:gosec // G101 false positive: "DepPreview" is not a credential
 const fixtureMulti2DepWithPreviewTarget = `import SwiftUI
 
 struct DepPreviewHost: View {
@@ -158,6 +133,7 @@ struct DepPreviewHost: View {
 }
 `
 
+//nolint:gosec // G101 false positive
 const fixtureMulti2DepWithPreviewDep = `import SwiftUI
 
 struct DepPreviewChild: View {

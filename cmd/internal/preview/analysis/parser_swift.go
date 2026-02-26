@@ -246,6 +246,11 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 // falling back to (typeName, name, kind) if the exact line match is not found.
 // expectedKind ensures that a property lookup never accidentally returns a
 // method source (or vice versa) when different members share the same name.
+//
+// Index Store はメソッド名をセレクター形式 ("greet(name:)") で返すが、
+// パーサーはベース名 ("greet") で返す。メソッドの場合はベース名に正規化して比較する。
+// NOTE: この正規化は暫定対応。本質的には USR ベースの結合に移行し、
+// 名前の文字列比較自体を不要にすべき。
 func lookupMemberSource(
 	sourceMap map[memberKey]*pb.MemberSource,
 	fallbackMap map[nameKey]*pb.MemberSource,
@@ -254,6 +259,12 @@ func lookupMemberSource(
 	expectedKind pb.MemberSourceKind,
 ) *pb.MemberSource {
 	memberName := idxMember.GetName()
+
+	// Index Store のメソッド名はセレクター形式 ("greet(name:)") だが、
+	// パーサーのキーはベース名 ("greet")。メソッドの場合はベース名に正規化する。
+	if expectedKind == pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD {
+		memberName = selectorBaseName(memberName)
+	}
 
 	// Try exact match first (typeName + line + name), then validate kind.
 	key := memberKey{typeName: typeName, line: idxMember.GetLine(), name: memberName}
@@ -268,6 +279,15 @@ func lookupMemberSource(
 	}
 
 	return nil
+}
+
+// selectorBaseName extracts the base name from a Swift selector.
+// e.g. "greet(name:)" → "greet", "refresh()" → "refresh", "greet" → "greet"
+func selectorBaseName(selector string) string {
+	if base, _, ok := strings.Cut(selector, "("); ok {
+		return base
+	}
+	return selector
 }
 
 // SourceFile parses types and imports from a Swift source file.

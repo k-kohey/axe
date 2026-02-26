@@ -22,56 +22,8 @@ import (
 // Also, the thunk filenames collide (thunk_0_ItemView.swift).
 // ============================================================
 
-const fixtureMultiSameBaseA = `import SwiftUI
-
-private struct LocalStyle {
-    var color: Color { .blue }
-}
-
-struct ItemViewA: View {
-    var styled: Color {
-        LocalStyle().color
-    }
-    var body: some View {
-        Text("A").foregroundColor(styled)
-    }
-}
-`
-
-const fixtureMultiSameBaseB = `import SwiftUI
-
-private struct LocalStyle {
-    var color: Color { .red }
-}
-
-struct ItemViewB: View {
-    var styled: Color {
-        LocalStyle().color
-    }
-    var body: some View {
-        Text("B").foregroundColor(styled)
-    }
-}
-`
-
-const fixtureMultiSameBaseTarget = `import SwiftUI
-
-struct SameBaseHost: View {
-    var body: some View {
-        VStack {
-            ItemViewA()
-            ItemViewB()
-        }
-    }
-}
-
-#Preview {
-    SameBaseHost()
-}
-`
-
 // Multi 1: Same basename files from different directories — known bug.
-// Moved to thunk_compile_known_bugs_test.go (TestKnownBug_SameBasenameDifferentDirs).
+// Fixtures and test moved to thunk_compile_known_bugs_test.go (TestKnownBug_SameBasenameDifferentDirs).
 func TestMultiFile_SameBasenameDifferentDirs(t *testing.T) {
 	t.Skip("Known bug: moved to TestKnownBug_SameBasenameDifferentDirs")
 }
@@ -381,7 +333,7 @@ func TestMultiFile_DepWithNoComputedProperties(t *testing.T) {
 	// The thunk should still compile.
 	thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
 		map[string]string{
-			"Config.swift":         fixtureMultiStoredOnlyDep,
+			"Config.swift":        fixtureMultiStoredOnlyDep,
 			"StoredDepHost.swift": fixtureMultiStoredOnlyTarget,
 		},
 		"StoredDepHost.swift",
@@ -407,30 +359,8 @@ func TestMultiFile_DepWithNoComputedProperties(t *testing.T) {
 // SourceFile() requires at least one View with body → should error.
 // ============================================================
 
-const fixtureMultiExtOnlyTargetBase = `import SwiftUI
-
-struct ExtOnlyTarget: View {
-    var body: some View {
-        Text(extra)
-    }
-}
-`
-
-const fixtureMultiExtOnlyTargetExt = `import SwiftUI
-
-extension ExtOnlyTarget {
-    var extra: String {
-        "Extension"
-    }
-}
-
-#Preview {
-    ExtOnlyTarget()
-}
-`
-
 // Multi 7: Target file is extension-only — known bug.
-// Moved to thunk_compile_known_bugs_test.go (TestKnownBug_ExtensionOnlyTarget).
+// Fixtures and test moved to thunk_compile_known_bugs_test.go (TestKnownBug_ExtensionOnlyTarget).
 func TestMultiFile_TargetIsExtensionOnly(t *testing.T) {
 	t.Skip("Known bug: moved to TestKnownBug_ExtensionOnlyTarget")
 }
@@ -493,8 +423,8 @@ func TestMultiFile_PrivateTypeCollisionAcrossFiles(t *testing.T) {
 	// Per-file thunks isolate private types, so this should compile.
 	runThunkCompileTest(t, sdk,
 		map[string]string{
-			"StyledViewA.swift":      fixtureMultiPrivateCollisionA,
-			"StyledViewB.swift":      fixtureMultiPrivateCollisionB,
+			"StyledViewA.swift":       fixtureMultiPrivateCollisionA,
+			"StyledViewB.swift":       fixtureMultiPrivateCollisionB,
 			"PrivCollisionHost.swift": fixtureMultiPrivateCollisionTarget,
 		},
 		"PrivCollisionHost.swift",
@@ -598,7 +528,7 @@ func TestMultiFile_CrossFileShortNameNoCollision(t *testing.T) {
 	runThunkCompileTest(t, sdk,
 		map[string]string{
 			"CrossShortHost.swift": fixtureMultiCrossShortTarget,
-			"PanelHeader.swift":   fixtureMultiCrossShortDep,
+			"PanelHeader.swift":    fixtureMultiCrossShortDep,
 		},
 		"CrossShortHost.swift",
 	)
