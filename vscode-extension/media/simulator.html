@@ -212,6 +212,13 @@
       }
     }
 
+    function ensureStableButtons(streamId) {
+      const rebuild = queryCard(streamId, '.btn-rebuild');
+      if (rebuild) rebuild.style.display = '';
+      const device = queryCard(streamId, '.btn-device');
+      if (device) device.style.display = '';
+    }
+
     window.addEventListener('message', (e) => {
       const msg = e.data;
       switch (msg.type) {
@@ -223,6 +230,7 @@
           card.querySelector('.file-name').textContent = msg.fileName || '';
           grid.appendChild(card);
           setupCardEvents(card, msg.streamId);
+          ensureStableButtons(msg.streamId);
           break;
         }
         case 'removeCard': {
@@ -244,6 +252,7 @@
               mini.textContent = 'LIVE';
               mini.classList.remove('loading');
             }
+            ensureStableButtons(msg.streamId);
           }
           break;
         }
@@ -264,6 +273,7 @@
               mini.classList.add('loading');
             }
           }
+          ensureStableButtons(msg.streamId);
           break;
         }
         case 'showNextButton': {
