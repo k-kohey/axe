@@ -11,10 +11,21 @@ import (
 
 const (
 	bootHeadlessMaxRetries = 3
-	bootHeadlessRetryDelay = 2 * time.Second
 )
 
 type bootHeadlessFn func(udid, deviceSetPath string) (*idb.Companion, error)
+
+var (
+	bootHeadlessRetryDelay = 2 * time.Second
+	bootHeadlessWait       = func(ctx context.Context, d time.Duration) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(d):
+			return nil
+		}
+	}
+)
 
 func bootHeadlessWithRetry(ctx context.Context, udid, deviceSetPath string) (*idb.Companion, error) {
 	return bootHeadlessWithRetryFunc(ctx, udid, deviceSetPath, idb.BootHeadless)
@@ -45,10 +56,8 @@ func bootHeadlessWithRetryFunc(ctx context.Context, udid, deviceSetPath string, 
 			"err", err,
 		)
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(bootHeadlessRetryDelay):
+		if err := bootHeadlessWait(ctx, bootHeadlessRetryDelay); err != nil {
+			return nil, err
 		}
 	}
 

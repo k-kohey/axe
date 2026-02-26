@@ -4,11 +4,25 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
 )
 
+func withBootRetryNoDelay(t *testing.T) {
+	t.Helper()
+	origWait := bootHeadlessWait
+	bootHeadlessWait = func(ctx context.Context, _ time.Duration) error {
+		return ctx.Err()
+	}
+	t.Cleanup(func() {
+		bootHeadlessWait = origWait
+	})
+}
+
 func TestBootHeadlessWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
+	withBootRetryNoDelay(t)
+
 	attempts := 0
 	fn := func(_, _ string) (*idb.Companion, error) {
 		attempts++
@@ -31,6 +45,8 @@ func TestBootHeadlessWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
 }
 
 func TestBootHeadlessWithRetryFunc_FailsAfterMaxAttempts(t *testing.T) {
+	withBootRetryNoDelay(t)
+
 	attempts := 0
 	fn := func(_, _ string) (*idb.Companion, error) {
 		attempts++

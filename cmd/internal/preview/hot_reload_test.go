@@ -9,19 +9,8 @@ import (
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
-
-func TestClassifyChange_BodyOnly(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "V.swift")
-
-	base := `import SwiftUI
-
-struct V: View {
-    var body: some View {
-        Text("Hello")
-    }
-}
 
 func TestSendWatchStatus_StreamScoped(t *testing.T) {
 	var buf syncBuffer
@@ -94,6 +83,18 @@ func TestReloadMultiFile_SendsCompilingStatusInServeMode(t *testing.T) {
 	if phase, _ := first.StreamStatus["phase"].(string); phase != "compiling_thunk" {
 		t.Fatalf("phase = %q, want %q", phase, "compiling_thunk")
 	}
+}
+
+func TestClassifyChange_BodyOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "V.swift")
+
+	base := `import SwiftUI
+
+struct V: View {
+    var body: some View {
+        Text("Hello")
+    }
 }
 `
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
