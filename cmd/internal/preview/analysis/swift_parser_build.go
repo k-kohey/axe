@@ -119,8 +119,15 @@ func downloadSwiftBinary(product string) (string, error) {
 
 	// Return cached download if present.
 	if info, err := os.Stat(binPath); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-		slog.Debug("Using cached downloaded binary", "product", product, "path", binPath)
-		return binPath, nil
+		ok, verifyErr := verifyCachedBinaryHash(binPath)
+		if verifyErr == nil && ok {
+			slog.Debug("Using cached downloaded binary", "product", product, "path", binPath)
+			return binPath, nil
+		}
+		slog.Warn("Cached binary hash verification failed; re-downloading",
+			"product", product, "path", binPath, "err", verifyErr)
+		_ = os.Remove(binPath)
+		_ = os.Remove(checksumSidecarPath(binPath))
 	}
 
 	arch := runtime.GOARCH
@@ -182,9 +189,41 @@ func downloadSwiftBinary(product string) (string, error) {
 	if err := os.Rename(tmpPath, binPath); err != nil {
 		return "", fmt.Errorf("renaming to %s: %w", binPath, err)
 	}
+	if err := os.WriteFile(checksumSidecarPath(binPath), []byte(actualHash+"\n"), 0o600); err != nil {
+		_ = os.Remove(binPath)
+		return "", fmt.Errorf("writing checksum sidecar: %w", err)
+	}
 
 	slog.Debug("Downloaded Swift binary", "product", product, "path", binPath)
 	return binPath, nil
+}
+
+func checksumSidecarPath(binPath string) string {
+	return binPath + ".sha256"
+}
+
+func verifyCachedBinaryHash(binPath string) (bool, error) {
+	expectedBytes, err := os.ReadFile(checksumSidecarPath(binPath))
+	if err != nil {
+		return false, err
+	}
+	expected := strings.TrimSpace(string(expectedBytes))
+	if expected == "" {
+		return false, fmt.Errorf("empty checksum sidecar")
+	}
+
+	f, err := os.Open(binPath)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false, err
+	}
+	actual := hex.EncodeToString(h.Sum(nil))
+	return actual == expected, nil
 }
 
 // verifyChecksum downloads checksums.txt from the GitHub release and verifies
