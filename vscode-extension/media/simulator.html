@@ -232,7 +232,7 @@
             const overlay = queryCard(msg.streamId, '.status-overlay');
             if (overlay) overlay.style.display = 'none';
             const mini = queryCard(msg.streamId, '.status-mini');
-            if (mini && !mini.textContent) mini.textContent = 'LIVE';
+            if (mini) mini.textContent = 'LIVE';
           }
           break;
         }

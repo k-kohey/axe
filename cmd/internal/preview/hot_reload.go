@@ -15,6 +15,20 @@ import (
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
+func sendWatchStatus(wctx watchContext, phase string) {
+	if !wctx.serve || wctx.ew == nil {
+		return
+	}
+	if err := wctx.ew.Send(&pb.Event{
+		StreamId: wctx.streamID,
+		Payload: &pb.Event_StreamStatus{
+			StreamStatus: &pb.StreamStatus{Phase: phase},
+		},
+	}); err != nil {
+		slog.Warn("Failed to send StreamStatus in watcher", "phase", phase, "err", err)
+	}
+}
+
 // runWatcher sets up file watching and command dispatching, then delegates
 // to the unified event loop. It uses SharedWatcher for file change detection
 // and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
@@ -244,6 +258,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	}()
 
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
+	sendWatchStatus(wctx, "building")
 
 	if err := buildProject(ctx, pc, dirs, wctx.build); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
@@ -285,6 +300,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 		return fmt.Errorf("thunk: %w", err)
 	}
 
+	sendWatchStatus(wctx, "compiling_thunk")
 	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -295,10 +311,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)
 
+	sendWatchStatus(wctx, "installing")
 	if _, err := installApp(ctx, bs, dirs, wctx.device, wctx.deviceSetPath, wctx.app, wctx.copier); err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 
+	sendWatchStatus(wctx, "running")
 	if err := launchWithHotReload(ctx, bs, wctx.loaderPath, dylibPath, dirs.Socket, wctx.device, wctx.deviceSetPath, wctx.app); err != nil {
 		return fmt.Errorf("launch: %w", err)
 	}

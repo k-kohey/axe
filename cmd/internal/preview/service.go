@@ -300,6 +300,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			device:        device,
 			deviceSetPath: deviceSetPath,
 			loaderPath:    loaderPath,
+			streamID:      defaultStreamID,
 			serve:         serve,
 			ew:            ew,
 			build:         br,
