@@ -2,6 +2,8 @@ name: Test Go CLI
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "cmd/**"
       - ".github/workflows/test-go.yml"

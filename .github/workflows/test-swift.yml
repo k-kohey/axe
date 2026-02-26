@@ -2,6 +2,8 @@ name: Test Swift CLI
 
 on:
   push:
+    branches:
+      - main
     paths:
       - "cmd/internal/preview/analysis/swift-analysis/**"
       - ".github/workflows/test-swift.yml"
