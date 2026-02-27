@@ -66,6 +66,154 @@ func chdir(t *testing.T, dir string) {
 	})
 }
 
+func TestDetectXcodeProject(t *testing.T) {
+	t.Run("detects single xcodeproj", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "App.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "App.xcodeproj" {
+			t.Errorf("project = %q, want App.xcodeproj", proj)
+		}
+		if ws != "" {
+			t.Errorf("workspace = %q, want empty", ws)
+		}
+	})
+
+	t.Run("detects single xcworkspace", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "App.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "App.xcworkspace" {
+			t.Errorf("workspace = %q, want App.xcworkspace", ws)
+		}
+	})
+
+	t.Run("workspace takes priority over project", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "App.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "App.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "App.xcworkspace" {
+			t.Errorf("workspace = %q, want App.xcworkspace", ws)
+		}
+	})
+
+	t.Run("multiple xcodeproj returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "A.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "B.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "" {
+			t.Errorf("workspace = %q, want empty", ws)
+		}
+	})
+
+	t.Run("multiple xcworkspace returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "A.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "B.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "" {
+			t.Errorf("workspace = %q, want empty", ws)
+		}
+	})
+
+	t.Run("multiple xcworkspace with single xcodeproj returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "A.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "B.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "App.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "" {
+			t.Errorf("workspace = %q, want empty", ws)
+		}
+	})
+
+	t.Run("single xcworkspace with multiple xcodeproj returns workspace", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, "App.xcworkspace"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "A.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(filepath.Join(dir, "B.xcodeproj"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "App.xcworkspace" {
+			t.Errorf("workspace = %q, want App.xcworkspace", ws)
+		}
+	})
+
+	t.Run("no xcode files returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		chdir(t, dir)
+
+		proj, ws := DetectXcodeProject()
+		if proj != "" {
+			t.Errorf("project = %q, want empty", proj)
+		}
+		if ws != "" {
+			t.Errorf("workspace = %q, want empty", ws)
+		}
+	})
+}
+
 func TestReadRC(t *testing.T) {
 	t.Run("parses key-value pairs", func(t *testing.T) {
 		dir := t.TempDir()
