@@ -20,6 +20,8 @@ var (
 	previewServe         bool
 	previewDevice        string
 	previewReuseBuild    bool
+	previewFullThunk     bool
+	previewStrict        bool
 )
 
 var previewCmd = &cobra.Command{
@@ -74,6 +76,14 @@ var previewCmd = &cobra.Command{
 			return err
 		}
 
+		// Validate flag combinations.
+		if previewFullThunk && (previewWatch || previewServe) {
+			return fmt.Errorf("--full-thunk is only valid in oneshot mode (without --watch or --serve)")
+		}
+		if previewStrict && !previewWatch && !previewServe {
+			return fmt.Errorf("--strict is only valid with --watch or --serve")
+		}
+
 		// idb_companion is always required (headless boot + serve mode).
 		if err := platform.CheckIDBCompanion(); err != nil {
 			return err
@@ -81,7 +91,7 @@ var previewCmd = &cobra.Command{
 
 		// Multi-stream serve mode: source file comes via AddStream commands on stdin.
 		if previewServe {
-			return preview.RunServe(pc)
+			return preview.RunServe(pc, previewStrict)
 		}
 
 		// Single-stream mode requires a source file argument.
@@ -96,7 +106,17 @@ var previewCmd = &cobra.Command{
 			return fmt.Errorf("source file not found: %s", sourceFile)
 		}
 
-		return preview.Run(sourceFile, pc, previewWatch, previewSelector, previewServe, previewDevice, previewReuseBuild)
+		return preview.Run(preview.RunOptions{
+			SourceFile:      sourceFile,
+			PC:              pc,
+			Watch:           previewWatch,
+			PreviewSelector: previewSelector,
+			Serve:           previewServe,
+			PreferredDevice: previewDevice,
+			ReuseBuild:      previewReuseBuild,
+			FullThunk:       previewFullThunk,
+			Strict:          previewStrict,
+		})
 	},
 }
 
@@ -110,5 +130,7 @@ func init() {
 	previewCmd.Flags().BoolVar(&previewServe, "serve", false, "run as IDE backend: stream video via idb, accept JSON commands on stdin (requires idb_companion)")
 	previewCmd.Flags().StringVar(&previewDevice, "device", "", "simulator UDID to use for preview (overrides .axerc DEVICE and global default)")
 	previewCmd.Flags().BoolVar(&previewReuseBuild, "reuse-build", false, "skip xcodebuild and reuse artifacts from a previous build")
+	previewCmd.Flags().BoolVar(&previewFullThunk, "full-thunk", false, "use full thunk compilation in oneshot mode (per-file dynamic replacement)")
+	previewCmd.Flags().BoolVar(&previewStrict, "strict", false, "require full thunk compilation in watch/serve mode (no degraded fallback)")
 	rootCmd.AddCommand(previewCmd)
 }

@@ -45,6 +45,10 @@ type stream struct {
 	cancel     context.CancelFunc
 	done       chan struct{} // closed when stream goroutine exits
 
+	// degraded is true when the stream launched using main-only thunk fallback.
+	// Hot-reload is not available in this mode.
+	degraded bool
+
 	// Per-stream command channels (buffered size 1).
 	switchFileCh   chan string
 	nextPreviewCh  chan struct{}
@@ -95,6 +99,9 @@ type StreamManager struct {
 	warmDevices map[warmDeviceKey]*warmDevice
 	stopping    atomic.Bool // true during StopAll; prevents new warm parking
 
+	// strict mode disables degraded fallback.
+	strict bool
+
 	// Shared project configuration.
 	pc            ProjectConfig
 	deviceSetPath string
@@ -128,12 +135,13 @@ type StreamManager struct {
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
 func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
-	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister) *StreamManager {
+	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister, strict bool) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
 		warmDevices:   make(map[warmDeviceKey]*warmDevice),
 		pool:          pool,
 		ew:            ew,
+		strict:        strict,
 		pc:            pc,
 		deviceSetPath: deviceSetPath,
 		indexCache:    newSharedIndexCache(nil),
@@ -466,6 +474,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		depGraph     *analysis.DependencyGraph
 		trackedFiles []string
 		dylibPath    string
+		degraded     bool
 		buildFailed  bool
 		buildDiag    string
 		err          error
@@ -553,22 +562,40 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 			return depGraph, trackedFiles, dylibPath, nil
 		}
 
-		res.depGraph, res.trackedFiles, res.dylibPath, err = compileAttempt()
-		if err != nil && !builtThisLaunch {
-			slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
-			sendStatus("building")
-			if buildErr := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); buildErr != nil {
-				res.buildFailed = true
-				res.buildDiag = buildErr.Error()
-				res.err = fmt.Errorf("build failed")
-				compileResCh <- res
-				return
-			}
-			sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
-			res.depGraph, res.trackedFiles, res.dylibPath, err = compileAttempt()
+		strategy := NewCompileStrategy(true, true, false, sm.strict)
+		compilers := map[CompileMode]CompileFunc{
+			CompileModeFull: func(_ context.Context) (string, error) {
+				dg, tf, dylibPath, err := compileAttempt()
+				if err != nil && !builtThisLaunch {
+					slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
+					sendStatus("building")
+					if buildErr := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); buildErr != nil {
+						res.buildFailed = true
+						res.buildDiag = buildErr.Error()
+						return "", fmt.Errorf("build failed")
+					}
+					sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
+					dg, tf, dylibPath, err = compileAttempt()
+				}
+				if err != nil {
+					return "", err
+				}
+				res.depGraph = dg
+				res.trackedFiles = tf
+				return dylibPath, nil
+			},
+			CompileModeMainOnly: func(_ context.Context) (string, error) {
+				sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
+				return compileMainOnlyPipeline(launcherCtx, s.file, bs, s.dirs, "0", sm.toolchain)
+			},
 		}
-		if err != nil {
-			res.err = err
+
+		compileStratResult, stratErr := ExecuteCompileStrategy(launcherCtx, strategy, compilers)
+		if stratErr != nil {
+			res.err = stratErr
+		} else {
+			res.dylibPath = compileStratResult.DylibPath
+			res.degraded = compileStratResult.Degraded
 		}
 		compileResCh <- res
 	}()
@@ -615,6 +642,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	s.bootCompanion = bootRes.companion
+	s.degraded = compileRes.degraded
 	bs := compileRes.bs
 	depGraph := compileRes.depGraph
 	trackedFiles := compileRes.trackedFiles
@@ -693,7 +721,17 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		s.hid = protocol.NewHIDHandler(idbClient, w, h)
 	}
 
-	// 15. Initialize watch state.
+	// 15. Degraded mode: skip watcher, run simplified event loop.
+	if s.degraded {
+		sendStatus("degraded")
+		slog.Warn("Stream running in degraded mode: hot-reload not available", "streamId", s.id)
+		if err := runDegradedStreamLoop(ctx, s, sm, idbErrCh); err != nil {
+			slog.Info("Degraded stream loop exited", "streamId", s.id, "err", err)
+		}
+		return
+	}
+
+	// 16. Initialize watch state (full mode only).
 	s.ws = &watchState{
 		reloadCounter:   1, // 0 was used for the initial launch
 		previewSelector: "0",
@@ -705,12 +743,12 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		indexCache:      sm.indexCache, // shared across all streams
 	}
 
-	// 16. Register with shared watcher for file change notifications.
+	// 17. Register with shared watcher for file change notifications.
 	if sm.watcher != nil {
 		sm.watcher.AddListener(s.id, s.fileChangeCh)
 	}
 
-	// 17. Enter the per-stream event loop (blocks until context cancelled or crash).
+	// 18. Enter the per-stream event loop (blocks until context cancelled or crash).
 	if err := runStreamLoop(ctx, s, sm, bs, idbErrCh); err != nil {
 		slog.Info("Stream loop exited", "streamId", s.id, "err", err)
 	}

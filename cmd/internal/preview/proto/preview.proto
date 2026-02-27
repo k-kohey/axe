@@ -99,7 +99,7 @@ message StreamStopped {
 
 // StreamStatus reports progress during stream initialization.
 message StreamStatus {
-  string phase = 1;  // "booting", "building", "installing", "running"
+  string phase = 1;  // "booting", "building", "installing", "running", "degraded"
 }
 
 // ProtocolError reports a protocol-level error (e.g. invalid command JSON).

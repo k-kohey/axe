@@ -131,14 +131,14 @@ func nopRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLi
 // sm.StreamLauncher after calling this.
 func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
-	return NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
+	return NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl, false)
 }
 
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
 // a device, sends a "booting" status event, and blocks until ctx is cancelled.
 func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl)
+	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl, false)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -967,5 +967,127 @@ func waitForStreamCount(t *testing.T, sm *StreamManager, n int, timeout time.Dur
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
+	}
+}
+
+func TestDegradedStreamLoop_RejectsCommands(t *testing.T) {
+	t.Parallel()
+
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+	pool := newFakeDevicePool()
+	sm := newTestStreamManagerWithRunners(pool, ew)
+
+	s := &stream{
+		id:             "degraded-1",
+		degraded:       true,
+		switchFileCh:   make(chan string, 1),
+		nextPreviewCh:  make(chan struct{}, 1),
+		forceRebuildCh: make(chan struct{}, 1),
+		inputCh:        make(chan *pb.Input, 1),
+		fileChangeCh:   make(chan string, 1),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	idbErrCh := make(chan error, 1)
+
+	// Start degraded loop in a goroutine.
+	loopDone := make(chan error, 1)
+	go func() {
+		loopDone <- runDegradedStreamLoop(ctx, s, sm, idbErrCh)
+	}()
+
+	// Send commands that should be rejected.
+	s.switchFileCh <- "/new/file.swift"
+	s.nextPreviewCh <- struct{}{}
+	s.forceRebuildCh <- struct{}{}
+
+	// Wait for all 3 rejection events.
+	waitForEvents(t, &buf, 3, 2*time.Second)
+
+	// Cancel context to stop the loop.
+	cancel()
+
+	select {
+	case err := <-loopDone:
+		if err != nil {
+			t.Fatalf("degraded loop returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for degraded loop to exit")
+	}
+
+	events := collectEvents(t, &buf)
+	if len(events) != 3 {
+		t.Fatalf("expected 3 rejection events, got %d", len(events))
+	}
+	for i, e := range events {
+		if e.StreamStatus == nil {
+			t.Errorf("event %d: expected StreamStatus, got %+v", i, e)
+			continue
+		}
+		if phase, _ := e.StreamStatus["phase"].(string); phase != "degraded" {
+			t.Errorf("event %d: phase = %q, want \"degraded\"", i, phase)
+		}
+	}
+}
+
+func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
+	t.Parallel()
+
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+	pool := newFakeDevicePool()
+	sm := newTestStreamManagerWithRunners(pool, ew)
+
+	bootDied := make(chan struct{})
+	s := &stream{
+		id:       "degraded-boot-crash",
+		degraded: true,
+		bootCompanion: &fakeCompanion{
+			doneCh: bootDied,
+			err:    fmt.Errorf("boot process exited with code 1"),
+		},
+		switchFileCh:   make(chan string, 1),
+		nextPreviewCh:  make(chan struct{}, 1),
+		forceRebuildCh: make(chan struct{}, 1),
+		inputCh:        make(chan *pb.Input, 1),
+		fileChangeCh:   make(chan string, 1),
+	}
+
+	ctx := t.Context()
+	idbErrCh := make(chan error, 1)
+
+	loopDone := make(chan error, 1)
+	go func() {
+		loopDone <- runDegradedStreamLoop(ctx, s, sm, idbErrCh)
+	}()
+
+	// Simulate boot crash.
+	close(bootDied)
+
+	select {
+	case err := <-loopDone:
+		if err == nil {
+			t.Fatal("expected error on boot crash, got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for degraded loop to exit on boot crash")
+	}
+
+	// Verify StreamStopped was sent.
+	waitForEvents(t, &buf, 1, 2*time.Second)
+	events := collectEvents(t, &buf)
+	found := false
+	for _, e := range events {
+		if e.StreamStopped != nil {
+			found = true
+			if reason, _ := e.StreamStopped["reason"].(string); reason != "runtime_error" {
+				t.Errorf("reason = %q, want \"runtime_error\"", reason)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected StreamStopped event on boot crash")
 	}
 }

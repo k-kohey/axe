@@ -222,6 +222,57 @@ func GenerateThunks(
 	return thunkPaths, nil
 }
 
+// GenerateMainOnlyThunk generates a single main thunk file without per-file
+// dynamic replacements. This is the "degraded" / "lightweight" thunk that only
+// contains the preview wrapper and refresh entry point. It is used when full
+// thunk compilation fails or is not requested.
+//
+// Returns the list of generated thunk paths (always a single main thunk).
+func GenerateMainOnlyThunk(
+	moduleName string,
+	thunkDir string,
+	targetSourceFile string,
+	previewSelector string,
+	imports []string,
+) ([]string, error) {
+	if err := os.MkdirAll(thunkDir, 0o755); err != nil {
+		return nil, fmt.Errorf("creating thunk dir: %w", err)
+	}
+
+	const reloadCounter = 0
+	cleanOldThunkFiles(thunkDir, reloadCounter)
+
+	mtd := MainThunkData{
+		ModuleName:     moduleName,
+		TargetFileName: filepath.Base(targetSourceFile),
+		ExtraImports:   imports,
+	}
+
+	previews, err := analysis.PreviewBlocks(targetSourceFile)
+	if err != nil {
+		slog.Warn("Failed to parse #Preview blocks for main-only thunk", "err", err)
+	}
+
+	if len(previews) > 0 {
+		selected, err := analysis.SelectPreview(previews, previewSelector)
+		if err != nil {
+			return nil, err
+		}
+		tp := analysis.TransformPreviewBlock(selected)
+		mtd.HasPreview = true
+		mtd.PreviewProps = tp.Properties
+		mtd.PreviewBody = tp.BodySource
+	}
+
+	mainThunkPath := filepath.Join(thunkDir, fmt.Sprintf("thunk_%d__main.swift", reloadCounter))
+	if err := writeTemplate(mainThunkPath, MainThunkTmpl, mtd); err != nil {
+		return nil, fmt.Errorf("generating main-only thunk: %w", err)
+	}
+
+	slog.Debug("Generated main-only thunk", "path", mainThunkPath)
+	return []string{mainThunkPath}, nil
+}
+
 // writeTemplate renders a template to a file.
 func writeTemplate(path string, tmpl *template.Template, data any) (retErr error) {
 	f, err := os.Create(path)

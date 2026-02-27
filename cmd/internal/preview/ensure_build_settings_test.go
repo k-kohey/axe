@@ -20,7 +20,7 @@ func TestEnsureBuildSettings_LazyInit(t *testing.T) {
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	dirs := previewDirs{Build: t.TempDir()}
 
@@ -48,7 +48,7 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 	}
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	dirs := previewDirs{Build: t.TempDir()}
 
@@ -86,7 +86,7 @@ func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
 	}
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	dirs := previewDirs{Build: t.TempDir()}
 
@@ -133,7 +133,7 @@ func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
 	}
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	dirs := previewDirs{Build: t.TempDir()}
 
@@ -150,7 +150,7 @@ func TestEnsureCompilerPathsExtracted_OnlyOnce(t *testing.T) {
 
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
 	dirs := previewDirs{Build: t.TempDir()}
@@ -174,7 +174,7 @@ func TestEnsureCompilerPathsExtracted_ConcurrentSafety(t *testing.T) {
 
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{})
+		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
 	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
 	dirs := previewDirs{Build: t.TempDir()}
