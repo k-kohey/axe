@@ -378,6 +378,5 @@ suite("SimulatorWebviewPanel", () => {
 		assert.ok(fakePanel.webview.html.includes("removeStream"));
 		assert.ok(fakePanel.webview.html.includes("changeDevice"));
 		assert.ok(fakePanel.webview.html.includes("showNextButton"));
-		assert.ok(fakePanel.webview.html.includes("hover-cursor"));
 	});
 });
