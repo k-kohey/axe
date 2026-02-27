@@ -50,8 +50,9 @@ func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string)
 	t.Helper()
 	outDir := t.TempDir()
 	indexStorePath := filepath.Join(outDir, "index-store")
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+
+	swiftCtx, swiftCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer swiftCancel()
 
 	args := []string{
 		"xcrun", "swiftc",
@@ -68,7 +69,7 @@ func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string)
 	}
 	args = append(args, srcFiles...)
 
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd := exec.CommandContext(swiftCtx, args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("building fixture module: %v\n%s", err, out)
@@ -76,8 +77,12 @@ func buildFixtureModule(t *testing.T, srcFiles []string, moduleName, sdk string)
 
 	// Load Index Store cache for source file parsing.
 	// Use the first source file's directory as source root.
+	// Separate context: LoadIndexStore may block while ensureIndexReader
+	// builds axe-index-reader from source on first run (CI), taking 2+ minutes.
+	indexCtx, indexCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer indexCancel()
 	sourceRoot := filepath.Dir(srcFiles[0])
-	cache, cacheErr := analysis.LoadIndexStore(ctx, indexStorePath, sourceRoot)
+	cache, cacheErr := analysis.LoadIndexStore(indexCtx, indexStorePath, sourceRoot)
 	if cacheErr != nil {
 		t.Fatalf("loading index store: %v", cacheErr)
 	}
