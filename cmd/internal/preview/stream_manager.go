@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/k-kohey/axe/internal/idb"
@@ -94,11 +93,6 @@ type StreamManager struct {
 	pool    DevicePoolInterface
 	ew      *protocol.EventWriter
 
-	// Warm device parking: keeps recently-used simulators booted for reuse.
-	warmMu      sync.Mutex
-	warmDevices map[warmDeviceKey]*warmDevice
-	stopping    atomic.Bool // true during StopAll; prevents new warm parking
-
 	// strict mode disables degraded fallback.
 	strict bool
 
@@ -138,7 +132,6 @@ func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc Pro
 	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister, strict bool) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
-		warmDevices:   make(map[warmDeviceKey]*warmDevice),
 		pool:          pool,
 		ew:            ew,
 		strict:        strict,
@@ -352,13 +345,6 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 		}
 	}
 
-	// Park the device for warm reuse instead of shutting it down immediately.
-	// During StopAll the process is exiting, so park is skipped.
-	if !sm.stopping.Load() && s.bootCompanion != nil && s.deviceUDID != "" {
-		sm.parkDevice(s.deviceUDID, s.deviceType, s.runtime, s.bootCompanion)
-		return
-	}
-
 	// Stop boot companion (simulator).
 	if s.bootCompanion != nil {
 		if err := s.bootCompanion.Stop(); err != nil {
@@ -422,35 +408,13 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		}
 	}
 
-	// 1. Try to reuse a warm device, otherwise acquire from pool + boot.
+	// 1. Acquire a device from pool.
 	sendStatus("booting")
 
-	var bootCompanion companionProcess
-	udid, warmBoot := sm.claimWarmDevice(s.deviceType, s.runtime)
-	if udid != "" {
-		select {
-		case <-warmBoot.Done():
-			// Warm device's boot companion already exited; release and fall back.
-			slog.Info("Warm device boot companion dead, falling back to fresh boot", "udid", udid)
-			releaseCtx, releaseCancel := context.WithTimeout(ctx, 30*time.Second)
-			if err := sm.pool.Release(releaseCtx, udid); err != nil {
-				slog.Warn("Failed to release dead warm device", "udid", udid, "err", err)
-			}
-			releaseCancel()
-			udid = ""
-		default:
-			slog.Info("Reusing warm device", "udid", udid, "deviceType", s.deviceType, "runtime", s.runtime)
-			bootCompanion = warmBoot
-		}
-	}
-
-	if udid == "" {
-		var err error
-		udid, err = sm.pool.Acquire(ctx, s.deviceType, s.runtime)
-		if err != nil {
-			s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("acquiring device: %v", err), "")
-			return
-		}
+	udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+	if err != nil {
+		s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("acquiring device: %v", err), "")
+		return
 	}
 	s.deviceUDID = udid
 
@@ -485,13 +449,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 	// 3. Boot simulator in parallel with build/compile preparation.
 	go func() {
-		res := bootResult{companion: bootCompanion}
-		if res.companion == nil {
-			var err error
-			res.companion, err = bootHeadlessWithRetry(launcherCtx, udid, sm.deviceSetPath)
-			if err != nil {
-				res.err = fmt.Errorf("booting simulator: %w", err)
-			}
+		var res bootResult
+		res.companion, res.err = bootHeadlessWithRetry(launcherCtx, udid, sm.deviceSetPath)
+		if res.err != nil {
+			res.err = fmt.Errorf("booting simulator: %w", res.err)
 		}
 		bootResCh <- res
 	}()
@@ -756,9 +717,6 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 
 // StopAll stops all active streams and shuts down the device pool.
 func (sm *StreamManager) StopAll() {
-	// Prevent new warm parking during shutdown.
-	sm.stopping.Store(true)
-
 	sm.mu.Lock()
 	streams := make([]*stream, 0, len(sm.streams))
 	for _, s := range sm.streams {
@@ -779,9 +737,6 @@ func (sm *StreamManager) StopAll() {
 			slog.Error("Stream cleanup timed out during StopAll", "streamId", s.id)
 		}
 	}
-
-	// Shut down any warm-parked devices that were parked before stopping was set.
-	sm.shutdownWarmDevices()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	sm.pool.ShutdownAll(shutdownCtx)
