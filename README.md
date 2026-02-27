@@ -72,8 +72,16 @@ axe preview MyView.swift --watch
 ### `axe preview`
 
 Launch a SwiftUI preview on a headless iOS Simulator.
-By default, builds and launches the preview, verifies the runtime is ready, then exits (exit 0 on success, exit 1 on failure).
+By default (oneshot mode), builds and launches the preview, captures a **PNG screenshot to stdout**, then exits (exit 0 on success, exit 1 on failure).
 Use `--watch` to keep running with hot-reload.
+
+```bash
+# Oneshot: capture screenshot to stdout
+axe preview MyView.swift > screenshot.png
+
+# Watch mode: hot-reload on file changes
+axe preview MyView.swift --watch
+```
 
 ```bash
 axe preview <source-file.swift> [flags]
@@ -92,6 +100,28 @@ axe preview <source-file.swift> [flags]
 | `--serve` | Run as IDE backend (JSON Lines protocol on stdin/stdout) |
 
 All flags fall back to `.axerc` values when not specified.
+
+#### `axe preview report`
+
+Capture screenshots of all `#Preview` blocks in one or more Swift files.
+
+```bash
+# Single file → single file
+axe preview report Sources/FooView.swift -o screenshot.png
+
+# Multiple files → directory (auto-created)
+axe preview report Sources/FooView.swift Sources/BarView.swift -o ./screenshots/
+```
+
+When `--output` is a directory, screenshots are saved as `<basename>--preview-<index>.png`.
+The project build is reused automatically after the first capture.
+
+| Flag | Description |
+|---|---|
+| `-o`, `--output` | Output path (directory or file) — required |
+| `--wait` | Rendering delay before capture (default `10s`) |
+
+Project flags (`--project`, `--scheme`, etc.) are shared with the parent `preview` command.
 
 #### Simulator Management
 
