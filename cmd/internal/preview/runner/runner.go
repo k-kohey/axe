@@ -96,7 +96,10 @@ func (r *App) Launch(ctx context.Context, device, bundleID, deviceSetPath string
 	for k, v := range env {
 		launchCmd.Env = append(launchCmd.Env, k+"="+v)
 	}
-	launchCmd.Stdout = os.Stdout
+	// simctl launch prints "<bundle-id>: <pid>" to stdout. Route it to stderr
+	// so it doesn't pollute stdout, which may carry binary screenshot data
+	// (oneshot mode) or JSON Lines protocol messages (serve mode).
+	launchCmd.Stdout = os.Stderr
 	launchCmd.Stderr = os.Stderr
 	if err := launchCmd.Run(); err != nil {
 		return fmt.Errorf("simctl launch failed: %w", err)
