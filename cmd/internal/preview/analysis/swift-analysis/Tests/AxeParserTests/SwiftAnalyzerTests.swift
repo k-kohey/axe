@@ -38,7 +38,7 @@ struct PropertyExtractionTests {
     #expect(props.count == 1)
     #expect(props[0].name == "body")
     #expect(props[0].typeExpr == "some View")
-    #expect(props[0].bodyLine == 5)
+    #expect(props[0].bodyLine == Int32(5))
     #expect(props[0].source.contains("Text"))
   }
 
@@ -142,7 +142,7 @@ struct PropertyExtractionTests {
     let props = result.properties(forType: "HogeView")
 
     // var keyword is on line 2
-    #expect(props[0].line == 2)
+    #expect(props[0].line == Int32(2))
   }
 }
 
@@ -263,7 +263,7 @@ struct MethodExtractionTests {
     let result = SwiftAnalyzer(source: source).analyze()
     let methods = result.methods(forType: "V")
     // func keyword is on line 2
-    #expect(methods[0].line == 2)
+    #expect(methods[0].line == Int32(2))
   }
 }
 

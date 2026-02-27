@@ -1,4 +1,5 @@
 import ArgumentParser
+import AxeAnalysisProto
 import Foundation
 import IndexStore
 
@@ -18,51 +19,9 @@ struct AxeIndexReader: ParsableCommand {
   func run() throws {
     let result = try readIndexStore(indexStorePath: indexStorePath, sourceRoot: sourceRoot)
 
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let data = try encoder.encode(result)
-
-    guard let json = String(data: data, encoding: .utf8) else {
-      throw ValidationError("Failed to encode JSON")
-    }
+    let json = try result.jsonString()
     print(json)
   }
-}
-
-// MARK: - Output types (protojson-compatible with IndexStoreResult)
-
-struct IndexStoreResultOutput: Codable, Sendable {
-  let files: [IndexFileDataOutput]
-  let typeFileMap: [String: String]
-}
-
-struct IndexFileDataOutput: Codable, Sendable {
-  let filePath: String
-  let types: [IndexTypeInfoOutput]
-  let referencedTypeNames: [String]
-  let definedTypeNames: [String]
-  let moduleName: String
-}
-
-struct IndexTypeInfoOutput: Codable, Sendable {
-  let name: String
-  let kind: Int  // TypeKind enum value (integer for protojson compat)
-  let accessLevel: String
-  let inheritedTypes: [String]
-  let members: [IndexMemberInfoOutput]
-  let line: Int32
-  let column: Int32
-  let usr: String
-}
-
-struct IndexMemberInfoOutput: Codable, Sendable {
-  let name: String
-  let kind: Int  // MemberKind enum value
-  let accessLevel: String
-  let line: Int32
-  let column: Int32
-  let isComputed: Bool
-  let usr: String
 }
 
 // MARK: - Internal builder types
@@ -103,7 +62,7 @@ private struct FileAccumulator {
 /// for backward compatibility with dependency resolution.
 func readIndexStore(
   indexStorePath: String, sourceRoot: String?
-) throws -> IndexStoreResultOutput {
+) throws -> IndexStoreResult {
   let store: IndexStore
   do {
     store = try IndexStore(path: indexStorePath)
@@ -254,74 +213,74 @@ func readIndexStore(
   }
 
   // Build output.
-  var files: [IndexFileDataOutput] = []
+  var files: [IndexFileData] = []
 
   for (filePath, acc) in fileAccumulators {
-    var types: [IndexTypeInfoOutput] = []
+    var types: [IndexTypeInfo] = []
 
     for (_, builder) in acc.types.sorted(by: { $0.value.line < $1.value.line }) {
       let members = builder.membersByUSR.values
         .sorted(by: { $0.line < $1.line })
         .map { member in
-          IndexMemberInfoOutput(
-            name: member.name,
-            kind: member.kind,
-            accessLevel: member.accessLevel,
-            line: member.line,
-            column: member.column,
-            isComputed: computedPropertyUSRs.contains(member.usr),
-            usr: member.usr
-          )
+          IndexMemberInfo.with {
+            $0.name = member.name
+            $0.kind = MemberKind(rawValue: member.kind) ?? .unknown
+            $0.accessLevel = member.accessLevel
+            $0.line = member.line
+            $0.column = member.column
+            $0.isComputed = computedPropertyUSRs.contains(member.usr)
+            $0.usr = member.usr
+          }
         }
 
       types.append(
-        IndexTypeInfoOutput(
-          name: builder.name,
-          kind: builder.kind,
-          accessLevel: builder.accessLevel,
-          inheritedTypes: Array(builder.inheritedTypes).sorted(),
-          members: members,
-          line: builder.line,
-          column: builder.column,
-          usr: builder.usr
-        ))
+        IndexTypeInfo.with {
+          $0.name = builder.name
+          $0.kind = TypeKind(rawValue: builder.kind) ?? .unknown
+          $0.accessLevel = builder.accessLevel
+          $0.inheritedTypes = Array(builder.inheritedTypes).sorted()
+          $0.members = members
+          $0.line = builder.line
+          $0.column = builder.column
+          $0.usr = builder.usr
+        })
     }
 
     files.append(
-      IndexFileDataOutput(
-        filePath: filePath,
-        types: types,
-        referencedTypeNames: Array(acc.referencedTypeNames).sorted(),
-        definedTypeNames: Array(acc.definedTypeNames).sorted(),
-        moduleName: acc.moduleName
-      ))
+      IndexFileData.with {
+        $0.filePath = filePath
+        $0.types = types
+        $0.referencedTypeNames = Array(acc.referencedTypeNames).sorted()
+        $0.definedTypeNames = Array(acc.definedTypeNames).sorted()
+        $0.moduleName = acc.moduleName
+      })
   }
 
   // Sort files by path for deterministic output.
   files.sort { $0.filePath < $1.filePath }
 
-  return IndexStoreResultOutput(
-    files: files,
-    typeFileMap: typeFileMap
-  )
+  return IndexStoreResult.with {
+    $0.files = files
+    $0.typeFileMap = typeFileMap
+  }
 }
 
 // MARK: - Conversion helpers
 
 private func symbolKindToTypeKind(_ kind: SymbolKind) -> Int {
-  if kind == .struct { return 1 }  // TYPE_KIND_STRUCT
-  if kind == .class { return 2 }  // TYPE_KIND_CLASS
-  if kind == .enum { return 3 }  // TYPE_KIND_ENUM
-  return 0  // TYPE_KIND_UNKNOWN
+  if kind == .struct { return TypeKind.`struct`.rawValue }
+  if kind == .class { return TypeKind.`class`.rawValue }
+  if kind == .enum { return TypeKind.`enum`.rawValue }
+  return TypeKind.unknown.rawValue
 }
 
 private func symbolKindToMemberKind(_ kind: SymbolKind) -> Int {
-  if kind == .instanceProperty { return 1 }  // MEMBER_KIND_INSTANCE_PROPERTY
-  if kind == .instanceMethod { return 2 }  // MEMBER_KIND_INSTANCE_METHOD
-  if kind == .staticProperty || kind == .classProperty { return 3 }  // MEMBER_KIND_STATIC_PROPERTY
-  if kind == .staticMethod || kind == .classMethod { return 4 }  // MEMBER_KIND_STATIC_METHOD
-  if kind == .constructor { return 5 }  // MEMBER_KIND_CONSTRUCTOR
-  return 0  // MEMBER_KIND_UNKNOWN
+  if kind == .instanceProperty { return MemberKind.instanceProperty.rawValue }
+  if kind == .instanceMethod { return MemberKind.instanceMethod.rawValue }
+  if kind == .staticProperty || kind == .classProperty { return MemberKind.staticProperty.rawValue }
+  if kind == .staticMethod || kind == .classMethod { return MemberKind.staticMethod.rawValue }
+  if kind == .constructor { return MemberKind.constructor.rawValue }
+  return MemberKind.unknown.rawValue
 }
 
 private func accessLevel(from properties: SymbolProperty) -> String {

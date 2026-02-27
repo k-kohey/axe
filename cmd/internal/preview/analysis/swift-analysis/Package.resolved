@@ -1,5 +1,5 @@
 {
-  "originHash" : "8ec6a76a86db3bf95d3b47e2dbffadaa7d4a002eccb77aa5b20a309466561e93",
+  "originHash" : "45e2ee239d80a2112b8f62fc2683d1cfbe5aab8dfd01e355dea08e71975392ff",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -16,6 +16,15 @@
       "location" : "https://github.com/MobileNativeFoundation/swift-index-store",
       "state" : {
         "revision" : "c4665d1c0897f45add476bb78692cbf1821c0e7a"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "5596511fce902e649c403cd4d6d5da1254f142b7",
+        "version" : "1.35.1"
       }
     },
     {

@@ -132,17 +132,17 @@ final class MemberSourceExtractor: SyntaxVisitor {
       let declLine = helper.lineNumber(at: node.bindingSpecifier.positionAfterSkippingLeadingTrivia)
 
       memberSources.append(
-        MemberSource(
-          typeName: typeName,
-          line: declLine,
-          kind: .property,
-          name: propName,
-          typeExpr: typeExpr,
-          signature: "",
-          selector: "",
-          bodyLine: bodyLine,
-          source: bodySource
-        ))
+        MemberSource.with {
+          $0.typeName = typeName
+          $0.line = Int32(declLine)
+          $0.kind = .property
+          $0.name = propName
+          $0.typeExpr = typeExpr
+          $0.signature = ""
+          $0.selector = ""
+          $0.bodyLine = Int32(bodyLine)
+          $0.source = bodySource
+        })
 
       bodyRanges.append(bodyRange)
     }
@@ -174,17 +174,17 @@ final class MemberSourceExtractor: SyntaxVisitor {
     let declLine = helper.lineNumber(at: node.funcKeyword.positionAfterSkippingLeadingTrivia)
 
     memberSources.append(
-      MemberSource(
-        typeName: typeName,
-        line: declLine,
-        kind: .method,
-        name: funcName,
-        typeExpr: "",
-        signature: signature,
-        selector: selector,
-        bodyLine: bodyLine,
-        source: bodySource
-      ))
+      MemberSource.with {
+        $0.typeName = typeName
+        $0.line = Int32(declLine)
+        $0.kind = .method
+        $0.name = funcName
+        $0.typeExpr = ""
+        $0.signature = signature
+        $0.selector = selector
+        $0.bodyLine = Int32(bodyLine)
+        $0.source = bodySource
+      })
 
     bodyRanges.append(bodyRange)
 
@@ -212,17 +212,17 @@ final class MemberSourceExtractor: SyntaxVisitor {
     let declLine = helper.lineNumber(at: node.initKeyword.positionAfterSkippingLeadingTrivia)
 
     memberSources.append(
-      MemberSource(
-        typeName: typeName,
-        line: declLine,
-        kind: .method,
-        name: "init",
-        typeExpr: "",
-        signature: signature,
-        selector: selector,
-        bodyLine: bodyLine,
-        source: bodySource
-      ))
+      MemberSource.with {
+        $0.typeName = typeName
+        $0.line = Int32(declLine)
+        $0.kind = .method
+        $0.name = "init"
+        $0.typeExpr = ""
+        $0.signature = signature
+        $0.selector = selector
+        $0.bodyLine = Int32(bodyLine)
+        $0.source = bodySource
+      })
 
     bodyRanges.append(bodyRange)
 

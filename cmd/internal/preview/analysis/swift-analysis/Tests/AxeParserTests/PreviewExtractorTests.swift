@@ -27,7 +27,7 @@ struct PreviewExtractorTests {
 
     #expect(extractor.previews.count == 1)
     #expect(extractor.previews[0].title == "")
-    #expect(extractor.previews[0].startLine == 1)
+    #expect(extractor.previews[0].startLine == Int32(1))
     #expect(extractor.previews[0].source.contains("HogeView()"))
   }
 

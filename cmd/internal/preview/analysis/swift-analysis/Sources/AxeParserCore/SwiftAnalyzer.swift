@@ -31,13 +31,13 @@ public struct SwiftAnalyzer {
       bodyRanges: allBodyRanges
     )
 
-    return ParseResult(
-      memberSources: memberExtractor.memberSources,
-      imports: importCollector.imports,
-      previews: previewExtractor.previews,
-      skeletonHash: skeletonHash,
-      typeAccessLevels: memberExtractor.typeAccessLevels
-    )
+    return ParseResult.with {
+      $0.memberSources = memberExtractor.memberSources
+      $0.imports = importCollector.imports
+      $0.previews = previewExtractor.previews
+      $0.skeletonHash = skeletonHash
+      $0.typeAccessLevels = memberExtractor.typeAccessLevels
+    }
   }
 
   // MARK: - Skeleton Hash

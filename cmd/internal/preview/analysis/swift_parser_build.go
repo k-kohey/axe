@@ -22,7 +22,7 @@ import (
 	"github.com/k-kohey/axe/internal/procgroup"
 )
 
-//go:embed swift-analysis/Package.swift swift-analysis/Sources/AxeParser/*.swift swift-analysis/Sources/AxeParserCore/*.swift swift-analysis/Sources/AxeIndexReader/*.swift
+//go:embed swift-analysis/Package.swift swift-analysis/Sources/AxeParser/*.swift swift-analysis/Sources/AxeParserCore/*.swift swift-analysis/Sources/AxeIndexReader/*.swift swift-analysis/Sources/AxeAnalysisProto/*.swift
 var swiftAnalysisFS embed.FS
 
 // Version is the axe CLI version (e.g. "v1.2.3"), injected by main at startup.

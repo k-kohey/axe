@@ -52,11 +52,11 @@ final class PreviewExtractor: SyntaxVisitor {
       let bodySource = helper.extractLines(in: bodyRange)
 
       previews.append(
-        PreviewBlock(
-          startLine: startLine,
-          title: title,
-          source: bodySource
-        ))
+        PreviewBlock.with {
+          $0.startLine = Int32(startLine)
+          $0.title = title
+          $0.source = bodySource
+        })
 
       bodyRanges.append(bodyRange)
     }

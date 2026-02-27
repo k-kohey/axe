@@ -34,6 +34,22 @@ protoc \
   --proto_path=cmd/internal/preview/proto \
   cmd/internal/preview/proto/analysis.proto
 
+# --- analysis proto -> Swift (SwiftProtobuf) ---
+SWIFT_PROTO_OUT="$SWIFT_ANALYSIS/Sources/AxeAnalysisProto"
+mkdir -p "$SWIFT_PROTO_OUT"
+if ! command -v protoc-gen-swift >/dev/null 2>&1; then
+  echo "protoc-gen-swift not found; skipping Swift proto generation." >&2
+  echo "Install SwiftProtobuf (e.g. brew install swift-protobuf) to regenerate." >&2
+  SWIFT_PROTO_OUT=""
+fi
+if [ -n "$SWIFT_PROTO_OUT" ]; then
+  protoc \
+    --swift_out="$SWIFT_PROTO_OUT" \
+    --swift_opt=Visibility=Public \
+    --proto_path=cmd/internal/preview/proto \
+    cmd/internal/preview/proto/analysis.proto
+fi
+
 # --- preview proto -> TypeScript (ts-proto) ---
 mkdir -p vscode-extension/src/generated
 protoc \

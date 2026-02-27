@@ -26,13 +26,7 @@ struct Parse: ParsableCommand {
     let analyzer = SwiftAnalyzer(source: source)
     let result = analyzer.analyze()
 
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    let data = try encoder.encode(result)
-
-    guard let json = String(data: data, encoding: .utf8) else {
-      throw ValidationError("Failed to encode JSON")
-    }
+    let json = try result.jsonString()
     print(json)
   }
 }
