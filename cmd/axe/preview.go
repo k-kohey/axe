@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,8 +33,8 @@ var previewCmd = &cobra.Command{
 	compiles it into a dylib, and launches the app on a headless simulator with the dylib injected.
 	The simulator is managed automatically in axe's dedicated device set and shut down on exit.
 
-	By default (no --watch), the command runs in oneshot mode: build, launch, verify the
-	runtime is ready via loader socket, then clean up and exit. Exit 0 on success, exit 1 on failure.
+	By default (no --watch), the command runs in oneshot mode: build, launch, capture a screenshot
+	to stdout (PNG), then clean up and exit. Exit 0 on success, exit 1 on failure.
 	With --watch, the command stays running and hot-reloads on file changes.
 
 	With --serve, the command runs as a multi-stream IDE backend. No source file argument is needed;
@@ -43,35 +44,7 @@ var previewCmd = &cobra.Command{
 	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,
 	Args: cobra.RangeArgs(0, 1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Fall back to .axerc for unset flags.
-		rc := platform.ReadRC()
-		if previewProject == "" && rc["PROJECT"] != "" {
-			previewProject = rc["PROJECT"]
-		}
-		if previewWorkspace == "" && rc["WORKSPACE"] != "" {
-			previewWorkspace = rc["WORKSPACE"]
-		}
-		if previewScheme == "" && rc["SCHEME"] != "" {
-			previewScheme = rc["SCHEME"]
-		}
-		if previewConfiguration == "" && rc["CONFIGURATION"] != "" {
-			previewConfiguration = rc["CONFIGURATION"]
-		}
-		if previewDevice == "" && rc["DEVICE"] != "" {
-			previewDevice = rc["DEVICE"]
-		}
-
-		if previewProject != "" && previewWorkspace != "" {
-			return fmt.Errorf("--project and --workspace are mutually exclusive")
-		}
-		if previewProject == "" && previewWorkspace == "" {
-			return fmt.Errorf("either --project or --workspace is required. Use flags or set PROJECT/WORKSPACE in .axerc")
-		}
-		if previewScheme == "" {
-			return fmt.Errorf("--scheme is required. Use the flag or set SCHEME in .axerc")
-		}
-
-		pc, err := preview.NewProjectConfig(previewProject, previewWorkspace, previewScheme, previewConfiguration)
+		pc, err := resolveProjectConfig()
 		if err != nil {
 			return err
 		}
@@ -106,7 +79,7 @@ var previewCmd = &cobra.Command{
 			return fmt.Errorf("source file not found: %s", sourceFile)
 		}
 
-		return preview.Run(preview.RunOptions{
+		opts := preview.RunOptions{
 			SourceFile:      sourceFile,
 			PC:              pc,
 			Watch:           previewWatch,
@@ -116,19 +89,66 @@ var previewCmd = &cobra.Command{
 			ReuseBuild:      previewReuseBuild,
 			FullThunk:       previewFullThunk,
 			Strict:          previewStrict,
-		})
+		}
+
+		// Oneshot mode: capture screenshot to stdout after ready.
+		if !previewWatch && !previewServe {
+			opts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
+				data, err := platform.Screenshot(ctx, device, deviceSetPath)
+				if err != nil {
+					return err
+				}
+				_, err = os.Stdout.Write(data)
+				return err
+			}
+		}
+
+		return preview.Run(opts)
 	},
 }
 
+// resolveProjectConfig applies .axerc fallbacks and validates project config flags.
+// Shared by the preview command and its subcommands (e.g. report).
+func resolveProjectConfig() (preview.ProjectConfig, error) {
+	rc := platform.ReadRC()
+	if previewProject == "" && rc["PROJECT"] != "" {
+		previewProject = rc["PROJECT"]
+	}
+	if previewWorkspace == "" && rc["WORKSPACE"] != "" {
+		previewWorkspace = rc["WORKSPACE"]
+	}
+	if previewScheme == "" && rc["SCHEME"] != "" {
+		previewScheme = rc["SCHEME"]
+	}
+	if previewConfiguration == "" && rc["CONFIGURATION"] != "" {
+		previewConfiguration = rc["CONFIGURATION"]
+	}
+	if previewDevice == "" && rc["DEVICE"] != "" {
+		previewDevice = rc["DEVICE"]
+	}
+
+	if previewProject != "" && previewWorkspace != "" {
+		return preview.ProjectConfig{}, fmt.Errorf("--project and --workspace are mutually exclusive")
+	}
+	if previewProject == "" && previewWorkspace == "" {
+		return preview.ProjectConfig{}, fmt.Errorf("either --project or --workspace is required. Use flags or set PROJECT/WORKSPACE in .axerc")
+	}
+	if previewScheme == "" {
+		return preview.ProjectConfig{}, fmt.Errorf("--scheme is required. Use the flag or set SCHEME in .axerc")
+	}
+
+	return preview.NewProjectConfig(previewProject, previewWorkspace, previewScheme, previewConfiguration)
+}
+
 func init() {
-	previewCmd.Flags().StringVar(&previewProject, "project", "", "path to .xcodeproj")
-	previewCmd.Flags().StringVar(&previewWorkspace, "workspace", "", "path to .xcworkspace")
-	previewCmd.Flags().StringVar(&previewScheme, "scheme", "", "Xcode scheme to build")
+	previewCmd.PersistentFlags().StringVar(&previewProject, "project", "", "path to .xcodeproj")
+	previewCmd.PersistentFlags().StringVar(&previewWorkspace, "workspace", "", "path to .xcworkspace")
+	previewCmd.PersistentFlags().StringVar(&previewScheme, "scheme", "", "Xcode scheme to build")
+	previewCmd.PersistentFlags().StringVar(&previewConfiguration, "configuration", "", "build configuration (e.g. Debug, Release)")
+	previewCmd.PersistentFlags().StringVar(&previewDevice, "device", "", "simulator UDID to use for preview (overrides .axerc DEVICE and global default)")
 	previewCmd.Flags().BoolVar(&previewWatch, "watch", false, "watch source file for changes and reload")
-	previewCmd.Flags().StringVar(&previewConfiguration, "configuration", "", "build configuration (e.g. Debug, Release)")
 	previewCmd.Flags().StringVar(&previewSelector, "preview", "", "select preview by title or index (e.g. --preview \"Dark Mode\" or --preview 1)")
 	previewCmd.Flags().BoolVar(&previewServe, "serve", false, "run as IDE backend: stream video via idb, accept JSON commands on stdin (requires idb_companion)")
-	previewCmd.Flags().StringVar(&previewDevice, "device", "", "simulator UDID to use for preview (overrides .axerc DEVICE and global default)")
 	previewCmd.Flags().BoolVar(&previewReuseBuild, "reuse-build", false, "skip xcodebuild and reuse artifacts from a previous build")
 	previewCmd.Flags().BoolVar(&previewFullThunk, "full-thunk", false, "use full thunk compilation in oneshot mode (per-file dynamic replacement)")
 	previewCmd.Flags().BoolVar(&previewStrict, "strict", false, "require full thunk compilation in watch/serve mode (no degraded fallback)")

@@ -385,6 +385,13 @@ func Run(opts RunOptions) error {
 		sendStopped("runtime_error", err.Error(), "")
 		return err
 	}
+
+	// OnReady callback (screenshot etc.) runs before cleanup.
+	if opts.OnReady != nil {
+		if err := opts.OnReady(ctx, device, deviceSetPath); err != nil {
+			return fmt.Errorf("on-ready: %w", err)
+		}
+	}
 	return nil
 }
 

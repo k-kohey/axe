@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -89,6 +90,12 @@ type RunOptions struct {
 	ReuseBuild      bool
 	FullThunk       bool
 	Strict          bool
+
+	// OnReady is called after the preview app has launched and is confirmed ready.
+	// Receives the simulator device UDID and device set path.
+	// Only invoked in oneshot mode (not --watch, not --serve).
+	// If nil, oneshot returns immediately after verifying readiness.
+	OnReady func(ctx context.Context, device, deviceSetPath string) error
 }
 
 // compileConfigFromBS converts buildSettings to codegen.CompileConfig.
