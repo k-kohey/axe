@@ -354,3 +354,42 @@ struct MapDepView: View {
 		t.Fatalf("expected compile success with dep-only import merge, got: %v", err)
 	}
 }
+
+// Regression: #if canImport(X) 内の import が thunk に反映される。
+// ImportCollector が条件付き import を `#if canImport(X)\nimport X\n#endif`
+// の形で保持し、thunk コンパイラが canImport を評価して解決する。
+func TestRegression_ConditionalImportInThunk(t *testing.T) {
+	sdk := simulatorSDKPath(t)
+
+	fixture := `import SwiftUI
+#if canImport(MapKit)
+import MapKit
+#endif
+
+struct ConditionalImportView: View {
+    var region: MKCoordinateRegion {
+        MKCoordinateRegion()
+    }
+
+    var body: some View {
+        Text("Lat: \(region.center.latitude)")
+    }
+}
+
+#Preview {
+    ConditionalImportView()
+}
+`
+	thunkPaths, moduleDir := generateThunksForTest(t, sdk,
+		map[string]string{"ConditionalImportView.swift": fixture},
+		"ConditionalImportView.swift",
+	)
+
+	if !thunkContains(t, thunkPaths, "#if canImport(MapKit)") {
+		t.Error("per-file thunk should contain #if canImport(MapKit)")
+	}
+
+	if err := typecheckThunks(t, thunkPaths, moduleDir, compileTestModuleName, sdk); err != nil {
+		t.Fatalf("per-file thunk should compile but failed: %v", err)
+	}
+}
