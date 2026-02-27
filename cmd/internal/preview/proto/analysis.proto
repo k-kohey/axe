@@ -95,6 +95,7 @@ message IndexMemberInfo {
   int32 line = 4;
   int32 column = 5;
   bool is_computed = 6;      // accessor occurrence の有無で判定
+  string usr = 7;            // Unified Symbol Resolution
 }
 
 message IndexTypeInfo {
@@ -105,6 +106,7 @@ message IndexTypeInfo {
   repeated IndexMemberInfo members = 5;
   int32 line = 6;
   int32 column = 7;
+  string usr = 8;               // Unified Symbol Resolution
 }
 
 message IndexFileData {

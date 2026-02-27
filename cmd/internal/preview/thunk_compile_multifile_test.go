@@ -359,10 +359,10 @@ func TestMultiFile_DepWithNoComputedProperties(t *testing.T) {
 // SourceFile() requires at least one View with body → should error.
 // ============================================================
 
-// Multi 7: Target file is extension-only — known bug.
-// Fixtures and test moved to thunk_compile_known_bugs_test.go (TestKnownBug_ExtensionOnlyTarget).
+// Multi 7: Target file is extension-only.
+// Coverage moved to thunk_compile_regression_test.go (TestRegression_ExtensionOnlyTarget).
 func TestMultiFile_TargetIsExtensionOnly(t *testing.T) {
-	t.Skip("Known bug: moved to TestKnownBug_ExtensionOnlyTarget")
+	t.Skip("Covered in TestRegression_ExtensionOnlyTarget")
 }
 
 // ============================================================
