@@ -78,11 +78,12 @@ struct ImportCollectorTests {
     let collector = ImportCollector()
     collector.walk(tree)
 
-    #expect(collector.imports == [
-      "import Foundation",
-      "#if canImport(MapKit)\nimport MapKit\n#endif",
-      "#if canImport(AppKit)\nimport AppKit\n#elseif canImport(UIKit)\nimport UIKit\n#endif",
-    ])
+    #expect(
+      collector.imports == [
+        "import Foundation",
+        "#if canImport(MapKit)\nimport MapKit\n#endif",
+        "#if canImport(AppKit)\nimport AppKit\n#elseif canImport(UIKit)\nimport UIKit\n#endif",
+      ])
   }
 
   @Test("#if os / #if DEBUG imports are skipped")

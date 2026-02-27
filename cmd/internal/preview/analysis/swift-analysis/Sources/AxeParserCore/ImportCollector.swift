@@ -56,9 +56,10 @@ final class ImportCollector: SyntaxVisitor {
 
   private func isSimpleCanImport(_ condition: ExprSyntax?) -> Bool {
     guard let condition,
-          let callExpr = condition.as(FunctionCallExprSyntax.self),
-          let declRef = callExpr.calledExpression.as(DeclReferenceExprSyntax.self),
-          declRef.baseName.text == "canImport" else {
+      let callExpr = condition.as(FunctionCallExprSyntax.self),
+      let declRef = callExpr.calledExpression.as(DeclReferenceExprSyntax.self),
+      declRef.baseName.text == "canImport"
+    else {
       return false
     }
     return true
