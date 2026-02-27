@@ -45,7 +45,7 @@ func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, Sour
 	return &runner.Build{}, &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
 }
 
-func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string, serve bool, preferredDevice string, reuseBuild bool) error {
+func Run(opts RunOptions) error {
 	// Set up signal-based context early so that long-running operations
 	// (build with lock, compileThunk, etc.) can be cancelled via Ctrl+C.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -53,7 +53,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// In serve mode, create an EventWriter to send JSON Lines to stdout.
 	var ew *protocol.EventWriter
-	if serve {
+	if opts.Serve {
 		ew = protocol.NewEventWriter(os.Stdout)
 
 		// Advertise the protocol version to the extension.
@@ -86,25 +86,25 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	br, tc, ar, fc, sl := defaultRunners()
 
-	step := &stepper{total: 9}
+	step := &stepper{total: 7}
 
 	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
-	device, deviceSetPath, err := platform.ResolveAxeSimulator(simctl, preferredDevice)
+	device, deviceSetPath, err := platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
 	done()
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
 		return err
 	}
 
-	dirs, err := newPreviewDirs(pc.primaryPath(), device)
+	dirs, err := newPreviewDirs(opts.PC.primaryPath(), device)
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
 		return err
 	}
 
 	done = step.begin("Fetching build settings...")
-	bs, err := fetchBuildSettings(ctx, pc, dirs, br)
+	bs, err := fetchBuildSettings(ctx, opts.PC, dirs, br)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -112,16 +112,16 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	}
 
 	sendStatus("building")
-	if reuseBuild && hasPreviousBuild(bs, dirs) {
+	if opts.ReuseBuild && hasPreviousBuild(bs, dirs) {
 		done = step.begin(fmt.Sprintf("Reusing previous build (%s)...", dirs.Build))
 		done()
 	} else {
 		label := "Building project..."
-		if reuseBuild {
+		if opts.ReuseBuild {
 			label = "No previous build found, building project..."
 		}
 		done = step.begin(label)
-		err = buildProject(ctx, pc, dirs, br)
+		err = buildProject(ctx, opts.PC, dirs, br)
 		done()
 		if err != nil {
 			sendStopped("build_error", "Build failed", err.Error())
@@ -131,48 +131,58 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	extractCompilerPaths(ctx, bs, dirs)
 
-	// Load Index Store cache for fast in-memory dependency resolution.
-	projectRoot := filepath.Dir(pc.primaryPath())
-	rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
-	if cacheErr != nil && ctx.Err() == nil {
-		slog.Warn("Index store cache unavailable", "err", cacheErr)
+	// Use CompileStrategy to decide between full and main-only thunk compilation.
+	var depGraph *analysis.DependencyGraph
+	var trackedFiles []string
+	var indexCache *sharedIndexCache
+
+	strategy := NewCompileStrategy(opts.Watch, opts.Serve, opts.FullThunk, opts.Strict)
+	compilers := map[CompileMode]CompileFunc{
+		CompileModeFull: func(ctx context.Context) (string, error) {
+			// Load Index Store cache for fast in-memory dependency resolution.
+			projectRoot := filepath.Dir(opts.PC.primaryPath())
+			rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
+			if cacheErr != nil && ctx.Err() == nil {
+				slog.Warn("Index store cache unavailable", "err", cacheErr)
+			}
+			indexCache = newSharedIndexCache(rawCache)
+
+			dg, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, opts.SourceFile, indexCache.Get())
+			if err != nil && ctx.Err() == nil {
+				slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
+			}
+			depGraph = dg
+
+			tf := []string{opts.SourceFile}
+			tf = append(tf, depFiles...)
+			slog.Debug("Tracked files", "count", len(tf), "files", tf)
+
+			files, tf, err := parseAndFilterTrackedFiles(opts.SourceFile, tf, indexCache.Get())
+			if err != nil {
+				return "", err
+			}
+			trackedFiles = tf
+
+			thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, opts.PreviewSelector, opts.SourceFile, 0)
+			if err != nil {
+				return "", err
+			}
+
+			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
+		},
+		CompileModeMainOnly: func(ctx context.Context) (string, error) {
+			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, tc)
+		},
 	}
-	indexCache := newSharedIndexCache(rawCache)
 
-	// Resolve dependencies using the index store for transitive graph.
-	depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, indexCache.Get())
-	if err != nil && ctx.Err() == nil {
-		slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
-	}
-
-	// Build tracked file list: target + dependencies.
-	trackedFiles := []string{sourceFile}
-	trackedFiles = append(trackedFiles, depFiles...)
-	slog.Debug("Tracked files", "count", len(trackedFiles), "files", trackedFiles)
-
-	done = step.begin("Parsing source file...")
-	files, trackedFiles, err := parseAndFilterTrackedFiles(sourceFile, trackedFiles, indexCache.Get())
+	done = step.begin("Compiling thunk...")
+	compileResult, err := ExecuteCompileStrategy(ctx, strategy, compilers)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
 	}
-
-	done = step.begin("Generating thunks...")
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile, 0)
-	done()
-	if err != nil {
-		sendStopped("build_error", err.Error(), "")
-		return err
-	}
-
-	done = step.begin("Compiling thunk dylib...")
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
-	done()
-	if err != nil {
-		sendStopped("build_error", err.Error(), "")
-		return err
-	}
+	dylibPath := compileResult.DylibPath
 
 	// Boot the simulator headlessly via idb_companion.
 	// Stopping bootCompanion will terminate the process and shut down the simulator.
@@ -251,7 +261,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 
 	// Count previews for StreamStarted.
 	previewCount := 0
-	if blocks, parseErr := analysis.PreviewBlocks(sourceFile); parseErr == nil {
+	if blocks, parseErr := analysis.PreviewBlocks(opts.SourceFile); parseErr == nil {
 		previewCount = len(blocks)
 	}
 
@@ -265,7 +275,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	// Set up idb client and companion for serve mode.
 	var idbErrCh chan error
 
-	if serve {
+	if opts.Serve {
 		companion, err := idb.Start(device, deviceSetPath)
 		if err != nil {
 			sendStopped("runtime_error", fmt.Sprintf("starting idb_companion: %v", err), "")
@@ -287,12 +297,44 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			EW:       ew,
 			StreamID: defaultStreamID,
 			Device:   device,
-			File:     sourceFile,
+			File:     opts.SourceFile,
 		}
 		go protocol.RelayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
 	}
 
-	if watch {
+	if opts.Watch && compileResult.Degraded {
+		sendStatus("degraded")
+		slog.Warn("Running in degraded mode: hot-reload not available")
+		if err := codegen.WaitForReady(ctx, dirs.Socket); err != nil {
+			sendStopped("runtime_error", err.Error(), "")
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "Preview launched in degraded mode (hot-reload disabled).")
+
+		// Block until termination signal or fatal event.
+		// Without this, the deferred cleanup would run immediately, stopping
+		// the simulator and making the degraded preview useless.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-bootCompanion.Done():
+			msg := "simulator crashed unexpectedly"
+			if err := bootCompanion.Err(); err != nil {
+				msg = fmt.Sprintf("simulator crashed: %v", err)
+			}
+			sendStopped("runtime_error", msg, "")
+			return fmt.Errorf("boot companion died")
+		case err := <-idbErrCh:
+			if err != nil {
+				msg := fmt.Sprintf("idb_companion error: %v", err)
+				sendStopped("runtime_error", msg, "")
+				return fmt.Errorf("idb error: %w", err)
+			}
+			return nil
+		}
+	}
+
+	if opts.Watch {
 		// Compute initial skeleton hashes for all tracked files.
 		skeletonMap := buildSkeletonMap(trackedFiles)
 
@@ -301,7 +343,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			deviceSetPath: deviceSetPath,
 			loaderPath:    loaderPath,
 			streamID:      defaultStreamID,
-			serve:         serve,
+			serve:         opts.Serve,
 			ew:            ew,
 			build:         br,
 			toolchain:     tc,
@@ -311,13 +353,13 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 
 		initialIndex := 0
-		if idx, err := strconv.Atoi(previewSelector); err == nil {
+		if idx, err := strconv.Atoi(opts.PreviewSelector); err == nil {
 			initialIndex = idx
 		}
 
 		ws := &watchState{
 			reloadCounter:   1, // 0 was used for the initial launch
-			previewSelector: previewSelector,
+			previewSelector: opts.PreviewSelector,
 			previewIndex:    initialIndex,
 			previewCount:    previewCount,
 			skeletonMap:     skeletonMap,
@@ -334,7 +376,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 		}
 
 		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-		return runWatcher(ctx, sourceFile, pc, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
+		return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
 	}
 
 	// Default mode (no --watch): verify runtime is ready, then exit silently.
@@ -355,7 +397,7 @@ func hasPreviousBuild(bs *buildSettings, dirs previewDirs) bool {
 // RunServe is the multi-stream entry point for --serve mode.
 // It reads AddStream/RemoveStream commands from stdin and manages
 // multiple preview streams concurrently via StreamManager.
-func RunServe(pc ProjectConfig) error {
+func RunServe(pc ProjectConfig, strict bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
@@ -385,7 +427,7 @@ func RunServe(pc ProjectConfig) error {
 	}
 
 	br, tc, ar, fc, sl := defaultRunners()
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl)
+	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl, strict)
 
 	// Start shared file watcher for all streams.
 	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.primaryPath()), sl)

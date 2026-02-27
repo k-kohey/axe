@@ -212,6 +212,67 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	return runEventLoop(ctx, cfg)
 }
 
+// runDegradedStreamLoop handles a degraded stream where hot-reload is unavailable.
+// Only Input events and fatal events (boot crash, idb error) are processed.
+// SwitchFile, NextPreview, and ForceRebuild commands are rejected with a
+// "degraded" status re-send to inform the extension.
+func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, idbErrCh <-chan error) error {
+	sendDegradedRejection := func() {
+		if err := sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "degraded"}},
+		}); err != nil {
+			slog.Warn("Failed to re-send degraded status", "streamId", s.id, "err", err)
+		}
+	}
+
+	var bootDiedCh <-chan struct{}
+	if s.bootCompanion != nil {
+		bootDiedCh = s.bootCompanion.Done()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+
+		case <-s.switchFileCh:
+			slog.Info("SwitchFile rejected in degraded mode", "streamId", s.id)
+			sendDegradedRejection()
+
+		case <-s.nextPreviewCh:
+			slog.Info("NextPreview rejected in degraded mode", "streamId", s.id)
+			sendDegradedRejection()
+
+		case <-s.forceRebuildCh:
+			slog.Info("ForceRebuild rejected in degraded mode", "streamId", s.id)
+			sendDegradedRejection()
+
+		case input := <-s.inputCh:
+			if s.hid != nil {
+				s.hid.HandleInput(ctx, input)
+			}
+
+		case <-bootDiedCh:
+			msg := "simulator crashed unexpectedly"
+			if s.bootCompanion != nil {
+				if err := s.bootCompanion.Err(); err != nil {
+					msg = fmt.Sprintf("simulator crashed: %v", err)
+				}
+			}
+			s.sendStopped(sm.ew, "runtime_error", msg, "")
+			return fmt.Errorf("boot companion died")
+
+		case err, ok := <-idbErrCh:
+			if ok && err != nil {
+				msg := fmt.Sprintf("idb_companion error: %v", err)
+				s.sendStopped(sm.ew, "runtime_error", msg, "")
+				return fmt.Errorf("idb error: %w", err)
+			}
+		}
+	}
+}
+
 // buildTrackedSet creates a set of cleaned file paths for efficient lookup.
 func buildTrackedSet(files []string) map[string]bool {
 	set := make(map[string]bool, len(files))

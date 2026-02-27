@@ -128,6 +128,35 @@ func compilePipeline(
 	return dylibPath, nil
 }
 
+// compileMainOnlyPipeline runs the lightweight "main-only" thunk pipeline.
+// It extracts imports from the source file, generates a single main thunk
+// (no per-file dynamic replacements), and compiles it into a dylib.
+func compileMainOnlyPipeline(
+	ctx context.Context,
+	sourceFile string,
+	bs *buildSettings,
+	dirs previewDirs,
+	previewSelector string,
+	tc ToolchainRunner,
+) (string, error) {
+	imports, err := analysis.SourceImports(sourceFile)
+	if err != nil {
+		return "", fmt.Errorf("source imports: %w", err)
+	}
+
+	thunkPaths, err := codegen.GenerateMainOnlyThunk(bs.ModuleName, dirs.Thunk, sourceFile, previewSelector, imports)
+	if err != nil {
+		return "", fmt.Errorf("main-only thunk: %w", err)
+	}
+
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
+	if err != nil {
+		return "", fmt.Errorf("main-only compile: %w", err)
+	}
+
+	return dylibPath, nil
+}
+
 // deploy attempts hot-reload via socket, falling back to full app relaunch.
 func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
 	if err := codegen.SendReloadCommand(ctx, dirs.Socket, dylibPath); err != nil {

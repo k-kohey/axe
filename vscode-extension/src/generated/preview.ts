@@ -114,7 +114,7 @@ export interface StreamStopped {
 
 /** StreamStatus reports progress during stream initialization. */
 export interface StreamStatus {
-  /** "booting", "building", "installing", "running" */
+  /** "booting", "building", "installing", "running", "degraded" */
   phase: string;
 }
 

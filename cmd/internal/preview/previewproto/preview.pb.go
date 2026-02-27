@@ -937,7 +937,7 @@ func (x *StreamStopped) GetDiagnostic() string {
 // StreamStatus reports progress during stream initialization.
 type StreamStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Phase         string                 `protobuf:"bytes,1,opt,name=phase,proto3" json:"phase,omitempty"` // "booting", "building", "installing", "running"
+	Phase         string                 `protobuf:"bytes,1,opt,name=phase,proto3" json:"phase,omitempty"` // "booting", "building", "installing", "running", "degraded"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

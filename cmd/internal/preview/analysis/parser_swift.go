@@ -449,6 +449,16 @@ func Skeleton(path string) (string, error) {
 	return result.GetSkeletonHash(), nil
 }
 
+// SourceImports extracts import statements from a Swift source file.
+// Unlike SourceFile, it does not require Index Store or View conformance.
+func SourceImports(path string) ([]string, error) {
+	result, err := swiftParse(path)
+	if err != nil {
+		return nil, fmt.Errorf("parsing imports: %w", err)
+	}
+	return result.GetImports(), nil
+}
+
 // DependencyFile parses types and imports from a dependency Swift file.
 // Unlike SourceFile, it does not require a body property or View conformance.
 // It returns all types (with computed properties/methods) found in the file.

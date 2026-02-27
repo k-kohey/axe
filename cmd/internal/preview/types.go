@@ -78,6 +78,19 @@ func (pc ProjectConfig) primaryPath() string {
 	return pc.Project
 }
 
+// RunOptions holds all parameters for a single-stream preview Run invocation.
+type RunOptions struct {
+	SourceFile      string
+	PC              ProjectConfig
+	Watch           bool
+	PreviewSelector string
+	Serve           bool
+	PreferredDevice string
+	ReuseBuild      bool
+	FullThunk       bool
+	Strict          bool
+}
+
 // compileConfigFromBS converts buildSettings to codegen.CompileConfig.
 func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
 	return codegen.CompileConfig{
