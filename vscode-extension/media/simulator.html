@@ -137,6 +137,22 @@
     }
     .card .card-actions button:hover { background: #4c4c4c; }
     .card .card-actions .btn-remove { margin-left: auto; color: #e88; }
+
+    /* Hover cursor indicator */
+    .hover-cursor {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.35);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      will-change: transform;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
@@ -148,6 +164,7 @@
         <div class="status-overlay"><div class="spinner"></div><span class="status-text">Initializing...</span></div>
         <div class="device-frame" style="display:none">
           <div class="device-screen">
+            <div class="hover-cursor"></div>
             <img class="preview-image" />
           </div>
         </div>
@@ -286,6 +303,22 @@
 
     function setupCardEvents(card, streamId) {
       const img = card.querySelector('.preview-image');
+      const screen = card.querySelector('.device-screen');
+      const cursor = card.querySelector('.hover-cursor');
+
+      // Hover cursor tracking on device screen.
+      // Uses transform instead of left/top to avoid layout reflow (composite-only).
+      const cursorOffset = 10; // half of .hover-cursor width/height
+      screen.addEventListener('mousemove', (e) => {
+        const rect = screen.getBoundingClientRect();
+        const x = e.clientX - rect.left - cursorOffset;
+        const y = e.clientY - rect.top - cursorOffset;
+        cursor.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+        cursor.style.opacity = '1';
+      });
+      screen.addEventListener('mouseleave', () => {
+        cursor.style.opacity = '0';
+      });
 
       // Touch events with streamId.
       img.addEventListener('mousedown', (e) => {
