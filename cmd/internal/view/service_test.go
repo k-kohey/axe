@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestValidateAddress(t *testing.T) {
+	tests := []struct {
+		name    string
+		addr    string
+		wantErr bool
+	}{
+		{"valid address", "0x7f8b4c000", false},
+		{"valid uppercase", "0xABCDEF", false},
+		{"missing prefix", "7f8b4c000", true},
+		{"injection attempt", "0x1234; echo pwned", true},
+		{"empty", "", true},
+		{"only prefix", "0x", true},
+		{"non-hex chars", "0xZZZZ", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAddress(tt.addr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateAddress(%q) error = %v, wantErr %v", tt.addr, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestExtractJSONError(t *testing.T) {
 	tests := []struct {
 		name string

@@ -1,16 +1,47 @@
 package view
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/procgroup"
 )
+
+var (
+	tempDirOnce sync.Once
+	tempDir     string
+	tempDirErr  error
+)
+
+// sessionTempDir returns a per-session temporary directory.
+// Files are isolated from other sessions, preventing TOCTOU and temp file conflicts.
+func sessionTempDir() (string, error) {
+	tempDirOnce.Do(func() {
+		tempDir, tempDirErr = os.MkdirTemp("", "axe-view-*")
+	})
+	if tempDirErr != nil {
+		return "", fmt.Errorf("creating session temp dir: %w", tempDirErr)
+	}
+	return tempDir, nil
+}
+
+var validAddress = regexp.MustCompile(`^0x[0-9a-fA-F]+$`)
+
+func validateAddress(addr string) error {
+	if !validAddress.MatchString(addr) {
+		return fmt.Errorf("invalid address format: %q", addr)
+	}
+	return nil
+}
 
 // defaultSimctl returns a SimctlRunner for the view package.
 func defaultSimctl() platform.SimctlRunner {
@@ -30,7 +61,11 @@ func fetchHierarchy(appName string, device string) (*rawBplistData, error) {
 	}
 	defer cleanup()
 
-	bplistPath := filepath.Join(os.TempDir(), "axe_fetchViewHierarchy.bplist")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return nil, err
+	}
+	bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
 
 	name, err := platform.ResolveAppName(appName)
 	if err != nil {
@@ -76,6 +111,10 @@ func extractSnapshot(node rawViewNode) string {
 // runSwiftUITreeLLDB runs LLDB to fetch SwiftUI tree JSON for the given address.
 // It writes the result to swiftuiJSONPath and returns the LLDB output for error inspection.
 func runSwiftUITreeLLDB(appName string, address string, swiftuiJSONPath string, device string) error {
+	if err := validateAddress(address); err != nil {
+		return err
+	}
+
 	pythonDir, cleanup, err := platform.ExtractScripts()
 	if err != nil {
 		return err
@@ -134,7 +173,11 @@ func readSwiftUITreeJSON(jsonPath string, compact bool) ([]SwiftUINode, []byte, 
 // fetchSwiftUITree runs LLDB to fetch the SwiftUI tree JSON for the given view address
 // and parses it into SwiftUINode trees.
 func fetchSwiftUITree(appName string, address string, compact bool, device string) ([]SwiftUINode, []byte, error) {
-	swiftuiJSON := filepath.Join(os.TempDir(), "axe_swiftui_tree.json")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	swiftuiJSON := filepath.Join(tempDir, "axe_swiftui_tree.json")
 
 	if err := runSwiftUITreeLLDB(appName, address, swiftuiJSON, device); err != nil {
 		return nil, nil, err
@@ -162,8 +205,12 @@ func RunTree(appName string, maxDepth int, frontmost bool, device string) (TreeO
 		}
 		defer cleanup()
 
-		bplistPath := filepath.Join(os.TempDir(), "axe_fetchViewHierarchy.bplist")
-		frontmostPath := filepath.Join(os.TempDir(), "axe_frontmost_view.txt")
+		tempDir, err := sessionTempDir()
+		if err != nil {
+			return TreeOutput{}, err
+		}
+		bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
+		frontmostPath := filepath.Join(tempDir, "axe_frontmost_view.txt")
 
 		name, err := platform.ResolveAppName(appName)
 		if err != nil {
@@ -226,13 +273,23 @@ func RunTree(appName string, maxDepth int, frontmost bool, device string) (TreeO
 // RunDetail fetches the detail for a specific view address.
 // swiftUI should be "none", "compact", or "full".
 func RunDetail(appName string, address string, swiftUI string, device string) (DetailOutput, error) {
-	bplistPath := filepath.Join(os.TempDir(), "axe_fetchViewHierarchy.bplist")
+	tempDir, err := sessionTempDir()
+	if err != nil {
+		return DetailOutput{}, err
+	}
+	bplistPath := filepath.Join(tempDir, "axe_fetchViewHierarchy.bplist")
 	cacheMaxAgeMin := 3
 
-	// Check cache: use existing bplist if updated within cacheMaxAgeMin minutes
+	// Check cache: use existing bplist if updated within cacheMaxAgeMin minutes.
+	// Note: sessionTempDir() creates a per-process directory, so this cache only
+	// helps when RunDetail is called multiple times within the same process
+	// (e.g. long-running server mode). Cross-process caching was intentionally
+	// removed to prevent TOCTOU attacks on predictable temp paths.
 	needFetch := true
 	if _, err := os.Stat(bplistPath); err == nil {
-		out, err := exec.Command("find", bplistPath, "-mmin", fmt.Sprintf("-%d", cacheMaxAgeMin)).Output()
+		findCtx, findCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer findCancel()
+		out, err := procgroup.Command(findCtx, "find", bplistPath, "-mmin", fmt.Sprintf("-%d", cacheMaxAgeMin)).Output()
 		if err == nil && strings.TrimSpace(string(out)) != "" {
 			slog.Debug("Using cached bplist...")
 			needFetch = false
@@ -288,7 +345,7 @@ func RunDetail(appName string, address string, swiftUI string, device string) (D
 	// Fetch SwiftUI tree in a separate LLDB session to avoid
 	// ObjC/Swift language-switch issues within a single session.
 	if uikit.IsHostingView && swiftUI != "none" {
-		swiftuiJSON := filepath.Join(os.TempDir(), "axe_swiftui_tree.json")
+		swiftuiJSON := filepath.Join(tempDir, "axe_swiftui_tree.json")
 		if err := runSwiftUITreeLLDB(appName, address, swiftuiJSON, device); err != nil {
 			slog.Warn("Failed to fetch SwiftUI tree", "error", err)
 			fmt.Fprintln(os.Stderr, "\nNote: SwiftUI tree could not be retrieved. _viewDebugData() may not be supported for this view.")

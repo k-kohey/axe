@@ -127,6 +127,11 @@ func GenerateThunks(
 		base := strings.TrimSuffix(filepath.Base(f.AbsPath), filepath.Ext(f.AbsPath))
 		baseNameCount[base]++
 	}
+	for base, count := range baseNameCount {
+		if count > 1 {
+			slog.Warn("Duplicate Swift basenames detected; @_private(sourceFile:) may bind ambiguously", "basename", base, "count", count)
+		}
+	}
 	baseNameSeen := make(map[string]int)
 
 	// Generate per-file thunks.
@@ -169,14 +174,17 @@ func GenerateThunks(
 		thunkPaths = append(thunkPaths, thunkPath)
 	}
 
-	// Collect extra imports from the target source file.
-	// The #Preview body is written in the target file's context and may reference
-	// types from its imports (e.g. DSTheme.Colors.primary).
-	var targetImports []string
+	// Collect imports from all files because the preview body may reference
+	// symbols that are only imported in dependency files.
+	seenImports := make(map[string]struct{})
+	var mergedImports []string
 	for _, f := range files {
-		if f.AbsPath == targetSourceFile {
-			targetImports = f.Imports
-			break
+		for _, imp := range f.Imports {
+			if _, exists := seenImports[imp]; exists {
+				continue
+			}
+			seenImports[imp] = struct{}{}
+			mergedImports = append(mergedImports, imp)
 		}
 	}
 
@@ -184,7 +192,7 @@ func GenerateThunks(
 	mtd := MainThunkData{
 		ModuleName:     moduleName,
 		TargetFileName: filepath.Base(targetSourceFile),
-		ExtraImports:   targetImports,
+		ExtraImports:   mergedImports,
 	}
 
 	// Parse #Preview blocks from the target source file.

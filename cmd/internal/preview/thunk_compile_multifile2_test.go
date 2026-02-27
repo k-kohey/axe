@@ -25,10 +25,10 @@ import (
 // The main thunk only includes target's imports → Map() is unknown.
 // ============================================================
 
-// Multi2-1: Preview body references type from dependency's import — known bug.
-// Fixtures and test moved to thunk_compile_known_bugs_test.go (TestKnownBug_DepOnlyImport).
+// Multi2-1: Preview body references type from dependency's import.
+// Coverage moved to thunk_compile_regression_test.go (TestRegression_DepOnlyImport).
 func TestMultiFile2_PreviewUsesDepOnlyImport(t *testing.T) {
-	t.Skip("Known bug: moved to TestKnownBug_DepOnlyImport")
+	t.Skip("Covered in TestRegression_DepOnlyImport")
 }
 
 // ============================================================
