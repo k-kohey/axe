@@ -60,8 +60,8 @@ struct ImportCollectorTests {
     #expect(collector.imports.isEmpty)
   }
 
-  @Test("#if canImport imports are skipped")
-  func canImportSkipped() {
+  @Test("#if canImport imports are collected in conditional form")
+  func canImportCollected() {
     let source = """
       import SwiftUI
       import Foundation
@@ -70,6 +70,64 @@ struct ImportCollectorTests {
       #endif
       #if canImport(AppKit)
       import AppKit
+      #elseif canImport(UIKit)
+      import UIKit
+      #endif
+      """
+    let tree = Parser.parse(source: source)
+    let collector = ImportCollector()
+    collector.walk(tree)
+
+    #expect(
+      collector.imports == [
+        "import Foundation",
+        "#if canImport(MapKit)\nimport MapKit\n#endif",
+        "#if canImport(AppKit)\nimport AppKit\n#elseif canImport(UIKit)\nimport UIKit\n#endif",
+      ])
+  }
+
+  @Test("#if os / #if DEBUG imports are skipped")
+  func nonCanImportSkipped() {
+    let source = """
+      import SwiftUI
+      import Foundation
+      #if os(iOS)
+      import UIKit
+      #endif
+      #if DEBUG
+      import OSLog
+      #endif
+      """
+    let tree = Parser.parse(source: source)
+    let collector = ImportCollector()
+    collector.walk(tree)
+
+    #expect(collector.imports == ["import Foundation"])
+  }
+
+  @Test("Mixed chain with non-canImport clause is skipped entirely")
+  func mixedChainSkipped() {
+    let source = """
+      import Foundation
+      #if os(macOS)
+      import AppKit
+      #elseif canImport(UIKit)
+      import UIKit
+      #endif
+      """
+    let tree = Parser.parse(source: source)
+    let collector = ImportCollector()
+    collector.walk(tree)
+
+    #expect(collector.imports == ["import Foundation"])
+  }
+
+  @Test("Mixed chain is skipped even when non-canImport clause has no imports")
+  func mixedChainNoImportClauseSkipped() {
+    let source = """
+      import Foundation
+      #if os(macOS)
+      let sentinel = 1
       #elseif canImport(UIKit)
       import UIKit
       #endif
