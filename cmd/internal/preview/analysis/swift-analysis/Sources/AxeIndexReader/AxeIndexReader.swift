@@ -52,6 +52,7 @@ struct IndexTypeInfoOutput: Codable, Sendable {
   let members: [IndexMemberInfoOutput]
   let line: Int32
   let column: Int32
+  let usr: String
 }
 
 struct IndexMemberInfoOutput: Codable, Sendable {
@@ -61,11 +62,13 @@ struct IndexMemberInfoOutput: Codable, Sendable {
   let line: Int32
   let column: Int32
   let isComputed: Bool
+  let usr: String
 }
 
 // MARK: - Internal builder types
 
 private struct TypeBuilder {
+  let usr: String
   let name: String
   let kind: Int
   let accessLevel: String
@@ -163,6 +166,7 @@ func readIndexStore(
 
         if fileAccumulators[mainFile]?.types[usr] == nil {
           fileAccumulators[mainFile]?.types[usr] = TypeBuilder(
+            usr: usr,
             name: name,
             kind: symbolKindToTypeKind(symbol.kind),
             accessLevel: accessLevel(from: symbol.properties),
@@ -207,6 +211,7 @@ func readIndexStore(
           if roles.contains(.childOf) {
             if fileAccumulators[mainFile]?.types[relatedSymbol.usr] == nil {
               fileAccumulators[mainFile]?.types[relatedSymbol.usr] = TypeBuilder(
+                usr: relatedSymbol.usr,
                 name: relatedSymbol.name,
                 kind: symbolKindToTypeKind(relatedSymbol.kind),
                 accessLevel: accessLevel(from: relatedSymbol.properties),
@@ -264,7 +269,8 @@ func readIndexStore(
             accessLevel: member.accessLevel,
             line: member.line,
             column: member.column,
-            isComputed: computedPropertyUSRs.contains(member.usr)
+            isComputed: computedPropertyUSRs.contains(member.usr),
+            usr: member.usr
           )
         }
 
@@ -276,7 +282,8 @@ func readIndexStore(
           inheritedTypes: Array(builder.inheritedTypes).sorted(),
           members: members,
           line: builder.line,
-          column: builder.column
+          column: builder.column,
+          usr: builder.usr
         ))
     }
 

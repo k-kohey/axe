@@ -779,6 +779,56 @@ func TestStreamManager_NextPreviewRouting(t *testing.T) {
 	sm.StopAll()
 }
 
+// TestStreamManager_ForceRebuildRouting verifies that ForceRebuild commands are
+// delivered to the stream's forceRebuildCh.
+func TestStreamManager_ForceRebuildRouting(t *testing.T) {
+	pool := newFakeDevicePool()
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+
+	sm := newTestStreamManagerWithRunners(pool, ew)
+
+	received := make(chan struct{}, 1)
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		s.deviceUDID = udid
+
+		_ = sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "running"}},
+		})
+
+		select {
+		case <-s.forceRebuildCh:
+			received <- struct{}{}
+		case <-ctx.Done():
+		}
+	}
+
+	ctx := t.Context()
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_AddStream{AddStream: &pb.AddStream{File: "/path/to/HogeView.swift", DeviceType: "iPhone-16-Pro", Runtime: "iOS-18-2"}},
+	})
+
+	waitForEvents(t, &buf, 1, 2*time.Second)
+
+	sm.HandleCommand(ctx, &pb.Command{
+		StreamId: "stream-a",
+		Payload:  &pb.Command_ForceRebuild{ForceRebuild: &pb.ForceRebuild{}},
+	})
+
+	select {
+	case <-received:
+		// Success.
+	case <-time.After(2 * time.Second):
+		t.Fatal("ForceRebuild not received by stream")
+	}
+
+	sm.StopAll()
+}
+
 // TestStreamManager_SharedIndexCache verifies that all streams share the same
 // sharedIndexCache instance from StreamManager. When one stream updates the
 // cache (simulating a rebuild), other streams see the new value.

@@ -115,7 +115,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		previewManager.sendInput(msg);
 	});
 
-	// Connect WebView control messages (removeStream, changeDevice, nextPreview).
+	// Connect WebView control messages (removeStream, changeDevice, nextPreview, forceRebuild).
 	webviewPanel.setWebViewMessageHandler((msg) => {
 		if (msg.type === "removeStream" && msg.streamId) {
 			void untrackStream(msg.streamId);
@@ -123,6 +123,8 @@ export function activate(context: vscode.ExtensionContext): void {
 			void handleChangeDevice(msg.streamId);
 		} else if (msg.type === "nextPreview" && msg.streamId) {
 			previewManager.nextPreview(msg.streamId);
+		} else if (msg.type === "forceRebuild" && msg.streamId) {
+			previewManager.forceRebuild(msg.streamId);
 		}
 	});
 
@@ -158,6 +160,16 @@ export function activate(context: vscode.ExtensionContext): void {
 		},
 	);
 
+	// Register rebuildPreview command — force rebuild in all active streams.
+	const rebuildPreviewCmd = vscode.commands.registerCommand(
+		"axe.rebuildPreview",
+		() => {
+			for (const [, streamId] of activeStreams) {
+				previewManager.forceRebuild(streamId);
+			}
+		},
+	);
+
 	// Clear resolver cache when executablePath changes.
 	const configListener = vscode.workspace.onDidChangeConfiguration((e) => {
 		if (e.affectsConfiguration("axe.executablePath")) {
@@ -169,6 +181,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		editorListener,
 		showPreviewCmd,
 		nextPreviewCmd,
+		rebuildPreviewCmd,
 		configListener,
 		{
 			dispose: () => {

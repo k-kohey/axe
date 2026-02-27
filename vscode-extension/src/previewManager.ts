@@ -160,6 +160,11 @@ export class PreviewManager {
 		this.sendCommand({ streamId, nextPreview: {} });
 	}
 
+	/** Force a rebuild + relaunch for a specific stream. */
+	forceRebuild(streamId: string): void {
+		this.sendCommand({ streamId, forceRebuild: {} });
+	}
+
 	/** Stop the axe process and clear all streams. */
 	async stopPreview(): Promise<void> {
 		if (!this.process) {

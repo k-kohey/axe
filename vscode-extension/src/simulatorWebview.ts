@@ -72,7 +72,7 @@ export class SimulatorWebviewPanel {
 			) {
 				this.onInput?.(msg as InputMessage);
 			}
-			// Route all messages to the generic handler (for removeStream, changeDevice, nextPreview).
+			// Route all messages to the generic handler (for removeStream, changeDevice, nextPreview, forceRebuild).
 			this.onWebViewMessage?.(msg);
 		});
 		this.panel.onDidDispose(() => {

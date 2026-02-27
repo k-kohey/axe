@@ -583,6 +583,76 @@ func TestGenerateThunks_SingleFile(t *testing.T) {
 	})
 }
 
+func TestGenerateThunks_MainThunkImportsUnionFromAllFiles(t *testing.T) {
+	dir := t.TempDir()
+	thunkDir := filepath.Join(dir, "thunk")
+
+	targetContent := `import SwiftUI
+struct MainView: View {
+    var body: some View { DepView() }
+}
+#Preview {
+    MainView()
+}`
+	targetPath := filepath.Join(dir, "MainView.swift")
+	if err := os.WriteFile(targetPath, []byte(targetContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	depContent := `import SwiftUI
+import MapKit
+
+struct DepView: View {
+    var body: some View { Map() }
+}`
+	depPath := filepath.Join(dir, "DepView.swift")
+	if err := os.WriteFile(depPath, []byte(depContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files := []analysis.FileThunkData{
+		{
+			FileName: "MainView.swift",
+			AbsPath:  targetPath,
+			Types: []analysis.TypeInfo{
+				{
+					Name:           "MainView",
+					Kind:           "struct",
+					InheritedTypes: []string{"View"},
+					Properties:     []analysis.PropertyInfo{{Name: "body", TypeExpr: "some View", BodyLine: 3, Source: "        DepView()"}},
+				},
+			},
+		},
+		{
+			FileName: "DepView.swift",
+			AbsPath:  depPath,
+			Types: []analysis.TypeInfo{
+				{
+					Name:           "DepView",
+					Kind:           "struct",
+					InheritedTypes: []string{"View"},
+					Properties:     []analysis.PropertyInfo{{Name: "body", TypeExpr: "some View", BodyLine: 5, Source: "        Map()"}},
+				},
+			},
+			Imports: []string{"import MapKit"},
+		},
+	}
+
+	thunkPaths, err := GenerateThunks(files, "MyApp", thunkDir, "", targetPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainThunk, err := os.ReadFile(thunkPaths[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(mainThunk)
+	if !strings.Contains(content, "import MapKit") {
+		t.Fatalf("main thunk missing dependency-only import\n\n%s", content)
+	}
+}
+
 func TestGenerateThunks_DuplicateBasenames(t *testing.T) {
 	dir := t.TempDir()
 	thunkDir := filepath.Join(dir, "thunk")

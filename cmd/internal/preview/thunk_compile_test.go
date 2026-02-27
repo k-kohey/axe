@@ -547,6 +547,214 @@ struct CollisionViewB: View {
 }
 `
 
+// Case G: delegate method in protocol conformance extension.
+// Verifies that a method declared in an extension (for protocol conformance)
+// is correctly generated as a @_dynamicReplacement func (not var).
+// Bug: if the method is mis-identified as a property, the parameter "error"
+// disappears from scope, and Swift 6 confuses bare "error" with the #error macro.
+const fixtureDelegateProtocol = `import Foundation
+
+protocol ErrorHandler {
+    func handleError(error: any Error)
+}
+`
+
+const fixtureDelegateView = `import SwiftUI
+
+enum AppError: Error, Equatable {
+    case notFound
+}
+
+class DelegateViewModel: ObservableObject {
+    // Stored property with the same name as the delegate method.
+    // Index Store reports this as kind=INSTANCE_PROPERTY with isComputed=true,
+    // causing combineWithIndexStore to misidentify the method as a property.
+    var handleError: ((any Error) -> Void)? = nil
+}
+
+extension DelegateViewModel: ErrorHandler {
+    func handleError(error: any Error) {
+        if case AppError.notFound = error {
+            print("not found")
+        }
+    }
+}
+
+struct DelegateView: View {
+    @StateObject var vm = DelegateViewModel()
+    var body: some View {
+        Text("Hello")
+    }
+}
+`
+
+// Case F: catch block enum case pattern matching.
+const fixtureErrorCatchPattern = `import SwiftUI
+
+enum DataError: Error {
+    case notFound
+    case permissionDenied
+}
+
+struct CatchPatternView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func loadData() throws -> String {
+        do {
+            throw DataError.notFound
+        } catch DataError.notFound {
+            return "Not Found"
+        } catch DataError.permissionDenied {
+            return "Permission Denied"
+        }
+    }
+}
+`
+
+// Case F2: "if case" pattern matching on Error existential.
+// "if case SomeEnum.case = error" is the idiomatic way to match
+// errors in Swift without a custom ~= operator.
+const fixtureErrorIfCasePattern = `import SwiftUI
+
+enum AppError: Error {
+    case networkFailure
+    case timeout
+}
+
+struct IfCaseErrorView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func describeError(error: Error) -> String {
+        if case AppError.networkFailure = error {
+            return "Network Failure"
+        } else if case AppError.timeout = error {
+            return "Timeout"
+        }
+        return "Unknown"
+    }
+}
+`
+
+// Case F3: switch pattern matching on Error existential.
+const fixtureErrorSwitchPattern = `import SwiftUI
+
+enum FetchError: Error {
+    case badURL
+    case unauthorized
+    case serverError
+}
+
+struct SwitchErrorView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func errorMessage(for error: Error) -> String {
+        switch error {
+        case FetchError.badURL:
+            return "Bad URL"
+        case FetchError.unauthorized:
+            return "Unauthorized"
+        case FetchError.serverError:
+            return "Server Error"
+        default:
+            return "Unknown"
+        }
+    }
+}
+`
+
+// Case F4: Equatable ~= with same-type operands (standard library ~=).
+// When both sides are the same Equatable type, the standard ~= applies.
+const fixtureEquatablePatternMatching = `import SwiftUI
+
+enum Status: Equatable {
+    case active
+    case inactive
+}
+
+struct StatusView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func isActive(status: Status) -> Bool {
+        Status.active ~= status
+    }
+}
+`
+
+// Case F5: explicit ~= with the implicit catch block "error" variable.
+// Reproduces the reported pattern: if (myError ~= error) {}
+// where error is the implicit catch variable.
+const fixtureExplicitTildeEqWithImplicitError = `import SwiftUI
+
+enum MyError: Error, Equatable {
+    case notFound
+    case unauthorized
+}
+
+func ~= (pattern: MyError, value: Error) -> Bool {
+    guard let value = value as? MyError else { return false }
+    return pattern == value
+}
+
+struct TildeEqView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func doWork() -> String {
+        do {
+            throw MyError.notFound
+        } catch {
+            if (MyError.notFound ~= error) {
+                return "Not Found"
+            }
+        }
+        return "OK"
+    }
+}
+`
+
+// Case F6: cross-file error catch pattern matching.
+// Error type is defined in a separate file from the View.
+const fixtureErrorTypesCrossFile = `import Foundation
+
+enum NetworkError: Error {
+    case connectionLost
+    case timeout
+}
+`
+
+const fixtureCrossFileErrorView = `import SwiftUI
+
+struct CrossFileErrorView: View {
+    var body: some View {
+        Text("Hello")
+    }
+
+    func describeError(error: Error) -> String {
+        switch error {
+        case NetworkError.connectionLost:
+            return "Connection Lost"
+        case NetworkError.timeout:
+            return "Timeout"
+        default:
+            return "Error"
+        }
+    }
+}
+
+#Preview {
+    CrossFileErrorView()
+}
+`
+
 // Case E: #Preview referencing a private type.
 // The main thunk uses @_private(sourceFile:) import for the target file,
 // so private types defined in that file are visible in the preview wrapper.
@@ -702,6 +910,47 @@ func TestThunkCompilation(t *testing.T) {
 			name:    "PreviewWithPrivateType",
 			sources: map[string]string{"WrapperView.swift": fixturePreviewWithPrivateType},
 			target:  "WrapperView.swift",
+		},
+		{
+			name: "DelegateMethodInExtension",
+			sources: map[string]string{
+				"ErrorHandler.swift": fixtureDelegateProtocol,
+				"DelegateView.swift": fixtureDelegateView,
+			},
+			target: "DelegateView.swift",
+		},
+		{
+			name:    "ErrorCatchPattern",
+			sources: map[string]string{"CatchPatternView.swift": fixtureErrorCatchPattern},
+			target:  "CatchPatternView.swift",
+		},
+		{
+			name:    "ErrorIfCasePattern",
+			sources: map[string]string{"IfCaseErrorView.swift": fixtureErrorIfCasePattern},
+			target:  "IfCaseErrorView.swift",
+		},
+		{
+			name:    "ErrorSwitchPattern",
+			sources: map[string]string{"SwitchErrorView.swift": fixtureErrorSwitchPattern},
+			target:  "SwitchErrorView.swift",
+		},
+		{
+			name:    "EquatablePatternMatching",
+			sources: map[string]string{"StatusView.swift": fixtureEquatablePatternMatching},
+			target:  "StatusView.swift",
+		},
+		{
+			name: "CrossFileErrorPattern",
+			sources: map[string]string{
+				"ErrorTypes.swift":         fixtureErrorTypesCrossFile,
+				"CrossFileErrorView.swift": fixtureCrossFileErrorView,
+			},
+			target: "CrossFileErrorView.swift",
+		},
+		{
+			name:    "ExplicitTildeEqWithImplicitError",
+			sources: map[string]string{"TildeEqView.swift": fixtureExplicitTildeEqWithImplicitError},
+			target:  "TildeEqView.swift",
 		},
 	}
 

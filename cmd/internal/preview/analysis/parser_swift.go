@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -110,95 +111,86 @@ func convertPreviewBlocks(protoBlocks []*pb.PreviewBlock) []PreviewBlock {
 	return blocks
 }
 
-// memberKey identifies a member source by type name, line, and member name.
-type memberKey struct {
-	typeName string
-	line     int32
-	name     string
+type parserMemberLineKey struct {
+	line int32
+	kind pb.MemberSourceKind
 }
 
-// nameKey identifies a member source by type name and member name only.
-type nameKey struct {
+type parserTypeMemberKey struct {
 	typeName string
-	name     string
+	baseName string
+	kind     pb.MemberSourceKind
+}
+
+type parserIndexes struct {
+	byLineKind     map[parserMemberLineKey][]*pb.MemberSource
+	byTypeAndBase  map[parserTypeMemberKey][]*pb.MemberSource
+	byShortAndBase map[parserTypeMemberKey][]*pb.MemberSource
+}
+
+func buildParserIndexes(parserResult *pb.ParseResult) parserIndexes {
+	idx := parserIndexes{
+		byLineKind:     make(map[parserMemberLineKey][]*pb.MemberSource, len(parserResult.GetMemberSources())),
+		byTypeAndBase:  make(map[parserTypeMemberKey][]*pb.MemberSource, len(parserResult.GetMemberSources())),
+		byShortAndBase: make(map[parserTypeMemberKey][]*pb.MemberSource, len(parserResult.GetMemberSources())),
+	}
+
+	for _, ms := range parserResult.GetMemberSources() {
+		kind := ms.GetKind()
+		base := parserMemberBaseName(ms)
+
+		idx.byLineKind[parserMemberLineKey{line: ms.GetLine(), kind: kind}] = append(
+			idx.byLineKind[parserMemberLineKey{line: ms.GetLine(), kind: kind}],
+			ms,
+		)
+
+		typeName := ms.GetTypeName()
+		idx.byTypeAndBase[parserTypeMemberKey{typeName: typeName, baseName: base, kind: kind}] = append(
+			idx.byTypeAndBase[parserTypeMemberKey{typeName: typeName, baseName: base, kind: kind}],
+			ms,
+		)
+
+		short := shortTypeName(typeName)
+		idx.byShortAndBase[parserTypeMemberKey{typeName: short, baseName: base, kind: kind}] = append(
+			idx.byShortAndBase[parserTypeMemberKey{typeName: short, baseName: base, kind: kind}],
+			ms,
+		)
+	}
+
+	return idx
 }
 
 // combineWithIndexStore combines Index Store member metadata with parser source text
 // to produce TypeInfo values. The Index Store provides filtering (instance/computed/non-init)
 // and the parser provides source text.
 func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseResult) []TypeInfo {
-	// Build short→qualified name mapping from parser output.
-	// The parser emits qualified names (e.g. "OuterView.InnerView") while the
-	// Index Store uses short names (e.g. "InnerView"). We need the qualified
-	// name for correct extension generation in thunk templates.
-	qualifiedNames := make(map[string]string) // shortName → qualifiedName
-	for _, ms := range parserResult.GetMemberSources() {
-		qn := ms.GetTypeName()
-		shortName := qn
-		if idx := strings.LastIndex(qn, "."); idx >= 0 {
-			shortName = qn[idx+1:]
-		}
-		// First occurrence wins to avoid ambiguity.
-		if _, exists := qualifiedNames[shortName]; !exists {
-			qualifiedNames[shortName] = qn
-		}
-	}
-
-	// Build lookup: (typeName, line, name) → MemberSource
-	sourceMap := make(map[memberKey]*pb.MemberSource, len(parserResult.GetMemberSources()))
-	for _, ms := range parserResult.GetMemberSources() {
-		key := memberKey{typeName: ms.GetTypeName(), line: ms.GetLine(), name: ms.GetName()}
-		sourceMap[key] = ms
-	}
-
-	// Also build a name-only fallback map: (typeName, name) → MemberSource
-	// Used when line numbers don't match exactly (e.g. minor offset differences).
-	fallbackMap := make(map[nameKey]*pb.MemberSource, len(parserResult.GetMemberSources()))
-	for _, ms := range parserResult.GetMemberSources() {
-		key := nameKey{typeName: ms.GetTypeName(), name: ms.GetName()}
-		// Only store the first occurrence per (typeName, name) to avoid ambiguity.
-		if _, exists := fallbackMap[key]; !exists {
-			fallbackMap[key] = ms
-		}
-	}
+	indexes := buildParserIndexes(parserResult)
 
 	var types []TypeInfo
 	for _, idxType := range indexData.GetTypes() {
-		// Resolve qualified name: use the parser's qualified name if available,
-		// otherwise fall back to the Index Store's short name.
-		typeName := idxType.GetName()
-		if qn, ok := qualifiedNames[typeName]; ok {
-			typeName = qn
-		}
-
-		// Use parser-derived access level (accurate) over Index Store's (unreliable).
-		// The Index Store SDK does not populate SymbolProperty access control flags
-		// (rawValue is 0 for most symbols), so its access_level is always "internal".
-		accessLevel := idxType.GetAccessLevel()
-		if al, ok := parserResult.GetTypeAccessLevels()[typeName]; ok {
-			accessLevel = al
-		}
-
 		ti := TypeInfo{
-			Name:           typeName,
+			Name:           idxType.GetName(),
 			Kind:           protoKindToString[idxType.GetKind()],
-			AccessLevel:    accessLevel,
+			AccessLevel:    idxType.GetAccessLevel(),
 			InheritedTypes: idxType.GetInheritedTypes(),
 		}
 
+		resolvedTypeCounts := map[string]int{}
+		usedForType := map[*pb.MemberSource]struct{}{}
 		for _, idxMember := range idxType.GetMembers() {
 			switch idxMember.GetKind() {
 			case pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY:
 				if !idxMember.GetIsComputed() {
 					continue // stored property — skip
 				}
-				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				ms := lookupMemberSource(indexes, idxType.GetName(), idxMember, usedForType)
 				if ms == nil {
 					slog.Debug("No parser source for computed property",
-						"type", typeName, "member", idxMember.GetName(),
+						"type", idxType.GetName(), "member", idxMember.GetName(),
 						"line", idxMember.GetLine())
 					continue
 				}
+				resolvedTypeCounts[ms.GetTypeName()]++
 				ti.Properties = append(ti.Properties, PropertyInfo{
 					Name:     ms.GetName(),
 					TypeExpr: ms.GetTypeExpr(),
@@ -207,13 +199,14 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 				})
 
 			case pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD:
-				ms := lookupMemberSource(sourceMap, fallbackMap, typeName, idxMember)
+				ms := lookupMemberSource(indexes, idxType.GetName(), idxMember, usedForType)
 				if ms == nil {
 					slog.Debug("No parser source for instance method",
-						"type", typeName, "member", idxMember.GetName(),
+						"type", idxType.GetName(), "member", idxMember.GetName(),
 						"line", idxMember.GetLine())
 					continue
 				}
+				resolvedTypeCounts[ms.GetTypeName()]++
 				ti.Methods = append(ti.Methods, MethodInfo{
 					Name:      ms.GetName(),
 					Selector:  ms.GetSelector(),
@@ -229,6 +222,12 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 		}
 
 		if len(ti.Properties) > 0 || len(ti.Methods) > 0 {
+			if resolvedTypeName := dominantTypeName(resolvedTypeCounts); resolvedTypeName != "" {
+				ti.Name = resolvedTypeName
+			}
+			if al, ok := parserResult.GetTypeAccessLevels()[ti.Name]; ok {
+				ti.AccessLevel = al
+			}
 			types = append(types, ti)
 		}
 	}
@@ -236,26 +235,150 @@ func combineWithIndexStore(indexData *pb.IndexFileData, parserResult *pb.ParseRe
 	return types
 }
 
-// lookupMemberSource tries to find a MemberSource by (typeName, line, name),
-// falling back to (typeName, name) if the exact line match is not found.
+// lookupMemberSource resolves parser source for an index member.
+// It prefers line+kind matches (index-store driven), then uses normalized
+// base names as a fallback when line numbers drift (e.g. #Preview stripping).
 func lookupMemberSource(
-	sourceMap map[memberKey]*pb.MemberSource,
-	fallbackMap map[nameKey]*pb.MemberSource,
-	typeName string,
+	indexes parserIndexes,
+	indexTypeName string,
 	idxMember *pb.IndexMemberInfo,
+	used map[*pb.MemberSource]struct{},
 ) *pb.MemberSource {
-	memberName := idxMember.GetName()
-
-	// Try exact match first (typeName + line + name).
-	key := memberKey{typeName: typeName, line: idxMember.GetLine(), name: memberName}
-	if ms, ok := sourceMap[key]; ok {
-		return ms
+	kind, ok := memberSourceKindForIndexMember(idxMember.GetKind())
+	if !ok {
+		return nil
 	}
 
-	// Fallback: match by (typeName, name) only.
-	nk := nameKey{typeName: typeName, name: memberName}
-	if ms, ok := fallbackMap[nk]; ok {
-		return ms
+	base := indexMemberBaseName(idxMember)
+	lineKey := parserMemberLineKey{line: idxMember.GetLine(), kind: kind}
+	if cands, ok := indexes.byLineKind[lineKey]; ok {
+		if ms := pickMemberCandidate(cands, used, indexTypeName, base); ms != nil {
+			return ms
+		}
+	}
+
+	typeKey := parserTypeMemberKey{typeName: indexTypeName, baseName: base, kind: kind}
+	if cands, ok := indexes.byTypeAndBase[typeKey]; ok {
+		if ms := pickMemberCandidate(cands, used, indexTypeName, base); ms != nil {
+			return ms
+		}
+	}
+
+	shortKey := parserTypeMemberKey{typeName: shortTypeName(indexTypeName), baseName: base, kind: kind}
+	if cands, ok := indexes.byShortAndBase[shortKey]; ok {
+		if ms := pickMemberCandidate(cands, used, indexTypeName, base); ms != nil {
+			return ms
+		}
+	}
+
+	slog.Debug("Member source lookup unresolved",
+		"indexType", indexTypeName,
+		"member", idxMember.GetName(),
+		"line", idxMember.GetLine(),
+		"kind", kind.String(),
+	)
+	return nil
+}
+
+func memberSourceKindForIndexMember(kind pb.MemberKind) (pb.MemberSourceKind, bool) {
+	switch kind {
+	case pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY:
+		return pb.MemberSourceKind_MEMBER_SOURCE_KIND_PROPERTY, true
+	case pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD:
+		return pb.MemberSourceKind_MEMBER_SOURCE_KIND_METHOD, true
+	default:
+		return pb.MemberSourceKind_MEMBER_SOURCE_KIND_UNKNOWN, false
+	}
+}
+
+func parserMemberBaseName(ms *pb.MemberSource) string { return ms.GetName() }
+
+func indexMemberBaseName(idxMember *pb.IndexMemberInfo) string {
+	name := idxMember.GetName()
+	if idxMember.GetKind() != pb.MemberKind_MEMBER_KIND_INSTANCE_METHOD {
+		return name
+	}
+	if i := strings.Index(name, "("); i > 0 {
+		return name[:i]
+	}
+	return name
+}
+
+func shortTypeName(name string) string {
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		return name[i+1:]
+	}
+	return name
+}
+
+func dominantTypeName(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	type candidate struct {
+		name  string
+		count int
+	}
+	items := make([]candidate, 0, len(counts))
+	for name, count := range counts {
+		items = append(items, candidate{name: name, count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].name < items[j].name
+		}
+		return items[i].count > items[j].count
+	})
+	return items[0].name
+}
+
+func pickMemberCandidate(
+	candidates []*pb.MemberSource,
+	used map[*pb.MemberSource]struct{},
+	indexTypeName string,
+	indexBaseName string,
+) *pb.MemberSource {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	filtered := make([]*pb.MemberSource, 0, len(candidates))
+	for _, ms := range candidates {
+		if _, already := used[ms]; already {
+			continue
+		}
+		filtered = append(filtered, ms)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	byBase := make([]*pb.MemberSource, 0, len(filtered))
+	for _, ms := range filtered {
+		if parserMemberBaseName(ms) == indexBaseName {
+			byBase = append(byBase, ms)
+		}
+	}
+	if len(byBase) == 1 {
+		used[byBase[0]] = struct{}{}
+		return byBase[0]
+	}
+	if len(byBase) > 1 {
+		for _, ms := range byBase {
+			if shortTypeName(ms.GetTypeName()) == shortTypeName(indexTypeName) {
+				used[ms] = struct{}{}
+				return ms
+			}
+		}
+		used[byBase[0]] = struct{}{}
+		return byBase[0]
+	}
+
+	for _, ms := range filtered {
+		if shortTypeName(ms.GetTypeName()) == shortTypeName(indexTypeName) {
+			used[ms] = struct{}{}
+			return ms
+		}
 	}
 
 	return nil
@@ -292,7 +415,9 @@ func SourceFile(path string, cache *IndexStoreCache) ([]TypeInfo, []string, erro
 		}
 	}
 	if !hasBody {
-		return nil, nil, fmt.Errorf("no type conforming to View with body property found in %s", path)
+		if len(result.GetPreviews()) == 0 {
+			return nil, nil, fmt.Errorf("no type conforming to View with body property found in %s", path)
+		}
 	}
 
 	slog.Debug("Parsed types", "count", len(types))

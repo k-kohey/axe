@@ -709,6 +709,7 @@ type IndexMemberInfo struct {
 	Line          int32                  `protobuf:"varint,4,opt,name=line,proto3" json:"line,omitempty"`
 	Column        int32                  `protobuf:"varint,5,opt,name=column,proto3" json:"column,omitempty"`
 	IsComputed    bool                   `protobuf:"varint,6,opt,name=is_computed,json=isComputed,proto3" json:"is_computed,omitempty"` // accessor occurrence の有無で判定
+	Usr           string                 `protobuf:"bytes,7,opt,name=usr,proto3" json:"usr,omitempty"`                                  // Unified Symbol Resolution
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -785,6 +786,13 @@ func (x *IndexMemberInfo) GetIsComputed() bool {
 	return false
 }
 
+func (x *IndexMemberInfo) GetUsr() string {
+	if x != nil {
+		return x.Usr
+	}
+	return ""
+}
+
 type IndexTypeInfo struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                             // ネスト型は "Outer.Inner"
@@ -794,6 +802,7 @@ type IndexTypeInfo struct {
 	Members        []*IndexMemberInfo     `protobuf:"bytes,5,rep,name=members,proto3" json:"members,omitempty"`
 	Line           int32                  `protobuf:"varint,6,opt,name=line,proto3" json:"line,omitempty"`
 	Column         int32                  `protobuf:"varint,7,opt,name=column,proto3" json:"column,omitempty"`
+	Usr            string                 `protobuf:"bytes,8,opt,name=usr,proto3" json:"usr,omitempty"` // Unified Symbol Resolution
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -875,6 +884,13 @@ func (x *IndexTypeInfo) GetColumn() int32 {
 		return x.Column
 	}
 	return 0
+}
+
+func (x *IndexTypeInfo) GetUsr() string {
+	if x != nil {
+		return x.Usr
+	}
+	return ""
 }
 
 type IndexFileData struct {
@@ -1060,7 +1076,7 @@ const file_analysis_proto_rawDesc = "" +
 	"\n" +
 	"TypesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc3\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd5\x01\n" +
 	"\x0fIndexMemberInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x18.axe.analysis.MemberKindR\x04kind\x12!\n" +
@@ -1068,7 +1084,8 @@ const file_analysis_proto_rawDesc = "" +
 	"\x04line\x18\x04 \x01(\x05R\x04line\x12\x16\n" +
 	"\x06column\x18\x05 \x01(\x05R\x06column\x12\x1f\n" +
 	"\vis_computed\x18\x06 \x01(\bR\n" +
-	"isComputed\"\x80\x02\n" +
+	"isComputed\x12\x10\n" +
+	"\x03usr\x18\a \x01(\tR\x03usr\"\x92\x02\n" +
 	"\rIndexTypeInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12*\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x16.axe.analysis.TypeKindR\x04kind\x12!\n" +
@@ -1076,7 +1093,8 @@ const file_analysis_proto_rawDesc = "" +
 	"\x0finherited_types\x18\x04 \x03(\tR\x0einheritedTypes\x127\n" +
 	"\amembers\x18\x05 \x03(\v2\x1d.axe.analysis.IndexMemberInfoR\amembers\x12\x12\n" +
 	"\x04line\x18\x06 \x01(\x05R\x04line\x12\x16\n" +
-	"\x06column\x18\a \x01(\x05R\x06column\"\xe2\x01\n" +
+	"\x06column\x18\a \x01(\x05R\x06column\x12\x10\n" +
+	"\x03usr\x18\b \x01(\tR\x03usr\"\xe2\x01\n" +
 	"\rIndexFileData\x12\x1b\n" +
 	"\tfile_path\x18\x01 \x01(\tR\bfilePath\x121\n" +
 	"\x05types\x18\x02 \x03(\v2\x1b.axe.analysis.IndexTypeInfoR\x05types\x122\n" +

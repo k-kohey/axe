@@ -9,7 +9,81 @@ import (
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/protocol"
 )
+
+func TestSendWatchStatus_StreamScoped(t *testing.T) {
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+
+	wctx := watchContext{
+		serve:    true,
+		streamID: "stream-a",
+		ew:       ew,
+	}
+	sendWatchStatus(wctx, "building")
+
+	events := collectEvents(t, &buf)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].StreamID != "stream-a" {
+		t.Fatalf("streamId = %q, want %q", events[0].StreamID, "stream-a")
+	}
+	if events[0].StreamStatus == nil {
+		t.Fatal("expected streamStatus payload")
+	}
+	if phase, _ := events[0].StreamStatus["phase"].(string); phase != "building" {
+		t.Fatalf("phase = %q, want %q", phase, "building")
+	}
+}
+
+func TestSendWatchStatus_NoServeNoEvent(t *testing.T) {
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+
+	wctx := watchContext{
+		serve:    false,
+		streamID: "stream-a",
+		ew:       ew,
+	}
+	sendWatchStatus(wctx, "building")
+
+	events := collectEvents(t, &buf)
+	if len(events) != 0 {
+		t.Fatalf("expected no events, got %d", len(events))
+	}
+}
+
+func TestReloadMultiFile_SendsCompilingStatusInServeMode(t *testing.T) {
+	var buf syncBuffer
+	wctx := watchContext{
+		serve:    true,
+		streamID: "stream-a",
+		ew:       protocol.NewEventWriter(&buf),
+	}
+	ws := &watchState{
+		reloadCounter:   1,
+		previewSelector: "0",
+		trackedFiles:    []string{},
+	}
+	bs := &buildSettings{ModuleName: "TestModule"}
+
+	// Missing types is fine for this test; we only verify that status is emitted.
+	_ = reloadMultiFile(context.Background(), "/nonexistent.swift", bs, previewDirs{}, wctx, ws)
+
+	events := filterEvents(collectEvents(t, &buf), "stream-a")
+	if len(events) == 0 {
+		t.Fatal("expected at least one status event")
+	}
+	first := events[0]
+	if first.StreamStatus == nil {
+		t.Fatal("expected streamStatus payload")
+	}
+	if phase, _ := first.StreamStatus["phase"].(string); phase != "compiling_thunk" {
+		t.Fatalf("phase = %q, want %q", phase, "compiling_thunk")
+	}
+}
 
 func TestClassifyChange_BodyOnly(t *testing.T) {
 	dir := t.TempDir()

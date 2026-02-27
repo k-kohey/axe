@@ -19,6 +19,7 @@ message Command {
     SwitchFile switch_file = 4;
     NextPreview next_preview = 5;
     Input input = 6;
+    ForceRebuild force_rebuild = 7;
   }
 }
 
@@ -40,6 +41,9 @@ message SwitchFile {
 
 // NextPreview cycles to the next #Preview block in the current file.
 message NextPreview {}
+
+// ForceRebuild triggers a full rebuild + relaunch for the current stream.
+message ForceRebuild {}
 
 // Input forwards user interaction (touch/text) to the simulator.
 message Input {

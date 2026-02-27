@@ -25,12 +25,13 @@ type eventLoopConfig struct {
 
 	// Event sources (receive-only channels).
 	// A nil channel blocks forever in select, effectively disabling that case.
-	fileChangeCh  <-chan string
-	switchFileCh  <-chan string
-	nextPreviewCh <-chan struct{}
-	inputCh       <-chan *pb.Input
-	idbErrCh      <-chan error
-	bootDiedCh    <-chan struct{}
+	fileChangeCh   <-chan string
+	switchFileCh   <-chan string
+	nextPreviewCh  <-chan struct{}
+	forceRebuildCh <-chan struct{}
+	inputCh        <-chan *pb.Input
+	idbErrCh       <-chan error
+	bootDiedCh     <-chan struct{}
 
 	// onCancel is called when the context is cancelled (e.g. Ctrl+C).
 	// May be nil if no cleanup message is needed.
@@ -124,6 +125,11 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 		case <-cfg.nextPreviewCh:
 			handleNextPreviewCmd(ctx, sourceFile, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws)
 
+		case <-cfg.forceRebuildCh:
+			if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
+				slog.Warn("Force rebuild error", "err", err)
+			}
+
 		case input := <-cfg.inputCh:
 			if cfg.hid != nil {
 				cfg.hid.HandleInput(ctx, input)
@@ -162,7 +168,9 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 		device:        s.deviceUDID,
 		deviceSetPath: sm.deviceSetPath,
 		loaderPath:    s.loaderPath,
+		streamID:      s.id,
 		serve:         true,
+		ew:            sm.ew,
 		build:         sm.build,
 		toolchain:     sm.toolchain,
 		app:           sm.app,
@@ -176,19 +184,20 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	}
 
 	cfg := &eventLoopConfig{
-		sourceFile:    s.file,
-		pc:            sm.pc,
-		bs:            bs,
-		dirs:          s.dirs,
-		wctx:          wctx,
-		ws:            s.ws,
-		hid:           s.hid,
-		fileChangeCh:  s.fileChangeCh,
-		switchFileCh:  s.switchFileCh,
-		nextPreviewCh: s.nextPreviewCh,
-		inputCh:       s.inputCh,
-		idbErrCh:      idbErrCh,
-		bootDiedCh:    bootDiedCh,
+		sourceFile:     s.file,
+		pc:             sm.pc,
+		bs:             bs,
+		dirs:           s.dirs,
+		wctx:           wctx,
+		ws:             s.ws,
+		hid:            s.hid,
+		fileChangeCh:   s.fileChangeCh,
+		switchFileCh:   s.switchFileCh,
+		nextPreviewCh:  s.nextPreviewCh,
+		forceRebuildCh: s.forceRebuildCh,
+		inputCh:        s.inputCh,
+		idbErrCh:       idbErrCh,
+		bootDiedCh:     bootDiedCh,
 		bootErr: func() error {
 			if s.bootCompanion != nil {
 				return s.bootCompanion.Err()

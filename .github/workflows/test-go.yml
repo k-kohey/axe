@@ -2,6 +2,12 @@ name: Test Go CLI
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - "cmd/**"
+      - ".github/workflows/test-go.yml"
+  pull_request:
     paths:
       - "cmd/**"
       - ".github/workflows/test-go.yml"
@@ -33,5 +39,5 @@ jobs:
 
       - name: Run Go tests
         run: |
-          go test -C cmd -run=TestParseSourceFile -count=1 -timeout 20m ./internal/preview/analysis/
+          go test -C cmd -run='^TestParseSourceFile$' -count=1 -timeout 20m ./internal/preview/analysis/
           go test -C cmd ./... -cover -timeout 15m

@@ -178,7 +178,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 	// Stopping bootCompanion will terminate the process and shut down the simulator.
 	sendStatus("booting")
 	done = step.begin("Booting simulator...")
-	bootCompanion, err := idb.BootHeadless(device, deviceSetPath)
+	bootCompanion, err := bootHeadlessWithRetry(ctx, device, deviceSetPath)
 	done()
 	if err != nil {
 		sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
@@ -300,6 +300,7 @@ func Run(sourceFile string, pc ProjectConfig, watch bool, previewSelector string
 			device:        device,
 			deviceSetPath: deviceSetPath,
 			loaderPath:    loaderPath,
+			streamID:      defaultStreamID,
 			serve:         serve,
 			ew:            ew,
 			build:         br,

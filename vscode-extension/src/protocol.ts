@@ -7,6 +7,7 @@ export type {
 	AddStream,
 	Command,
 	Event,
+	ForceRebuild,
 	Frame,
 	Hello,
 	Input,

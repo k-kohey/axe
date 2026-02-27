@@ -138,6 +138,7 @@ type watchContext struct {
 	device        string // simulator device identifier for simctl
 	deviceSetPath string // custom device set path for simctl --set
 	loaderPath    string // path to the compiled loader binary
+	streamID      string // protocol stream id in serve mode
 	serve         bool   // true when running in serve mode (IDE integration)
 	ew            *protocol.EventWriter
 
