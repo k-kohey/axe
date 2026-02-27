@@ -18,10 +18,6 @@ type fakeCompanion struct {
 	err     error
 }
 
-func newFakeCompanion() *fakeCompanion {
-	return &fakeCompanion{doneCh: make(chan struct{})}
-}
-
 func (f *fakeCompanion) Done() <-chan struct{} { return f.doneCh }
 func (f *fakeCompanion) Err() error            { return f.err }
 func (f *fakeCompanion) Stop() error {
