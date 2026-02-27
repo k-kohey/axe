@@ -6,7 +6,7 @@ go = "1.25.0"
 # Define node and cobra-cli for the project, as cobra-cli is an npm package
 nodejs = "25.6.1"
 pnpm = "10.11.0"
-# idb_companion is required for --serve mode (install via: brew install facebook/fb/idb-companion)
+# idb_companion is required for preview (install via: brew install facebook/fb/idb-companion)
 # Protocol Buffers compiler and Go plugins
 protoc = "33.4"
 "go:google.golang.org/protobuf/cmd/protoc-gen-go" = "v1.36.11"

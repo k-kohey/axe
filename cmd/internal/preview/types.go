@@ -93,7 +93,7 @@ type RunOptions struct {
 
 	// OnReady is called after the preview app has launched and is confirmed ready.
 	// Receives the simulator device UDID and device set path.
-	// Only invoked in oneshot mode (not --watch, not --serve).
+	// Only invoked in oneshot mode (not watch, not serve).
 	// If nil, oneshot returns immediately after verifying readiness.
 	OnReady func(ctx context.Context, device, deviceSetPath string) error
 }
