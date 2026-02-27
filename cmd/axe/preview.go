@@ -33,6 +33,11 @@ var previewCmd = &cobra.Command{
 	compiles it into a dylib, and launches the app on a headless simulator with the dylib injected.
 	The simulator is managed automatically in axe's dedicated device set and shut down on exit.
 
+	The project is resolved in this order:
+	  1. --project / --workspace flags (highest priority)
+	  2. Auto-detection: a single .xcworkspace or .xcodeproj in the current directory
+	  3. PROJECT / WORKSPACE in .axerc
+
 	By default (no --watch), the command runs in oneshot mode: build, launch, capture a screenshot
 	to stdout (PNG), then clean up and exit. Exit 0 on success, exit 1 on failure.
 	With --watch, the command stays running and hot-reloads on file changes.
@@ -107,15 +112,26 @@ var previewCmd = &cobra.Command{
 	},
 }
 
-// resolveProjectConfig applies .axerc fallbacks and validates project config flags.
+// resolveProjectConfig resolves project settings using the following priority:
+//  1. --project / --workspace flags (highest priority)
+//  2. Auto-detection: a single .xcworkspace or .xcodeproj in the current directory
+//  3. PROJECT / WORKSPACE in .axerc
+//
 // Shared by the preview command and its subcommands (e.g. report).
 func resolveProjectConfig() (preview.ProjectConfig, error) {
-	rc := platform.ReadRC()
-	if previewProject == "" && rc["PROJECT"] != "" {
-		previewProject = rc["PROJECT"]
+	// Priority 2: auto-detect from current directory when flags are not set.
+	if previewProject == "" && previewWorkspace == "" {
+		previewProject, previewWorkspace = platform.DetectXcodeProject()
 	}
-	if previewWorkspace == "" && rc["WORKSPACE"] != "" {
-		previewWorkspace = rc["WORKSPACE"]
+
+	// Priority 3: fall back to .axerc for unset flags.
+	rc := platform.ReadRC()
+	if previewProject == "" && previewWorkspace == "" {
+		if rc["WORKSPACE"] != "" {
+			previewWorkspace = rc["WORKSPACE"]
+		} else if rc["PROJECT"] != "" {
+			previewProject = rc["PROJECT"]
+		}
 	}
 	if previewScheme == "" && rc["SCHEME"] != "" {
 		previewScheme = rc["SCHEME"]
@@ -131,7 +147,7 @@ func resolveProjectConfig() (preview.ProjectConfig, error) {
 		return preview.ProjectConfig{}, fmt.Errorf("--project and --workspace are mutually exclusive")
 	}
 	if previewProject == "" && previewWorkspace == "" {
-		return preview.ProjectConfig{}, fmt.Errorf("either --project or --workspace is required. Use flags or set PROJECT/WORKSPACE in .axerc")
+		return preview.ProjectConfig{}, fmt.Errorf("either --project or --workspace is required. Place a single .xcodeproj or .xcworkspace in the current directory, or set PROJECT/WORKSPACE in .axerc")
 	}
 	if previewScheme == "" {
 		return preview.ProjectConfig{}, fmt.Errorf("--scheme is required. Use the flag or set SCHEME in .axerc")

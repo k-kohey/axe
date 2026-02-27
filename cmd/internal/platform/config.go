@@ -34,6 +34,35 @@ func (r *RealProcessLister) ListProcesses() (string, error) {
 	return string(out), nil
 }
 
+// DetectXcodeProject looks for a single .xcworkspace or .xcodeproj in
+// the current directory and returns the detected project/workspace path.
+// .xcworkspace is preferred over .xcodeproj (workspace contains project + deps).
+// If zero or multiple candidates are found, empty strings are returned
+// so that the caller can fall back to other sources.
+func DetectXcodeProject() (project, workspace string) {
+	workspaces, _ := filepath.Glob("*.xcworkspace")
+	if len(workspaces) > 1 {
+		slog.Warn("Multiple workspaces found; skipping auto-detect", "paths", workspaces)
+		return "", ""
+	}
+	if len(workspaces) == 1 {
+		slog.Info("Auto-detected workspace", "path", workspaces[0])
+		return "", workspaces[0]
+	}
+
+	projects, _ := filepath.Glob("*.xcodeproj")
+	if len(projects) > 1 {
+		slog.Warn("Multiple projects found; skipping auto-detect", "paths", projects)
+		return "", ""
+	}
+	if len(projects) == 1 {
+		slog.Info("Auto-detected project", "path", projects[0])
+		return projects[0], ""
+	}
+
+	return "", ""
+}
+
 // ReadRC parses the .axerc file in the current directory and returns
 // all key-value pairs as a map. The file format is KEY=VALUE, one per line.
 // Lines starting with '#' are treated as comments. Returns an empty map
