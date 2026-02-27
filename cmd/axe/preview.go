@@ -119,18 +119,26 @@ var previewCmd = &cobra.Command{
 //
 // Shared by the preview command and its subcommands (e.g. report).
 func resolveProjectConfig() (preview.ProjectConfig, error) {
+	project := previewProject
+	workspace := previewWorkspace
+
 	// Priority 2: auto-detect from current directory when flags are not set.
-	if previewProject == "" && previewWorkspace == "" {
-		previewProject, previewWorkspace = platform.DetectXcodeProject()
+	if project == "" && workspace == "" {
+		project, workspace = platform.DetectXcodeProject()
 	}
 
 	// Priority 3: fall back to .axerc for unset flags.
 	rc := platform.ReadRC()
-	if previewProject == "" && previewWorkspace == "" {
-		if rc["WORKSPACE"] != "" {
-			previewWorkspace = rc["WORKSPACE"]
-		} else if rc["PROJECT"] != "" {
-			previewProject = rc["PROJECT"]
+	if project == "" && workspace == "" {
+		rcProj := rc["PROJECT"]
+		rcWs := rc["WORKSPACE"]
+		if rcProj != "" && rcWs != "" {
+			return preview.ProjectConfig{}, fmt.Errorf("PROJECT and WORKSPACE in .axerc are mutually exclusive")
+		}
+		if rcWs != "" {
+			workspace = rcWs
+		} else if rcProj != "" {
+			project = rcProj
 		}
 	}
 	if previewScheme == "" && rc["SCHEME"] != "" {
@@ -143,17 +151,17 @@ func resolveProjectConfig() (preview.ProjectConfig, error) {
 		previewDevice = rc["DEVICE"]
 	}
 
-	if previewProject != "" && previewWorkspace != "" {
+	if project != "" && workspace != "" {
 		return preview.ProjectConfig{}, fmt.Errorf("--project and --workspace are mutually exclusive")
 	}
-	if previewProject == "" && previewWorkspace == "" {
+	if project == "" && workspace == "" {
 		return preview.ProjectConfig{}, fmt.Errorf("either --project or --workspace is required. Place a single .xcodeproj or .xcworkspace in the current directory, or set PROJECT/WORKSPACE in .axerc")
 	}
 	if previewScheme == "" {
 		return preview.ProjectConfig{}, fmt.Errorf("--scheme is required. Use the flag or set SCHEME in .axerc")
 	}
 
-	return preview.NewProjectConfig(previewProject, previewWorkspace, previewScheme, previewConfiguration)
+	return preview.NewProjectConfig(project, workspace, previewScheme, previewConfiguration)
 }
 
 func init() {
