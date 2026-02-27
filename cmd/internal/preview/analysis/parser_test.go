@@ -346,10 +346,10 @@ func TestCombineWithIndexStore_NestedTypeSameShortName(t *testing.T) {
 	}
 
 	names := []string{types[0].Name, types[1].Name}
-	if !(names[0] == "FeatureX.Card" || names[1] == "FeatureX.Card") {
+	if names[0] != "FeatureX.Card" && names[1] != "FeatureX.Card" {
 		t.Fatalf("missing FeatureX.Card in %v", names)
 	}
-	if !(names[0] == "FeatureY.Card" || names[1] == "FeatureY.Card") {
+	if names[0] != "FeatureY.Card" && names[1] != "FeatureY.Card" {
 		t.Fatalf("missing FeatureY.Card in %v", names)
 	}
 }
