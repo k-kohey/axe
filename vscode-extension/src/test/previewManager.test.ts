@@ -872,7 +872,7 @@ suite("PreviewManager", () => {
 		assert.strictEqual(stopped, true);
 	});
 
-	test("spawn args use serve mode (no source file)", async () => {
+	test("spawn args use serve subcommand (no source file)", async () => {
 		const spawnedArgs: string[][] = [];
 		const fakeProc = createFakeProcess();
 		fakeProc.stdin = new Writable({
@@ -906,8 +906,9 @@ suite("PreviewManager", () => {
 
 		const args = spawnedArgs[0];
 		assert.ok(args.includes("preview"), "should include 'preview' subcommand");
-		assert.ok(args.includes("--watch"), "should include --watch");
-		assert.ok(args.includes("--serve"), "should include --serve");
+		assert.ok(args.includes("serve"), "should include 'serve' subcommand");
+		assert.ok(!args.includes("--watch"), "should not include --watch flag");
+		assert.ok(!args.includes("--serve"), "should not include --serve flag");
 		assert.ok(args.includes("--project"), "should include --project");
 		assert.ok(args.includes("MyScheme"), "should include scheme value");
 		// Source file should NOT be in args (it's sent via AddStream command)

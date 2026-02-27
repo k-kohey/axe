@@ -64,7 +64,11 @@ SCHEME=MyApp
 Then preview any Swift file containing `#Preview`:
 
 ```bash
-axe preview MyView.swift --watch
+# Oneshot: capture screenshot to stdout
+axe preview MyView.swift > screenshot.png
+
+# Watch mode: hot-reload on file changes
+axe preview watch MyView.swift
 ```
 
 ## Usage
@@ -72,32 +76,70 @@ axe preview MyView.swift --watch
 ### `axe preview`
 
 Launch a SwiftUI preview on a headless iOS Simulator.
-By default (oneshot mode), builds and launches the preview, captures a **PNG screenshot to stdout**, then exits (exit 0 on success, exit 1 on failure).
-Use `--watch` to keep running with hot-reload.
+
+The `preview` command has several subcommands:
+
+| Command | Description |
+|---|---|
+| `axe preview <file>` | Oneshot: capture a PNG screenshot to stdout, then exit |
+| `axe preview watch <file>` | Watch for file changes and hot-reload |
+| `axe preview serve` | Run as multi-stream IDE backend (JSON Lines protocol) |
+| `axe preview report` | Capture screenshots of all `#Preview` blocks |
+| `axe preview simulator` | Manage simulators for preview |
+
+#### Oneshot Mode (default)
 
 ```bash
-# Oneshot: capture screenshot to stdout
 axe preview MyView.swift > screenshot.png
-
-# Watch mode: hot-reload on file changes
-axe preview MyView.swift --watch
-```
-
-```bash
 axe preview <source-file.swift> [flags]
 ```
+
+Builds and launches the preview, captures a **PNG screenshot to stdout**, then exits (exit 0 on success, exit 1 on failure).
+
+| Flag | Description |
+|---|---|
+| `--preview` | Select a `#Preview` block by title or index (e.g. `--preview "Dark Mode"` or `--preview 1`) |
+| `--reuse-build` | Skip xcodebuild and reuse previous build artifacts |
+| `--full-thunk` | Use full thunk compilation (per-file dynamic replacement) |
+
+#### `axe preview watch`
+
+```bash
+axe preview watch MyView.swift
+axe preview watch <source-file.swift> [flags]
+```
+
+Watch the source file for changes and hot-reload the preview. Body-only changes are hot-reloaded without rebuilding; structural changes trigger a full rebuild automatically.
+
+| Flag | Description |
+|---|---|
+| `--preview` | Select a `#Preview` block by title or index |
+| `--reuse-build` | Skip xcodebuild and reuse previous build artifacts |
+| `--strict` | Require full thunk compilation (no degraded fallback) |
+
+#### `axe preview serve`
+
+```bash
+axe preview serve [flags]
+```
+
+Run as a multi-stream IDE backend. Streams are managed via JSON Lines commands on stdin (`AddStream`/`RemoveStream`), and events (`Frame`/`StreamStarted`/`StreamStopped`/`StreamStatus`) are emitted on stdout. Used by the VS Code / Cursor extension.
+
+| Flag | Description |
+|---|---|
+| `--strict` | Require full thunk compilation (no degraded fallback) |
+
+#### Common Flags
+
+These flags are shared by all `preview` subcommands:
 
 | Flag | Description |
 |---|---|
 | `--project` | Path to `.xcodeproj` |
 | `--workspace` | Path to `.xcworkspace` (mutually exclusive with `--project`) |
 | `--scheme` | Xcode scheme to build (required) |
-| `--watch` | Watch for file changes and hot-reload |
-| `--preview` | Select a `#Preview` block by title or index (e.g. `--preview "Dark Mode"` or `--preview 1`) |
 | `--device` | Simulator UDID to use |
 | `--configuration` | Build configuration (e.g. `Debug`) |
-| `--reuse-build` | Skip xcodebuild and reuse previous build artifacts |
-| `--serve` | Run as IDE backend (JSON Lines protocol on stdin/stdout) |
 
 All flags fall back to `.axerc` values when not specified.
 
@@ -222,7 +264,7 @@ DEVICE=<simulator-udid>
 
 ## Known Issues
 
-### Hot Reload (`preview --watch`)
+### Hot Reload (`preview watch`)
 
 - **Stored properties cannot be hot-reloaded**: `let`, `@State`, `@Published` etc. change memory layout and automatically trigger a full rebuild. Computed properties and methods are hot-reloaded.
 - **Generic/static/class methods and initializers are not hot-reloaded**.

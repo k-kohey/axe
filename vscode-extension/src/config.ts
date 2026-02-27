@@ -22,17 +22,12 @@ export function getConfig(): AxeConfig {
 }
 
 /**
- * Build CLI arguments for axe preview.
- * In serve mode (no filePath), source files are provided via AddStream commands on stdin.
+ * Build CLI arguments for axe preview serve.
+ * Source files are provided via AddStream commands on stdin, not as CLI args.
  * Device selection is per-stream via AddStream, not a global flag.
  */
-export function buildArgs(config: AxeConfig, filePath?: string): string[] {
-	const args = ["preview"];
-
-	if (filePath) {
-		args.push(filePath);
-	}
-	args.push("--watch", "--serve");
+export function buildArgs(config: AxeConfig): string[] {
+	const args = ["preview", "serve"];
 
 	if (config.project) {
 		args.push("--project", config.project);

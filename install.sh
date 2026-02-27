@@ -48,15 +48,15 @@ case ":$PATH:" in
   *) echo "Note: Add ${INSTALL_DIR} to your PATH if not already set" ;;
 esac
 
-# Install idb_companion for --serve mode (interactive preview)
+# Install idb_companion for preview (headless boot + serve mode)
 if command -v brew >/dev/null 2>&1; then
   if ! command -v idb_companion >/dev/null 2>&1; then
     echo ""
-    echo "Installing idb_companion (required for --serve mode)..."
+    echo "Installing idb_companion (required for axe preview)..."
     brew install facebook/fb/idb-companion
   fi
 else
   echo ""
-  echo "Note: idb_companion is required for --serve mode (interactive preview)."
+  echo "Note: idb_companion is required for axe preview."
   echo "      Install Homebrew (https://brew.sh) then run: brew install facebook/fb/idb-companion"
 fi

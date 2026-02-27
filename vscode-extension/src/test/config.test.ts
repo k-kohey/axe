@@ -11,31 +11,21 @@ suite("buildArgs", () => {
 		additionalArgs: [],
 	};
 
-	test("serve mode args with default config (no filePath)", () => {
+	test("serve mode args with default config", () => {
 		const args = buildArgs(defaultConfig);
-		assert.deepStrictEqual(args, ["preview", "--watch", "--serve"]);
-	});
-
-	test("includes filePath when provided", () => {
-		const args = buildArgs(defaultConfig, "/path/to/File.swift");
-		assert.deepStrictEqual(args, [
-			"preview",
-			"/path/to/File.swift",
-			"--watch",
-			"--serve",
-		]);
+		assert.deepStrictEqual(args, ["preview", "serve"]);
 	});
 
 	test("includes --project when set", () => {
 		const config = { ...defaultConfig, project: "App.xcodeproj" };
-		const args = buildArgs(config, "/path/to/File.swift");
+		const args = buildArgs(config);
 		assert.ok(args.includes("--project"));
 		assert.strictEqual(args[args.indexOf("--project") + 1], "App.xcodeproj");
 	});
 
 	test("includes --workspace when set", () => {
 		const config = { ...defaultConfig, workspace: "App.xcworkspace" };
-		const args = buildArgs(config, "/path/to/File.swift");
+		const args = buildArgs(config);
 		assert.ok(args.includes("--workspace"));
 		assert.strictEqual(
 			args[args.indexOf("--workspace") + 1],
@@ -45,14 +35,14 @@ suite("buildArgs", () => {
 
 	test("includes --scheme when set", () => {
 		const config = { ...defaultConfig, scheme: "MyScheme" };
-		const args = buildArgs(config, "/path/to/File.swift");
+		const args = buildArgs(config);
 		assert.ok(args.includes("--scheme"));
 		assert.strictEqual(args[args.indexOf("--scheme") + 1], "MyScheme");
 	});
 
 	test("includes --configuration when set", () => {
 		const config = { ...defaultConfig, configuration: "Debug" };
-		const args = buildArgs(config, "/path/to/File.swift");
+		const args = buildArgs(config);
 		assert.ok(args.includes("--configuration"));
 		assert.strictEqual(args[args.indexOf("--configuration") + 1], "Debug");
 	});
@@ -62,37 +52,12 @@ suite("buildArgs", () => {
 			...defaultConfig,
 			additionalArgs: ["--verbose", "--no-color"],
 		};
-		const args = buildArgs(config, "/path/to/File.swift");
+		const args = buildArgs(config);
 		assert.ok(args.includes("--verbose"));
 		assert.ok(args.includes("--no-color"));
 	});
 
-	test("all flags combined with filePath", () => {
-		const config: AxeConfig = {
-			executablePath: "axe",
-			project: "App.xcodeproj",
-			workspace: "",
-			scheme: "App",
-			configuration: "Debug",
-			additionalArgs: ["--extra"],
-		};
-		const args = buildArgs(config, "/src/View.swift");
-		assert.deepStrictEqual(args, [
-			"preview",
-			"/src/View.swift",
-			"--watch",
-			"--serve",
-			"--project",
-			"App.xcodeproj",
-			"--scheme",
-			"App",
-			"--configuration",
-			"Debug",
-			"--extra",
-		]);
-	});
-
-	test("all flags combined in serve mode (no filePath)", () => {
+	test("all flags combined", () => {
 		const config: AxeConfig = {
 			executablePath: "axe",
 			project: "App.xcodeproj",
@@ -104,8 +69,7 @@ suite("buildArgs", () => {
 		const args = buildArgs(config);
 		assert.deepStrictEqual(args, [
 			"preview",
-			"--watch",
-			"--serve",
+			"serve",
 			"--project",
 			"App.xcodeproj",
 			"--scheme",
@@ -116,9 +80,11 @@ suite("buildArgs", () => {
 		]);
 	});
 
-	test("always includes --serve", () => {
+	test("always includes serve subcommand", () => {
 		const args = buildArgs(defaultConfig);
-		assert.ok(args.includes("--serve"));
+		assert.ok(args.includes("serve"));
+		assert.ok(!args.includes("--serve"));
+		assert.ok(!args.includes("--watch"));
 	});
 
 	test("empty strings are not passed as flags", () => {

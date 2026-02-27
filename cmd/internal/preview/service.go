@@ -379,7 +379,7 @@ func Run(opts RunOptions) error {
 		return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
 	}
 
-	// Default mode (no --watch): verify runtime is ready, then exit silently.
+	// Oneshot mode (no watch): verify runtime is ready, then exit silently.
 	// Cleanup (terminate app, stop simulator, remove socket) runs via defer.
 	if err := codegen.WaitForReady(ctx, dirs.Socket); err != nil {
 		sendStopped("runtime_error", err.Error(), "")
@@ -401,7 +401,7 @@ func hasPreviousBuild(bs *buildSettings, dirs previewDirs) bool {
 	return err == nil
 }
 
-// RunServe is the multi-stream entry point for --serve mode.
+// RunServe is the multi-stream entry point for serve mode.
 // It reads AddStream/RemoveStream commands from stdin and manages
 // multiple preview streams concurrently via StreamManager.
 func RunServe(pc ProjectConfig, strict bool) error {
