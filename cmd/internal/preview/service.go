@@ -187,7 +187,7 @@ func Run(opts RunOptions) error {
 	// Boot the simulator.
 	// For external (standard Xcode set) devices, use simctl boot (non-headless)
 	// and skip shutdown on exit since the user may be using the device elsewhere.
-	// For axe-managed devices, use idb_companion for headless boot.
+	// For axe-managed devices, use idb_companion via bootWithRetry.
 	sendStatus("booting")
 	var bootCompanion *idb.Companion
 	if isExternalDevice {
@@ -202,7 +202,7 @@ func Run(opts RunOptions) error {
 		}
 	} else {
 		done = step.begin("Booting simulator...")
-		bootCompanion, err = bootHeadlessWithRetry(ctx, device, deviceSetPath)
+		bootCompanion, err = bootWithRetry(ctx, device, deviceSetPath, !opts.NoHeadless)
 		done()
 		if err != nil {
 			sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")

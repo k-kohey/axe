@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	bootHeadlessMaxRetries = 3
+	bootMaxRetries = 3
 )
 
-type bootHeadlessFn func(udid, deviceSetPath string) (*idb.Companion, error)
+type bootFn func(udid, deviceSetPath string) (*idb.Companion, error)
 
 var (
-	bootHeadlessRetryDelay = 2 * time.Second
-	bootHeadlessWait       = func(ctx context.Context, d time.Duration) error {
+	bootRetryDelay = 2 * time.Second
+	bootWait       = func(ctx context.Context, d time.Duration) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -27,12 +27,16 @@ var (
 	}
 )
 
-func bootHeadlessWithRetry(ctx context.Context, udid, deviceSetPath string) (*idb.Companion, error) {
-	return bootHeadlessWithRetryFunc(ctx, udid, deviceSetPath, idb.BootHeadless)
+func bootWithRetry(ctx context.Context, udid, deviceSetPath string, headless bool) (*idb.Companion, error) {
+	fn := idb.Boot
+	if headless {
+		fn = idb.BootHeadless
+	}
+	return bootWithRetryFunc(ctx, udid, deviceSetPath, fn)
 }
 
-func bootHeadlessWithRetryFunc(ctx context.Context, udid, deviceSetPath string, fn bootHeadlessFn) (*idb.Companion, error) {
-	maxAttempts := 1 + bootHeadlessMaxRetries
+func bootWithRetryFunc(ctx context.Context, udid, deviceSetPath string, fn bootFn) (*idb.Companion, error) {
+	maxAttempts := 1 + bootMaxRetries
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if ctx.Err() != nil {
@@ -56,7 +60,7 @@ func bootHeadlessWithRetryFunc(ctx context.Context, udid, deviceSetPath string, 
 			"err", err,
 		)
 
-		if err := bootHeadlessWait(ctx, bootHeadlessRetryDelay); err != nil {
+		if err := bootWait(ctx, bootRetryDelay); err != nil {
 			return nil, err
 		}
 	}

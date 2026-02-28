@@ -11,16 +11,16 @@ import (
 
 func withBootRetryNoDelay(t *testing.T) {
 	t.Helper()
-	origWait := bootHeadlessWait
-	bootHeadlessWait = func(ctx context.Context, _ time.Duration) error {
+	origWait := bootWait
+	bootWait = func(ctx context.Context, _ time.Duration) error {
 		return ctx.Err()
 	}
 	t.Cleanup(func() {
-		bootHeadlessWait = origWait
+		bootWait = origWait
 	})
 }
 
-func TestBootHeadlessWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
+func TestBootWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
 	withBootRetryNoDelay(t)
 
 	attempts := 0
@@ -32,7 +32,7 @@ func TestBootHeadlessWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
 		return &idb.Companion{}, nil
 	}
 
-	companion, err := bootHeadlessWithRetryFunc(context.Background(), "UDID", "/tmp/devset", fn)
+	companion, err := bootWithRetryFunc(context.Background(), "UDID", "/tmp/devset", fn)
 	if err != nil {
 		t.Fatalf("expected success, got error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestBootHeadlessWithRetryFunc_SucceedsAfterRetries(t *testing.T) {
 	}
 }
 
-func TestBootHeadlessWithRetryFunc_FailsAfterMaxAttempts(t *testing.T) {
+func TestBootWithRetryFunc_FailsAfterMaxAttempts(t *testing.T) {
 	withBootRetryNoDelay(t)
 
 	attempts := 0
@@ -53,17 +53,17 @@ func TestBootHeadlessWithRetryFunc_FailsAfterMaxAttempts(t *testing.T) {
 		return nil, errors.New("always fails")
 	}
 
-	_, err := bootHeadlessWithRetryFunc(context.Background(), "UDID", "/tmp/devset", fn)
+	_, err := bootWithRetryFunc(context.Background(), "UDID", "/tmp/devset", fn)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	wantAttempts := 1 + bootHeadlessMaxRetries
+	wantAttempts := 1 + bootMaxRetries
 	if attempts != wantAttempts {
 		t.Fatalf("attempts = %d, want %d", attempts, wantAttempts)
 	}
 }
 
-func TestBootHeadlessWithRetryFunc_StopsOnContextCancel(t *testing.T) {
+func TestBootWithRetryFunc_StopsOnContextCancel(t *testing.T) {
 	attempts := 0
 	fn := func(_, _ string) (*idb.Companion, error) {
 		attempts++
@@ -73,7 +73,7 @@ func TestBootHeadlessWithRetryFunc_StopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := bootHeadlessWithRetryFunc(ctx, "UDID", "/tmp/devset", fn)
+	_, err := bootWithRetryFunc(ctx, "UDID", "/tmp/devset", fn)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context canceled, got %v", err)
 	}
