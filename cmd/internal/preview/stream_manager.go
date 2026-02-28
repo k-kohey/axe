@@ -450,7 +450,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	// 3. Boot simulator in parallel with build/compile preparation.
 	go func() {
 		var res bootResult
-		res.companion, res.err = bootHeadlessWithRetry(launcherCtx, udid, sm.deviceSetPath)
+		res.companion, res.err = bootWithRetry(launcherCtx, udid, sm.deviceSetPath, true)
 		if res.err != nil {
 			res.err = fmt.Errorf("booting simulator: %w", res.err)
 		}

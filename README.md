@@ -116,6 +116,7 @@ Watch the source file for changes and hot-reload the preview. Body-only changes 
 | `--preview` | Select a `#Preview` block by title or index |
 | `--reuse-build` | Skip xcodebuild and reuse previous build artifacts |
 | `--strict` | Require full thunk compilation (no degraded fallback) |
+| `--headless` | Run simulator headlessly without a display window |
 
 #### `axe preview serve`
 

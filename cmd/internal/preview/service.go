@@ -184,11 +184,11 @@ func Run(opts RunOptions) error {
 	}
 	dylibPath := compileResult.DylibPath
 
-	// Boot the simulator headlessly via idb_companion.
+	// Boot the simulator via idb_companion (headless unless --no-headless is set).
 	// Stopping bootCompanion will terminate the process and shut down the simulator.
 	sendStatus("booting")
 	done = step.begin("Booting simulator...")
-	bootCompanion, err := bootHeadlessWithRetry(ctx, device, deviceSetPath)
+	bootCompanion, err := bootWithRetry(ctx, device, deviceSetPath, !opts.NoHeadless)
 	done()
 	if err != nil {
 		sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
