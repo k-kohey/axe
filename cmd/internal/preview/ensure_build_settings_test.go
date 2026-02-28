@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"errors"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,7 +23,7 @@ func TestEnsureBuildSettings_LazyInit(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// First call should fetch build settings.
 	bs, err := sm.ensureBuildSettings(context.Background(), dirs)
@@ -50,7 +51,7 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// Call twice — FetchBuildSettings should only be invoked once.
 	bs1, err := sm.ensureBuildSettings(context.Background(), dirs)
@@ -64,7 +65,7 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 	}
 
 	if bs1 != bs2 {
-		t.Error("expected same *buildSettings pointer from both calls")
+		t.Error("expected same *build.Settings pointer from both calls")
 	}
 
 	if callCount.Load() != 1 {
@@ -88,14 +89,14 @@ func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// Launch 10 concurrent calls.
 	const goroutines = 10
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	errs := make([]error, goroutines)
-	results := make([]*buildSettings, goroutines)
+	results := make([]*build.Settings, goroutines)
 
 	for i := range goroutines {
 		go func(idx int) {
@@ -135,7 +136,7 @@ func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	_, err := sm.ensureBuildSettings(context.Background(), dirs)
 	if err == nil {
@@ -152,8 +153,8 @@ func TestEnsureCompilerPathsExtracted_OnlyOnce(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{Build: t.TempDir()}
+	bs := &build.Settings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// Call twice.
 	sm.ensureCompilerPathsExtracted(context.Background(), bs, dirs)
@@ -176,8 +177,8 @@ func TestEnsureCompilerPathsExtracted_ConcurrentSafety(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{Build: t.TempDir()}
+	bs := &build.Settings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	const goroutines = 10
 	var wg sync.WaitGroup

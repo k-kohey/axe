@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
+	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
@@ -17,7 +18,7 @@ import (
 type eventLoopConfig struct {
 	sourceFile string
 	pc         ProjectConfig
-	bs         *buildSettings
+	bs         *build.Settings
 	dirs       previewDirs
 	wctx       watchContext
 	ws         *watchState
@@ -162,7 +163,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 // runStreamLoop is the per-stream event loop for multi-stream mode.
 // It assembles an eventLoopConfig from the stream and delegates to runEventLoop.
 func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
-	bs *buildSettings, idbErrCh <-chan error) error {
+	bs *build.Settings, idbErrCh <-chan error) error {
 
 	wctx := watchContext{
 		device:        s.deviceUDID,

@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"errors"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func TestFetchBuildSettings_ParsesAllFields(t *testing.T) {
 `
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 	if err != nil {
@@ -105,7 +106,7 @@ func TestFetchBuildSettings_BuiltProductsDir(t *testing.T) {
 				Scheme:        "TestScheme",
 				Configuration: tt.configuration,
 			}
-			dirs := previewDirs{Build: "/tmp/build"}
+			dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: "/tmp/build"}}
 
 			bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 			if err != nil {
@@ -156,7 +157,7 @@ func TestFetchBuildSettings_MissingFields(t *testing.T) {
 
 			br := &fakeBuildRunner{fetchOutput: []byte(tt.output)}
 			pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-			dirs := previewDirs{Build: t.TempDir()}
+			dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 			_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 			if err == nil {
@@ -179,7 +180,7 @@ func TestFetchBuildSettings_SwiftVersionOptional(t *testing.T) {
 `
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 	if err != nil {
@@ -198,7 +199,7 @@ func TestFetchBuildSettings_RunnerError(t *testing.T) {
 		fetchErr:    errors.New("exit status 1"),
 	}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 	if err == nil {
@@ -221,7 +222,7 @@ func TestFetchBuildSettings_PassesCorrectArgs(t *testing.T) {
 		Workspace: "/tmp/TestWorkspace.xcworkspace",
 		Scheme:    "TestScheme",
 	}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
 	if err != nil {
@@ -245,7 +246,7 @@ func TestBuildProject_Success(t *testing.T) {
 
 	br := &fakeBuildRunner{buildOutput: []byte("BUILD SUCCEEDED")}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	err := buildProject(context.Background(), pc, dirs, br)
 	if err != nil {
@@ -270,7 +271,7 @@ func TestBuildProject_Failure(t *testing.T) {
 		buildErr:    errors.New("exit status 65"),
 	}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	err := buildProject(context.Background(), pc, dirs, br)
 	if err == nil {
@@ -362,8 +363,8 @@ func TestExtractCompilerPaths_DeduplicatesIncludePaths(t *testing.T) {
 }
 
 func TestExtractCompilerPaths_NoRespFile(t *testing.T) {
-	bs := &buildSettings{ModuleName: "NoSuchModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{Build: t.TempDir()}
+	bs := &build.Settings{ModuleName: "NoSuchModule", BuiltProductsDir: "/tmp/none"}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// Should not panic or error, just silently return.
 	extractCompilerPaths(context.Background(), bs, dirs)
@@ -392,11 +393,11 @@ arm64-apple-ios17.0-simulator
 
 // setupRespFile creates a temporary directory structure mimicking the xcodebuild
 // intermediates layout and writes content as a swiftc response file.
-func setupRespFile(t *testing.T, content string) (*buildSettings, previewDirs) {
+func setupRespFile(t *testing.T, content string) (*build.Settings, previewDirs) {
 	t.Helper()
 	root := t.TempDir()
-	dirs := previewDirs{Build: root}
-	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/products/dir"}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
+	bs := &build.Settings{ModuleName: "TestModule", BuiltProductsDir: "/products/dir"}
 
 	respDir := filepath.Join(root, "Build", "Intermediates.noindex",
 		"TestProject.build", "Debug-iphonesimulator",

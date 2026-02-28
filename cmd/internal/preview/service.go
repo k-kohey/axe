@@ -97,7 +97,7 @@ func Run(opts RunOptions) error {
 		return err
 	}
 
-	dirs, err := newPreviewDirs(opts.PC.primaryPath(), device)
+	dirs, err := newPreviewDirs(opts.PC.PrimaryPath(), device)
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
 		return err
@@ -140,7 +140,7 @@ func Run(opts RunOptions) error {
 	compilers := map[CompileMode]CompileFunc{
 		CompileModeFull: func(ctx context.Context) (string, error) {
 			// Load Index Store cache for fast in-memory dependency resolution.
-			projectRoot := filepath.Dir(opts.PC.primaryPath())
+			projectRoot := filepath.Dir(opts.PC.PrimaryPath())
 			rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
 			if cacheErr != nil && ctx.Err() == nil {
 				slog.Warn("Index store cache unavailable", "err", cacheErr)
@@ -168,7 +168,7 @@ func Run(opts RunOptions) error {
 				return "", err
 			}
 
-			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
+			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
 		},
 		CompileModeMainOnly: func(ctx context.Context) (string, error) {
 			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, tc)
@@ -395,12 +395,6 @@ func Run(opts RunOptions) error {
 	return nil
 }
 
-// hasPreviousBuild checks whether a .app bundle exists in the build products directory.
-func hasPreviousBuild(bs *buildSettings, dirs previewDirs) bool {
-	_, err := resolveAppBundle(bs, dirs)
-	return err == nil
-}
-
 // RunServe is the multi-stream entry point for serve mode.
 // It reads AddStream/RemoveStream commands from stdin and manages
 // multiple preview streams concurrently via StreamManager.
@@ -437,7 +431,7 @@ func RunServe(pc ProjectConfig, strict bool) error {
 	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl, strict)
 
 	// Start shared file watcher for all streams.
-	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.primaryPath()), sl)
+	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}

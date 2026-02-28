@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,7 +68,7 @@ func TestReloadMultiFile_SendsCompilingStatusInServeMode(t *testing.T) {
 		previewSelector: "0",
 		trackedFiles:    []string{},
 	}
-	bs := &buildSettings{ModuleName: "TestModule"}
+	bs := &build.Settings{ModuleName: "TestModule"}
 
 	// Missing types is fine for this test; we only verify that status is emitted.
 	_ = reloadMultiFile(context.Background(), "/nonexistent.swift", bs, previewDirs{}, wctx, ws)
@@ -233,7 +234,7 @@ struct V: View {
 func TestSwitchFile_NonexistentPath(t *testing.T) {
 	ws := &watchState{}
 	pc, _ := NewProjectConfig("dummy.xcodeproj", "", "Scheme", "")
-	bs := &buildSettings{}
+	bs := &build.Settings{}
 	dirs := previewDirs{}
 
 	wctx := watchContext{}
@@ -310,7 +311,7 @@ struct V: View {
 
 	ws := &watchState{}
 	pc, _ := NewProjectConfig(filepath.Join(dir, "dummy.xcodeproj"), "", "Scheme", "")
-	bs := &buildSettings{ModuleName: "TestModule"}
+	bs := &build.Settings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
 	errFake := errors.New("cancelled")
 	wctx := watchContext{

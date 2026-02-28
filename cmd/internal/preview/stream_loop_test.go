@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,7 +62,7 @@ func TestStreamLoop_Cancellation(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStreamLoop(ctx, s, sm, &buildSettings{}, nil)
+		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, nil)
 	}()
 
 	// Cancel should cause clean exit.
@@ -88,7 +89,7 @@ func TestStreamLoop_SwitchFile(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStreamLoop(ctx, s, sm, &buildSettings{}, nil)
+		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, nil)
 	}()
 
 	// Send a switchFile command. Since we don't have a real project, switchFile
@@ -117,7 +118,7 @@ func TestStreamLoop_NextPreview(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStreamLoop(ctx, s, sm, &buildSettings{}, nil)
+		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, nil)
 	}()
 
 	// Send nextPreview. The actual reloadMultiFile will fail but the index
@@ -162,7 +163,7 @@ func TestStreamLoop_BootCrash(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStreamLoop(ctx, s, sm, &buildSettings{}, nil)
+		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, nil)
 	}()
 
 	select {
@@ -202,7 +203,7 @@ func TestStreamLoop_IDBError(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- runStreamLoop(ctx, s, sm, &buildSettings{}, idbErrCh)
+		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, idbErrCh)
 	}()
 
 	select {

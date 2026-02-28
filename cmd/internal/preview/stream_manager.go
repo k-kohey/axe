@@ -11,6 +11,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -102,7 +103,7 @@ type StreamManager struct {
 
 	// Shared build settings (lazy init, protected by bsMu).
 	bsMu        sync.RWMutex
-	bs          *buildSettings
+	bs          *build.Settings
 	bsExtracted bool // true after extractCompilerPaths has been called
 
 	// Shared Index Store cache across all streams.
@@ -364,7 +365,7 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 
 // ensureBuildSettings fetches build settings once (lazy init) and caches the
 // result. Thread-safe via double-checked locking on bsMu.
-func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDirs) (*buildSettings, error) {
+func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDirs) (*build.Settings, error) {
 	sm.bsMu.RLock()
 	if sm.bs != nil {
 		bs := sm.bs
@@ -389,7 +390,7 @@ func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDi
 
 // ensureCompilerPathsExtracted calls extractCompilerPaths exactly once.
 // Must be called after at least one successful buildProject invocation.
-func (sm *StreamManager) ensureCompilerPathsExtracted(ctx context.Context, bs *buildSettings, dirs previewDirs) {
+func (sm *StreamManager) ensureCompilerPathsExtracted(ctx context.Context, bs *build.Settings, dirs previewDirs) {
 	sm.bsMu.Lock()
 	defer sm.bsMu.Unlock()
 	if sm.bsExtracted {
@@ -419,7 +420,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	s.deviceUDID = udid
 
 	// 2. Create per-stream preview directories.
-	dirs, err := newPreviewDirs(sm.pc.primaryPath(), udid)
+	dirs, err := newPreviewDirs(sm.pc.PrimaryPath(), udid)
 	if err != nil {
 		s.sendStopped(sm.ew, "resource_error", err.Error(), "")
 		return
@@ -434,7 +435,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		err       error
 	}
 	type compileResult struct {
-		bs           *buildSettings
+		bs           *build.Settings
 		depGraph     *analysis.DependencyGraph
 		trackedFiles []string
 		dylibPath    string
@@ -487,7 +488,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 			slog.Info("Reusing previous app build artifacts for stream launch", "streamId", s.id, "buildDir", s.dirs.Build)
 		}
 
-		projectRoot := filepath.Dir(sm.pc.primaryPath())
+		projectRoot := filepath.Dir(sm.pc.PrimaryPath())
 		compileAttempt := func() (*analysis.DependencyGraph, []string, string, error) {
 			sendStatus("compiling_thunk")
 			// Load (or refresh) the shared Index Store cache. The first stream to
@@ -516,7 +517,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 				return nil, nil, "", err
 			}
 
-			dylibPath, err := codegen.CompileThunk(launcherCtx, thunkPaths, compileConfigFromBS(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+			dylibPath, err := codegen.CompileThunk(launcherCtx, thunkPaths, compileConfigFromSettings(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
 			if err != nil {
 				return nil, nil, "", err
 			}

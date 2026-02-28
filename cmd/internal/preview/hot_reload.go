@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -33,12 +34,12 @@ func sendWatchStatus(wctx watchContext, phase string) {
 // to the unified event loop. It uses SharedWatcher for file change detection
 // and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
-	bs *buildSettings, dirs previewDirs, wctx watchContext,
+	bs *build.Settings, dirs previewDirs, wctx watchContext,
 	ws *watchState, hid *protocol.HIDHandler,
 	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
 
 	// Set up shared file watcher.
-	watchRoot := filepath.Dir(pc.primaryPath())
+	watchRoot := filepath.Dir(pc.PrimaryPath())
 	sw, err := watch.NewSharedWatcher(ctx, watchRoot, wctx.sources)
 	if err != nil {
 		return fmt.Errorf("creating file watcher: %w", err)
@@ -93,7 +94,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 }
 
 // reloadMultiFile generates a combined thunk for all tracked files and hot-reloads.
-func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState) error {
+func reloadMultiFile(ctx context.Context, sourceFile string, bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState) error {
 	ws.mu.Lock()
 	if ws.building {
 		ws.mu.Unlock()
@@ -144,7 +145,7 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *buildSettings, 
 // switchFile handles switching to a new source file in serve mode.
 // It resolves dependencies, generates a thunk, and attempts a hot-reload.
 // Falls back to rebuild+relaunch if compile fails, and full restart as last resort.
-func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState) error {
+func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState) error {
 	if _, err := os.Stat(newSourceFile); err != nil {
 		return fmt.Errorf("source file not found: %s", newSourceFile)
 	}
@@ -191,7 +192,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
-	cfg := compileConfigFromBS(bs)
+	cfg := compileConfigFromSettings(bs)
 	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile, counter)
 	if err != nil {
 		return fmt.Errorf("thunk: %w", err)
@@ -242,7 +243,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 // This function does NOT use compilePipeline because it has a unique fallback:
 // when parseTrackedFiles returns empty, it retries with sourceFile only.
 // It also uses terminate → install → launch (not the hot-reload deploy path).
-func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState) error {
+func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig, bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState) error {
 	ws.mu.Lock()
 	if ws.building {
 		ws.mu.Unlock()
@@ -303,7 +304,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	}
 
 	sendWatchStatus(wctx, "compiling_thunk")
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -331,7 +332,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	// Reload Index Store cache after rebuild (index data is updated by the build).
 	// Update the shared cache so all streams (in multi-stream mode) see fresh data.
-	projectRoot := filepath.Dir(pc.primaryPath())
+	projectRoot := filepath.Dir(pc.PrimaryPath())
 	newCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
 	if cacheErr != nil && ctx.Err() == nil {
 		slog.Warn("Failed to reload index store cache after rebuild", "err", cacheErr)
@@ -397,7 +398,7 @@ func classifyChange(sourceFile string, prevSkeleton string) (reloadStrategy, str
 // On error it logs and returns the original values unchanged.
 func handleSwitchFileCmd(
 	ctx context.Context, newFile, sourceFile string, trackedSet map[string]bool,
-	pc ProjectConfig, bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
+	pc ProjectConfig, bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState,
 ) (string, map[string]bool) {
 	if newFile == "" {
 		return sourceFile, trackedSet
@@ -416,7 +417,7 @@ func handleSwitchFileCmd(
 // handleNextPreviewCmd cycles to the next preview index and hot-reloads.
 func handleNextPreviewCmd(
 	ctx context.Context, sourceFile string,
-	bs *buildSettings, dirs previewDirs, wctx watchContext, ws *watchState,
+	bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState,
 ) {
 	ws.mu.Lock()
 	count := ws.previewCount
