@@ -1,4 +1,4 @@
-package preview
+package report
 
 import (
 	"context"
@@ -122,7 +122,7 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 	}
 	queue.Seal()
 
-	// 4. Result storage (preserves file × preview ordering)
+	// 4. Result storage (preserves file x preview ordering)
 	type outcome struct {
 		capture *reportCapture
 		failure *captureFailure
@@ -225,13 +225,33 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 	wg.Wait()
 
 	// 6. Flatten results in file-order, preview-order.
+	//    In failFast mode, workers may have left some jobs unprocessed.
+	//    Fill any zero-value outcomes as failures so callers see complete results.
+	var failFastErr error
+	if failFast {
+		if v := firstErr.Load(); v != nil {
+			failFastErr, _ = v.(error)
+		}
+	}
+
 	var merged captureResult
-	for _, fileResults := range results {
-		for _, o := range fileResults {
-			if o.capture != nil {
+	for fileIdx, fileResults := range results {
+		for prevIdx, o := range fileResults {
+			switch {
+			case o.capture != nil:
 				merged.captures = append(merged.captures, *o.capture)
-			} else if o.failure != nil {
+			case o.failure != nil:
 				merged.failures = append(merged.failures, *o.failure)
+			default:
+				// Unprocessed job (failFast aborted before reaching it).
+				pb := blocks[fileIdx].previews[prevIdx]
+				merged.failures = append(merged.failures, captureFailure{
+					file:      blocks[fileIdx].file,
+					index:     prevIdx,
+					title:     pb.Title,
+					startLine: pb.StartLine,
+					err:       fmt.Errorf("skipped due to earlier failure: %w", failFastErr),
+				})
 			}
 		}
 	}

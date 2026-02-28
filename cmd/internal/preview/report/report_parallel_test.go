@@ -1,4 +1,4 @@
-package preview
+package report
 
 import (
 	"errors"

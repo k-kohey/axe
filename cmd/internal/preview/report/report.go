@@ -1,4 +1,4 @@
-package preview
+package report
 
 import (
 	"context"
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview"
 	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
 )
@@ -28,7 +29,7 @@ type ReportOptions struct {
 	Output      string        // directory or file path
 	RenderDelay time.Duration // wait time before screenshot
 	Format      string        // png, md, or html
-	PC          ProjectConfig
+	PC          build.ProjectConfig
 	Device      string
 	Concurrency int // 0 = auto, 1 = sequential (existing path)
 }
@@ -225,7 +226,7 @@ func runReportDocument(
 // ResolveAxeSimulator and uses the pre-acquired device directly.
 func captureOnce(opts ReportOptions, file string, previewIndex int,
 	preparer *build.Preparer, deviceUDID, deviceSetPath string) ([]byte, error) {
-	runOpts := RunOptions{
+	runOpts := preview.RunOptions{
 		SourceFile:      file,
 		PC:              opts.PC,
 		PreviewSelector: strconv.Itoa(previewIndex),
@@ -250,7 +251,7 @@ func captureOnce(opts ReportOptions, file string, previewIndex int,
 		png = data
 		return nil
 	}
-	if err := Run(runOpts); err != nil {
+	if err := preview.Run(runOpts); err != nil {
 		return nil, err
 	}
 	if len(png) == 0 {
@@ -385,7 +386,7 @@ func validateReportFiles(files []string) ([]fileBlocks, error) {
 // Returns true if output is a directory, false if a single file.
 //
 // Priority: if the path already exists as a directory, treat as directory.
-// Otherwise, use file extension as heuristic (has extension → file, no extension → directory).
+// Otherwise, use file extension as heuristic (has extension -> file, no extension -> directory).
 func resolveOutputMode(output string, blocks []fileBlocks) (bool, error) {
 	totalPreviews := 0
 	for _, fb := range blocks {
@@ -405,14 +406,14 @@ func resolveOutputMode(output string, blocks []fileBlocks) (bool, error) {
 		return false, nil
 	}
 
-	// No extension and not an existing directory → treat as new directory.
+	// No extension and not an existing directory -> treat as new directory.
 	return true, nil
 }
 
 // checkOutputCollisions detects when multiple source files would produce the same
 // output file name (e.g. Sources/FooView.swift and Tests/FooView.swift).
 func checkOutputCollisions(output string, blocks []fileBlocks) error {
-	seen := make(map[string]string) // output path → source file
+	seen := make(map[string]string) // output path -> source file
 	for _, fb := range blocks {
 		for i := range len(fb.previews) {
 			p := computeOutputPath(output, fb.file, i, true)

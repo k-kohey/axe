@@ -1,4 +1,4 @@
-package preview
+package report
 
 import (
 	"encoding/base64"
@@ -1044,7 +1044,7 @@ func TestRenderHTMLReport_SinglePreviewGrammar(t *testing.T) {
 }
 
 // --- Golden file tests ---
-// Run with -update to regenerate: go test ./internal/preview/ -run Golden -update
+// Run with -update to regenerate: go test ./internal/preview/report/ -run Golden -update
 
 func goldenSingleCaptures() []reportCapture {
 	return []reportCapture{

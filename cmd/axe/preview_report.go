@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/platform"
-	"github.com/k-kohey/axe/internal/preview"
+	"github.com/k-kohey/axe/internal/preview/report"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ var previewReportCmd = &cobra.Command{
 			return err
 		}
 
-		return preview.RunReport(preview.ReportOptions{
+		return report.RunReport(report.ReportOptions{
 			Files:       args,
 			Output:      reportOutput,
 			RenderDelay: reportWait,
@@ -65,6 +65,6 @@ func init() {
 	previewReportCmd.Flags().DurationVar(&reportWait, "wait", 10*time.Second, "rendering delay before screenshot capture")
 	previewReportCmd.Flags().StringVar(&reportFormat, "format", "png", "output format: png, md, or html")
 	previewReportCmd.Flags().IntVarP(&reportConcurrency, "concurrency", "j", 0,
-		"max parallel simulators (0 = auto, max 4)")
+		"max parallel simulators (0 = auto)")
 	previewCmd.AddCommand(previewReportCmd)
 }
