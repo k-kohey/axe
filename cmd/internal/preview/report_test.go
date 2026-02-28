@@ -998,7 +998,7 @@ func TestRenderMarkdownReport_FailureEscaping(t *testing.T) {
 		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
 	}
 	failures := []captureFailure{
-		{file: "/tmp/HogeView.swift", index: 1, title: "Bad", startLine: 20,
+		{file: "/tmp/HogeView.swift", index: 1, title: "A|B\nC", startLine: 20,
 			err: fmt.Errorf("pipe|char and\nnewline")},
 	}
 	md, err := renderMarkdownReport(captures, failures, "", "test")
@@ -1006,7 +1006,10 @@ func TestRenderMarkdownReport_FailureEscaping(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(md, `pipe\|char and newline`) {
-		t.Fatal("expected pipe and newline to be escaped in markdown failures table")
+		t.Fatal("expected pipe and newline to be escaped in error column")
+	}
+	if !strings.Contains(md, `A\|B C`) {
+		t.Fatal("expected pipe and newline to be escaped in title column")
 	}
 }
 

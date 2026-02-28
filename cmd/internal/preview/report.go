@@ -265,7 +265,8 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
 			for attempt := range captureMaxRetries {
 				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
-				png, lastErr = captureOnce(opts, fb.file, i, buildDone)
+				reuseBuild := buildDone || attempt > 0
+				png, lastErr = captureOnce(opts, fb.file, i, reuseBuild)
 				if lastErr == nil {
 					buildDone = true
 					break
@@ -553,7 +554,7 @@ func renderMarkdownReport(captures []reportCapture, failures []captureFailure, c
 		b.WriteString("| --- | ---: | --- |\n")
 		for _, f := range failures {
 			fmt.Fprintf(&b, "| `%s` | %d — %s | %s |\n",
-				filepath.Base(f.file), f.index, displayTitle(f.title), escapeMDTableCell(f.err.Error()))
+				filepath.Base(f.file), f.index, escapeMDTableCell(displayTitle(f.title)), escapeMDTableCell(f.err.Error()))
 		}
 		b.WriteString("\n")
 	}
