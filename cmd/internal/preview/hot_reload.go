@@ -206,7 +206,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		}
 		// 4. Retry: rebuild project then try compile again.
 		slog.Info("Thunk compile failed, attempting rebuild", "err", err)
-		if buildErr := buildProject(ctx, pc, dirs, wctx.build); buildErr != nil {
+		if buildErr := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
 		dylibPath, err = codegen.CompileThunk(ctx, thunkPaths, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
@@ -263,7 +263,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
 	sendWatchStatus(wctx, "building")
 
-	if err := buildProject(ctx, pc, dirs, wctx.build); err != nil {
+	if err := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
 	}
 

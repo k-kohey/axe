@@ -247,9 +247,9 @@ func TestBuildProject_Success(t *testing.T) {
 
 	br := &fakeBuildRunner{buildOutput: []byte("BUILD SUCCEEDED")}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	err := buildProject(context.Background(), pc, dirs, br)
+	err := build.Run(context.Background(), pc, dirs, br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,9 +272,9 @@ func TestBuildProject_Failure(t *testing.T) {
 		buildErr:    errors.New("exit status 65"),
 	}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	err := buildProject(context.Background(), pc, dirs, br)
+	err := build.Run(context.Background(), pc, dirs, br)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
