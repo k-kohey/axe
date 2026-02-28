@@ -29,10 +29,16 @@ func (r *Toolchain) SDKPath(ctx context.Context, sdk string) (string, error) {
 }
 
 func (r *Toolchain) CompileSwift(ctx context.Context, args []string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("empty command args")
+	}
 	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
 func (r *Toolchain) CompileC(ctx context.Context, args []string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("empty command args")
+	}
 	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
 }
 
