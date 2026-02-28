@@ -14,6 +14,7 @@ import (
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -86,7 +87,7 @@ func Run(opts RunOptions) error {
 
 	br, tc, ar, fc, sl := defaultRunners()
 
-	step := &stepper{total: 7}
+	step := &stepper{total: 6}
 
 	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
@@ -103,33 +104,15 @@ func Run(opts RunOptions) error {
 		return err
 	}
 
-	done = step.begin("Fetching build settings...")
-	bs, err := fetchBuildSettings(ctx, opts.PC, dirs, br)
+	sendStatus("building")
+	done = step.begin("Building...")
+	result, err := build.Prepare(ctx, opts.PC, dirs.ProjectDirs, opts.ReuseBuild, br)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
 	}
-
-	sendStatus("building")
-	if opts.ReuseBuild && hasPreviousBuild(bs, dirs) {
-		done = step.begin(fmt.Sprintf("Reusing previous build (%s)...", dirs.Build))
-		done()
-	} else {
-		label := "Building project..."
-		if opts.ReuseBuild {
-			label = "No previous build found, building project..."
-		}
-		done = step.begin(label)
-		err = buildProject(ctx, opts.PC, dirs, br)
-		done()
-		if err != nil {
-			sendStopped("build_error", "Build failed", err.Error())
-			return err
-		}
-	}
-
-	extractCompilerPaths(ctx, bs, dirs)
+	bs := result.Settings
 
 	// Use CompileStrategy to decide between full and main-only thunk compilation.
 	var depGraph *analysis.DependencyGraph

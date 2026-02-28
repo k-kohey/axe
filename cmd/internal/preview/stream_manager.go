@@ -101,10 +101,10 @@ type StreamManager struct {
 	pc            ProjectConfig
 	deviceSetPath string
 
-	// Shared build settings (lazy init, protected by bsMu).
-	bsMu        sync.RWMutex
-	bs          *build.Settings
-	bsExtracted bool // true after extractCompilerPaths has been called
+	// Shared build result (lazy init, protected by bsMu).
+	// Populated by ensurePrepared which runs FetchSettings + Build + ExtractCompilerPaths once.
+	bsMu     sync.RWMutex
+	prepared *build.Result
 
 	// Shared Index Store cache across all streams.
 	// When any stream rebuilds, it updates this cache so other streams
@@ -316,11 +316,11 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 	// Terminate the app on the device.
 	if s.deviceUDID != "" {
 		sm.bsMu.RLock()
-		bs := sm.bs
+		p := sm.prepared
 		sm.bsMu.RUnlock()
-		if bs != nil {
+		if p != nil {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			terminateApp(cleanupCtx, bs, s.deviceUDID, sm.deviceSetPath, sm.app)
+			terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, sm.app)
 			cleanupCancel()
 		}
 	}
@@ -363,41 +363,30 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 	}
 }
 
-// ensureBuildSettings fetches build settings once (lazy init) and caches the
-// result. Thread-safe via double-checked locking on bsMu.
-func (sm *StreamManager) ensureBuildSettings(ctx context.Context, dirs previewDirs) (*build.Settings, error) {
+// ensurePrepared runs the full build pipeline (fetch settings, build if needed,
+// extract compiler paths) once and caches the result.
+// Thread-safe via double-checked locking on bsMu.
+func (sm *StreamManager) ensurePrepared(ctx context.Context, dirs previewDirs) (*build.Result, error) {
 	sm.bsMu.RLock()
-	if sm.bs != nil {
-		bs := sm.bs
+	if sm.prepared != nil {
+		r := sm.prepared
 		sm.bsMu.RUnlock()
-		return bs, nil
+		return r, nil
 	}
 	sm.bsMu.RUnlock()
 
 	sm.bsMu.Lock()
 	defer sm.bsMu.Unlock()
-	if sm.bs != nil {
-		return sm.bs, nil
+	if sm.prepared != nil {
+		return sm.prepared, nil
 	}
 
-	bs, err := fetchBuildSettings(ctx, sm.pc, dirs, sm.build)
+	r, err := build.Prepare(ctx, sm.pc, dirs.ProjectDirs, true, sm.build)
 	if err != nil {
 		return nil, err
 	}
-	sm.bs = bs
-	return bs, nil
-}
-
-// ensureCompilerPathsExtracted calls extractCompilerPaths exactly once.
-// Must be called after at least one successful buildProject invocation.
-func (sm *StreamManager) ensureCompilerPathsExtracted(ctx context.Context, bs *build.Settings, dirs previewDirs) {
-	sm.bsMu.Lock()
-	defer sm.bsMu.Unlock()
-	if sm.bsExtracted {
-		return
-	}
-	extractCompilerPaths(ctx, bs, dirs)
-	sm.bsExtracted = true
+	sm.prepared = r
+	return r, nil
 }
 
 // defaultStreamLauncher is the production stream lifecycle.
@@ -461,31 +450,26 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	// 4. Build + compile path (runs in parallel with boot).
 	go func() {
 		res := compileResult{}
-		bs, err := sm.ensureBuildSettings(launcherCtx, s.dirs)
+
+		// Prepare: fetch settings + build (if needed) + extract compiler paths.
+		// ensurePrepared caches the result so only the first stream pays the cost.
+		prepared, err := sm.ensurePrepared(launcherCtx, s.dirs)
 		if err != nil {
-			res.err = err
+			res.buildFailed = true
+			res.buildDiag = err.Error()
+			res.err = fmt.Errorf("build failed")
 			compileResCh <- res
 			return
 		}
+		bs := prepared.Settings
 		res.bs = bs
+		builtThisLaunch := prepared.Built
 
-		// Optimistic path: reuse existing app build artifacts if available.
-		// If thunk compilation fails, fall back to full build and retry once.
-		builtThisLaunch := false
-		if !hasPreviousBuild(bs, s.dirs) {
-			sendStatus("building")
-			if err := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); err != nil {
-				res.buildFailed = true
-				res.buildDiag = err.Error()
-				res.err = fmt.Errorf("build failed")
-				compileResCh <- res
-				return
-			}
-			builtThisLaunch = true
-			sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
-		} else {
+		if !builtThisLaunch {
 			sendStatus("reusing_build")
 			slog.Info("Reusing previous app build artifacts for stream launch", "streamId", s.id, "buildDir", s.dirs.Build)
+		} else {
+			sendStatus("building")
 		}
 
 		projectRoot := filepath.Dir(sm.pc.PrimaryPath())
@@ -531,12 +515,12 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 				if err != nil && !builtThisLaunch {
 					slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
 					sendStatus("building")
-					if buildErr := buildProject(launcherCtx, sm.pc, s.dirs, sm.build); buildErr != nil {
+					if buildErr := build.Run(launcherCtx, sm.pc, s.dirs.ProjectDirs, sm.build); buildErr != nil {
 						res.buildFailed = true
 						res.buildDiag = buildErr.Error()
 						return "", fmt.Errorf("build failed")
 					}
-					sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
+					build.ExtractCompilerPaths(launcherCtx, bs, s.dirs.ProjectDirs)
 					dg, tf, dylibPath, err = compileAttempt()
 				}
 				if err != nil {
@@ -547,7 +531,6 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 				return dylibPath, nil
 			},
 			CompileModeMainOnly: func(_ context.Context) (string, error) {
-				sm.ensureCompilerPathsExtracted(launcherCtx, bs, s.dirs)
 				return compileMainOnlyPipeline(launcherCtx, s.file, bs, s.dirs, "0", sm.toolchain)
 			},
 		}

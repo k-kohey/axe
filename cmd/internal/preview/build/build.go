@@ -12,6 +12,36 @@ import (
 	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
+// Result holds the output of a Prepare call.
+type Result struct {
+	Settings *Settings
+	Dirs     ProjectDirs
+	Built    bool // true if xcodebuild was invoked (false when reusing a previous build)
+}
+
+// Prepare runs the full build pipeline: fetch settings, optionally build,
+// and extract compiler paths. This is the high-level entry point.
+func Prepare(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, reuse bool, r Runner) (*Result, error) {
+	s, err := FetchSettings(ctx, pc, dirs, r)
+	if err != nil {
+		return nil, err
+	}
+
+	built := false
+	if reuse && HasPreviousBuild(s, dirs) {
+		slog.Info("Reusing previous build", "buildDir", dirs.Build)
+	} else {
+		if err := Run(ctx, pc, dirs, r); err != nil {
+			return nil, err
+		}
+		built = true
+	}
+
+	ExtractCompilerPaths(ctx, s, dirs)
+
+	return &Result{Settings: s, Dirs: dirs, Built: built}, nil
+}
+
 // FetchSettings runs "xcodebuild -showBuildSettings" and parses the output
 // into a Settings struct.
 func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) (*Settings, error) {
@@ -112,6 +142,12 @@ func Run(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) erro
 // transitive SPM dependencies (C module headers, framework bundles, and
 // generated ObjC module maps) that xcodebuild manages internally.
 func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
+	// Clear previously extracted paths so that re-extraction after a rebuild
+	// produces fresh results (idempotent).
+	s.ExtraIncludePaths = nil
+	s.ExtraFrameworkPaths = nil
+	s.ExtraModuleMapFiles = nil
+
 	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		slog.Warn("Failed to acquire read lock for compiler paths", "err", err)
