@@ -197,9 +197,11 @@ func runThunkTestWithSharedModule(t *testing.T, sdk string,
 	for name := range sources {
 		parsePath := filepath.Join(parseDir, name)
 		sharedPath := filepath.Join(sharedSrcDir, name)
-		if data := sharedCache.FileData(sharedPath); data != nil {
-			remappedFiles[parsePath] = data
+		data := sharedCache.FileData(sharedPath)
+		if data == nil {
+			t.Fatalf("shared cache missing index data for %s", sharedPath)
 		}
+		remappedFiles[parsePath] = data
 	}
 	remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
 
