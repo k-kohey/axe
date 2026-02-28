@@ -138,7 +138,7 @@ These flags are shared by all `preview` subcommands:
 | `--project` | Path to `.xcodeproj` |
 | `--workspace` | Path to `.xcworkspace` (mutually exclusive with `--project`) |
 | `--scheme` | Xcode scheme to build (required) |
-| `--device` | Simulator UDID to use |
+| `--device` | Simulator UDID to use (searches axe set first, then standard Xcode set) |
 | `--configuration` | Build configuration (e.g. `Debug`) |
 
 All flags fall back to `.axerc` values when not specified.
@@ -177,7 +177,7 @@ Project flags (`--project`, `--scheme`, etc.) are shared with the parent `previe
 
 #### Simulator Management
 
-axe manages its own isolated simulator device set, separate from your normal simulators.
+axe manages its own isolated simulator device set, separate from your normal simulators. When `--device` specifies a UDID from the standard Xcode simulator set, axe uses it directly and does **not** shut it down on exit.
 
 ```bash
 # List managed simulators

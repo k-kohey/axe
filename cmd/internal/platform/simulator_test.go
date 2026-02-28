@@ -39,6 +39,7 @@ func (f *simFakeSimctlRunner) Create(_ context.Context, name, deviceType, runtim
 
 func (f *simFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error { return nil }
 func (f *simFakeSimctlRunner) Delete(_ context.Context, _, _ string) error   { return nil }
+func (f *simFakeSimctlRunner) Boot(_ context.Context, _ string) error        { return nil }
 
 func (f *simFakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
 	if f.allDevicesJSON != nil {
@@ -266,12 +267,15 @@ func TestResolveAxeSimulator_PreferredUDID(t *testing.T) {
 		},
 	}
 
-	udid, _, err := ResolveAxeSimulator(runner, "BBB")
+	udid, _, isExternal, err := ResolveAxeSimulator(runner, "BBB")
 	if err != nil {
 		t.Fatalf("ResolveAxeSimulator: %v", err)
 	}
 	if udid != "BBB" {
 		t.Errorf("expected BBB, got %s", udid)
+	}
+	if isExternal {
+		t.Error("expected isExternal=false for axe set device")
 	}
 }
 
@@ -282,7 +286,7 @@ func TestResolveAxeSimulator_PreferredUDID_NotFound(t *testing.T) {
 		},
 	}
 
-	_, _, err := ResolveAxeSimulator(runner, "MISSING")
+	_, _, _, err := ResolveAxeSimulator(runner, "MISSING")
 	if err == nil {
 		t.Fatal("expected error for missing UDID, got nil")
 	}
@@ -296,12 +300,15 @@ func TestResolveAxeSimulator_AutoSelectShutdown(t *testing.T) {
 		},
 	}
 
-	udid, _, err := ResolveAxeSimulator(runner, "")
+	udid, _, isExternal, err := ResolveAxeSimulator(runner, "")
 	if err != nil {
 		t.Fatalf("ResolveAxeSimulator: %v", err)
 	}
 	if udid != "BBB" {
 		t.Errorf("expected BBB (shutdown), got %s", udid)
+	}
+	if isExternal {
+		t.Error("expected isExternal=false for auto-selected axe device")
 	}
 }
 
@@ -319,12 +326,15 @@ func TestResolveAxeSimulator_AutoCreate(t *testing.T) {
 		createdUDID: "NEW-1",
 	}
 
-	udid, _, err := ResolveAxeSimulator(runner, "")
+	udid, _, isExternal, err := ResolveAxeSimulator(runner, "")
 	if err != nil {
 		t.Fatalf("ResolveAxeSimulator: %v", err)
 	}
 	if udid != "NEW-1" {
 		t.Errorf("expected NEW-1, got %s", udid)
+	}
+	if isExternal {
+		t.Error("expected isExternal=false for auto-created device")
 	}
 }
 
@@ -342,7 +352,7 @@ func TestResolveAxeSimulator_CreateError(t *testing.T) {
 		createErr: fmt.Errorf("simctl create failed"),
 	}
 
-	_, _, err := ResolveAxeSimulator(runner, "")
+	_, _, _, err := ResolveAxeSimulator(runner, "")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -387,5 +397,61 @@ func TestParseDevicesJSON_MalformedJSON(t *testing.T) {
 	_, err := parseDevicesJSON([]byte(`{not json`))
 	if err == nil {
 		t.Fatal("expected error on malformed JSON, got nil")
+	}
+}
+
+func TestResolveAxeSimulator_PreferredUDID_FallbackToStandardSet(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		// axe set has no matching device
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown"},
+		},
+		// standard set has the requested device
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPhone 16 Pro", "udid": "STD-UUID", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}
+				]
+			}
+		}`),
+	}
+
+	udid, deviceSetPath, isExternal, err := ResolveAxeSimulator(runner, "STD-UUID")
+	if err != nil {
+		t.Fatalf("ResolveAxeSimulator: %v", err)
+	}
+	if udid != "STD-UUID" {
+		t.Errorf("expected STD-UUID, got %s", udid)
+	}
+	if deviceSetPath != "" {
+		t.Errorf("expected empty deviceSetPath for standard set device, got %q", deviceSetPath)
+	}
+	if !isExternal {
+		t.Error("expected isExternal=true for standard set device")
+	}
+}
+
+func TestResolveAxeSimulator_PreferredUDID_NotFoundAnywhere(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		devices: []simDevice{
+			{Name: "axe iPhone 16 Pro (1)", UDID: "AAA", State: "Shutdown"},
+		},
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPhone 16 Pro", "udid": "OTHER-UUID", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}
+				]
+			}
+		}`),
+	}
+
+	_, _, _, err := ResolveAxeSimulator(runner, "NONEXISTENT")
+	if err == nil {
+		t.Fatal("expected error when UDID not found in either set, got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' in error message, got: %s", err.Error())
 	}
 }

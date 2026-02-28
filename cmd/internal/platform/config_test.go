@@ -27,6 +27,7 @@ func (f *configFakeSimctlRunner) Create(_ context.Context, _, _, _, _ string) (s
 }
 func (f *configFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error { return nil }
 func (f *configFakeSimctlRunner) Delete(_ context.Context, _, _ string) error   { return nil }
+func (f *configFakeSimctlRunner) Boot(_ context.Context, _ string) error        { return nil }
 func (f *configFakeSimctlRunner) ListAllDevices(_ context.Context, _ bool) ([]byte, error) {
 	if f.allDevicesJSON != nil {
 		return f.allDevicesJSON, nil

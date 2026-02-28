@@ -46,13 +46,19 @@ func AxeDeviceSetPath() (string, error) {
 }
 
 // ResolveAxeSimulator finds or creates a simulator in the axe device set.
-// It returns the UDID and device set path for the resolved simulator.
+// It returns the UDID, device set path, and whether the device is external
+// (belongs to the standard Xcode simulator set rather than the axe set).
 //
 // Resolution priority:
-//  1. preferredUDID (from --device flag) — must exist, used regardless of state
+//  1. preferredUDID (from --device flag) — search axe set first, then standard set
 //  2. config.json defaultSimulator — Shutdown only; skip if Booted or absent
 //  3. First Shutdown device in the axe set
 //  4. Auto-create from the latest available iPhone
+//
+// When a device is found in the standard set (isExternal=true), deviceSetPath is
+// returned as "" so that downstream simctl commands target the default set.
+// External devices are not shut down by axe on exit because the user may be
+// using them in other workflows (e.g. Xcode).
 //
 // NOTE: Race condition with concurrent processes
 // This function is not protected by a lock. When multiple axe preview processes
@@ -69,13 +75,13 @@ func AxeDeviceSetPath() (string, error) {
 //
 // Both add complexity and startup latency; the current behavior is acceptable for typical
 // usage since duplicate creation is harmless and same-device collision is unlikely in practice.
-func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, deviceSetPath string, err error) {
+func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, deviceSetPath string, isExternal bool, err error) {
 	deviceSetPath, err = AxeDeviceSetPath()
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	if err := os.MkdirAll(deviceSetPath, 0o755); err != nil {
-		return "", "", fmt.Errorf("creating axe device set directory: %w", err)
+		return "", "", false, fmt.Errorf("creating axe device set directory: %w", err)
 	}
 
 	listCtx, listCancel := simctlContext()
@@ -90,10 +96,31 @@ func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, devic
 		for _, d := range devices {
 			if d.UDID == preferredUDID {
 				slog.Info("Using specified simulator", "name", d.Name, "udid", d.UDID)
-				return d.UDID, deviceSetPath, nil
+				return d.UDID, deviceSetPath, false, nil
 			}
 		}
-		return "", "", fmt.Errorf("simulator %s not found in axe device set. Run 'axe preview simulator list' to see available devices", preferredUDID)
+
+		// Fallback: search the standard Xcode simulator set.
+		stdCtx, stdCancel := simctlContext()
+		defer stdCancel()
+		stdJSON, listErr := simctl.ListAllDevices(stdCtx, true)
+		if listErr != nil {
+			slog.Warn("Failed to list standard Xcode simulator set", "err", listErr)
+		} else {
+			stdDevices, parseErr := parseDevicesJSON(stdJSON)
+			if parseErr != nil {
+				slog.Warn("Failed to parse standard Xcode simulator set", "err", parseErr)
+			} else {
+				for _, d := range stdDevices {
+					if d.UDID == preferredUDID {
+						slog.Info("Using simulator from standard Xcode set", "name", d.Name, "udid", d.UDID)
+						return d.UDID, "", true, nil
+					}
+				}
+			}
+		}
+
+		return "", "", false, fmt.Errorf("simulator %s not found in axe device set or standard Xcode simulator set. Run 'axe preview simulator list' or 'xcrun simctl list devices' to see available devices", preferredUDID)
 	}
 
 	// Priority 2-3: pick a Shutdown simulator (config default preferred, then any).
@@ -105,13 +132,13 @@ func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, devic
 
 	if selected, ok := selectAvailableSimulator(devices, defaultUDID); ok {
 		slog.Info("Using simulator", "udid", selected)
-		return selected, deviceSetPath, nil
+		return selected, deviceSetPath, false, nil
 	}
 
 	// Priority 4: auto-create from the latest iPhone.
 	source, runtime, err := findLatestIPhone(simctl)
 	if err != nil {
-		return "", "", fmt.Errorf("finding latest iPhone: %w", err)
+		return "", "", false, fmt.Errorf("finding latest iPhone: %w", err)
 	}
 
 	slog.Info("Creating simulator in axe device set", "source", source.Name, "deviceType", source.DeviceTypeIdentifier, "runtime", runtime)
@@ -119,9 +146,9 @@ func ResolveAxeSimulator(simctl SimctlRunner, preferredUDID string) (udid, devic
 	defer createCancel()
 	createdUDID, err := simctl.Create(createCtx, "axe "+source.Name+" (1)", source.DeviceTypeIdentifier, runtime, deviceSetPath)
 	if err != nil {
-		return "", "", fmt.Errorf("creating simulator: %w", err)
+		return "", "", false, fmt.Errorf("creating simulator: %w", err)
 	}
-	return createdUDID, deviceSetPath, nil
+	return createdUDID, deviceSetPath, false, nil
 }
 
 // selectAvailableSimulator picks a Shutdown simulator from devices.
