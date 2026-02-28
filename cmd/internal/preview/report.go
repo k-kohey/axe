@@ -19,6 +19,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 )
 
 // ReportOptions holds parameters for the preview report command.
@@ -102,20 +103,27 @@ func RunReport(opts ReportOptions) error {
 		return err
 	}
 
+	dirs, err := build.NewProjectDirs(opts.PC.PrimaryPath())
+	if err != nil {
+		return fmt.Errorf("resolving build directories: %w", err)
+	}
+	br := build.NewRunner()
+	preparer := build.NewPreparer(opts.PC, dirs, false, br)
+
 	switch format {
 	case reportFormatPNG:
-		return runReportPNG(opts, blocks)
+		return runReportPNG(opts, blocks, preparer)
 	case reportFormatMD:
-		return runReportDocument(opts, blocks, markdownReportFileName, renderMarkdownReport)
+		return runReportDocument(opts, blocks, markdownReportFileName, renderMarkdownReport, preparer)
 	case reportFormatHTML:
-		return runReportDocument(opts, blocks, htmlReportFileName, renderHTMLReport)
+		return runReportDocument(opts, blocks, htmlReportFileName, renderHTMLReport, preparer)
 	default:
 		// defensive: normalizeReportFormat should have caught this
 		return fmt.Errorf("unsupported format: %s", format)
 	}
 }
 
-func runReportPNG(opts ReportOptions, blocks []fileBlocks) error {
+func runReportPNG(opts ReportOptions, blocks []fileBlocks, preparer *build.Preparer) error {
 	outputIsDir, err := resolveOutputMode(opts.Output, blocks)
 	if err != nil {
 		return err
@@ -137,7 +145,7 @@ func runReportPNG(opts ReportOptions, blocks []fileBlocks) error {
 		}
 	}
 
-	return captureLoop(opts, blocks, func(file string, index int, _ analysis.PreviewBlock, png []byte) error {
+	return captureLoop(opts, blocks, preparer, func(file string, index int, _ analysis.PreviewBlock, png []byte) error {
 		outputPath := computeOutputPath(opts.Output, file, index, outputIsDir)
 		return os.WriteFile(outputPath, png, 0o644)
 	})
@@ -148,6 +156,7 @@ func runReportDocument(
 	blocks []fileBlocks,
 	reportFileName string,
 	render func([]reportCapture, []captureFailure, string, string) (string, error),
+	preparer *build.Preparer,
 ) error {
 	reportPath, assetsDir, err := prepareReportOutputPaths(opts.Output, reportFileName)
 	if err != nil {
@@ -156,7 +165,7 @@ func runReportDocument(
 
 	slog.Info("preview report capture begin", "format", reportFileName, "fileCount", len(blocks))
 
-	result := captureLoopPartial(opts, blocks)
+	result := captureLoopPartial(opts, blocks, preparer)
 
 	slog.Info("preview report capture done",
 		"captureCount", len(result.captures), "failureCount", len(result.failures))
@@ -196,13 +205,13 @@ func runReportDocument(
 }
 
 // captureOnce executes a single preview capture and returns the PNG data.
-func captureOnce(opts ReportOptions, file string, previewIndex int, reuseBuild bool) ([]byte, error) {
+func captureOnce(opts ReportOptions, file string, previewIndex int, preparer *build.Preparer) ([]byte, error) {
 	runOpts := RunOptions{
 		SourceFile:      file,
 		PC:              opts.PC,
 		PreviewSelector: strconv.Itoa(previewIndex),
 		PreferredDevice: opts.Device,
-		ReuseBuild:      reuseBuild,
+		Preparer:        preparer,
 	}
 	var png []byte
 	runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
@@ -231,20 +240,18 @@ func captureOnce(opts ReportOptions, file string, previewIndex int, reuseBuild b
 
 // captureLoop iterates all preview blocks, captures screenshots via the simulator,
 // and calls onCapture with the resulting PNG data for each preview.
-func captureLoop(opts ReportOptions, blocks []fileBlocks, onCapture func(file string, index int, pb analysis.PreviewBlock, png []byte) error) error {
-	buildDone := false
+func captureLoop(opts ReportOptions, blocks []fileBlocks, preparer *build.Preparer, onCapture func(file string, index int, pb analysis.PreviewBlock, png []byte) error) error {
 	for _, fb := range blocks {
 		for i, pb := range fb.previews {
 			fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 			slog.Info("preview report capture", "file", fb.file, "previewIndex", i)
-			png, err := captureOnce(opts, fb.file, i, buildDone)
+			png, err := captureOnce(opts, fb.file, i, preparer)
 			if err != nil {
 				return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(fb.file), i, err)
 			}
 			if err := onCapture(fb.file, i, pb, png); err != nil {
 				return err
 			}
-			buildDone = true
 		}
 	}
 	return nil
@@ -255,9 +262,8 @@ const captureMaxRetries = 3
 // captureLoopPartial iterates all preview blocks, captures screenshots,
 // retries on failure with backoff, and continues past individual errors.
 // Used by runReportDocument (MD/HTML) to produce partial reports.
-func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
+func captureLoopPartial(opts ReportOptions, blocks []fileBlocks, preparer *build.Preparer) captureResult {
 	var result captureResult
-	buildDone := false
 	for _, fb := range blocks {
 		for i, pb := range fb.previews {
 			var png []byte
@@ -265,10 +271,8 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
 			for attempt := range captureMaxRetries {
 				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
-				reuseBuild := buildDone || attempt > 0
-				png, lastErr = captureOnce(opts, fb.file, i, reuseBuild)
+				png, lastErr = captureOnce(opts, fb.file, i, preparer)
 				if lastErr == nil {
-					buildDone = true
 					break
 				}
 				slog.Warn("preview capture failed",

@@ -35,6 +35,12 @@ type RunOptions struct {
 	Strict          bool
 	NoHeadless      bool
 
+	// Preparer caches FetchSettings results across multiple Run invocations.
+	// When set, Run() delegates to Preparer.Prepare() instead of calling
+	// build.Prepare() directly. This avoids redundant xcodebuild
+	// -showBuildSettings calls in report mode.
+	Preparer *build.Preparer
+
 	// OnReady is called after the preview app has launched and is confirmed ready.
 	// Receives the simulator device UDID and device set path.
 	// Only invoked in oneshot mode (not watch, not serve).

@@ -136,14 +136,18 @@ func nopRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLi
 // sm.StreamLauncher after calling this.
 func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
-	return NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl, false)
+	pc := ProjectConfig{}
+	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
+	return NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false)
 }
 
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
 // a device, sends a "booting" status event, and blocks until ctx is cancelled.
 func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
-	sm := NewStreamManager(pool, ew, ProjectConfig{}, "", br, tc, ar, fc, sl, false)
+	pc := ProjectConfig{}
+	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
+	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -1162,11 +1166,24 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(pool, ew)
 
-	app := &cleanupCountingAppRunner{}
-	sm.app = app
-	sm.prepared = &build.Result{Settings: &build.Settings{BundleID: "axe.com.example.TestModule"}}
+	// Create a preparer with a fake runner that returns valid settings,
+	// then call Prepare() to populate the cache so that Cached() returns non-nil.
+	output := []byte(`    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`)
+	br := &fakeBuildRunner{fetchOutput: output}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	preparer := build.NewPreparer(pc, build.ProjectDirs{Build: t.TempDir()}, false, br)
+	if _, err := preparer.Prepare(context.Background()); err != nil {
+		t.Fatalf("seeding preparer cache: %v", err)
+	}
+
+	_, tc, _, fc, sl := nopRunners()
+	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, &cleanupCountingAppRunner{}, fc, sl, false)
+
+	app := sm.app.(*cleanupCountingAppRunner)
 
 	socketPath := filepath.Join(t.TempDir(), "loader.sock")
 	if err := os.WriteFile(socketPath, []byte("x"), 0o644); err != nil {

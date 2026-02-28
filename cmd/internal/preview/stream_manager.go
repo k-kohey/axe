@@ -104,10 +104,9 @@ type StreamManager struct {
 	pc            ProjectConfig
 	deviceSetPath string
 
-	// Shared build result (lazy init, protected by bsMu).
-	// Populated by ensurePrepared which runs FetchSettings + Build + ExtractCompilerPaths once.
-	bsMu     sync.RWMutex
-	prepared *build.Result
+	// Preparer caches the build pipeline result (FetchSettings + Build +
+	// ExtractCompilerPaths) so only the first stream pays the cost.
+	preparer *build.Preparer
 
 	// Shared Index Store cache across all streams.
 	// When any stream rebuilds, it updates this cache so other streams
@@ -133,7 +132,7 @@ type StreamManager struct {
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
 func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
-	br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister, strict bool) *StreamManager {
+	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister, strict bool) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
 		pool:          pool,
@@ -141,6 +140,7 @@ func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc Pro
 		strict:        strict,
 		pc:            pc,
 		deviceSetPath: deviceSetPath,
+		preparer:      preparer,
 		indexCache:    newSharedIndexCache(nil),
 		build:         br,
 		toolchain:     tc,
@@ -319,10 +319,7 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 
 		// Terminate the app on the device.
 		if s.deviceUDID != "" {
-			sm.bsMu.RLock()
-			p := sm.prepared
-			sm.bsMu.RUnlock()
-			if p != nil {
+			if p := sm.preparer.Cached(); p != nil {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, sm.app)
 				cleanupCancel()
@@ -366,32 +363,6 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 			releaseCancel()
 		}
 	})
-}
-
-// ensurePrepared runs the full build pipeline (fetch settings, build if needed,
-// extract compiler paths) once and caches the result.
-// Thread-safe via double-checked locking on bsMu.
-func (sm *StreamManager) ensurePrepared(ctx context.Context, dirs previewDirs) (*build.Result, error) {
-	sm.bsMu.RLock()
-	if sm.prepared != nil {
-		r := sm.prepared
-		sm.bsMu.RUnlock()
-		return r, nil
-	}
-	sm.bsMu.RUnlock()
-
-	sm.bsMu.Lock()
-	defer sm.bsMu.Unlock()
-	if sm.prepared != nil {
-		return sm.prepared, nil
-	}
-
-	r, err := build.Prepare(ctx, sm.pc, dirs.ProjectDirs, true, sm.build)
-	if err != nil {
-		return nil, err
-	}
-	sm.prepared = r
-	return r, nil
 }
 
 // defaultStreamLauncher is the production stream lifecycle.
@@ -457,8 +428,8 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		res := compileResult{}
 
 		// Prepare: fetch settings + build (if needed) + extract compiler paths.
-		// ensurePrepared caches the result so only the first stream pays the cost.
-		prepared, err := sm.ensurePrepared(launcherCtx, s.dirs)
+		// Preparer caches the result so only the first stream pays the cost.
+		prepared, err := sm.preparer.Prepare(launcherCtx)
 		if err != nil {
 			res.buildFailed = true
 			res.buildDiag = err.Error()

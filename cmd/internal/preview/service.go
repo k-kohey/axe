@@ -106,7 +106,12 @@ func Run(opts RunOptions) error {
 
 	sendStatus("building")
 	done = step.begin("Building...")
-	result, err := build.Prepare(ctx, opts.PC, dirs.ProjectDirs, opts.ReuseBuild, br)
+	var result *build.Result
+	if opts.Preparer != nil {
+		result, err = opts.Preparer.Prepare(ctx)
+	} else {
+		result, err = build.Prepare(ctx, opts.PC, dirs.ProjectDirs, opts.ReuseBuild, br)
+	}
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
@@ -442,7 +447,14 @@ func RunServe(pc ProjectConfig, strict bool) error {
 	}
 
 	br, tc, ar, fc, sl := defaultRunners()
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl, strict)
+
+	projDirs, err := build.NewProjectDirs(pc.PrimaryPath())
+	if err != nil {
+		return fmt.Errorf("resolving build directories: %w", err)
+	}
+	preparer := build.NewPreparer(pc, projDirs, true, br)
+
+	sm := NewStreamManager(pool, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict)
 
 	// Start shared file watcher for all streams.
 	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
