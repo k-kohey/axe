@@ -67,6 +67,9 @@ type stream struct {
 
 	// Prevents duplicate StreamStopped events.
 	stoppedOnce sync.Once
+
+	// Prevents duplicate resource cleanup when multiple callers race to cleanup.
+	cleanupOnce sync.Once
 }
 
 // sendStopped sends a StreamStopped event exactly once per stream.
@@ -308,59 +311,61 @@ func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 // cleanupStreamResources releases all per-stream resources. Each nil check
 // makes this function idempotent and safe when called from partial initialization.
 func (sm *StreamManager) cleanupStreamResources(s *stream) {
-	// Unregister from shared watcher.
-	if sm.watcher != nil {
-		sm.watcher.RemoveListener(s.id)
-	}
-
-	// Terminate the app on the device.
-	if s.deviceUDID != "" {
-		sm.bsMu.RLock()
-		p := sm.prepared
-		sm.bsMu.RUnlock()
-		if p != nil {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, sm.app)
-			cleanupCancel()
+	s.cleanupOnce.Do(func() {
+		// Unregister from shared watcher.
+		if sm.watcher != nil {
+			sm.watcher.RemoveListener(s.id)
 		}
-	}
 
-	// Remove loader socket.
-	if s.dirs.Socket != "" {
-		if err := os.Remove(s.dirs.Socket); err != nil && !os.IsNotExist(err) {
-			slog.Debug("Failed to remove socket", "streamId", s.id, "path", s.dirs.Socket, "err", err)
+		// Terminate the app on the device.
+		if s.deviceUDID != "" {
+			sm.bsMu.RLock()
+			p := sm.prepared
+			sm.bsMu.RUnlock()
+			if p != nil {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, sm.app)
+				cleanupCancel()
+			}
 		}
-	}
 
-	// Close idb gRPC client.
-	if s.idbClient != nil {
-		if err := s.idbClient.Close(); err != nil {
-			slog.Debug("Failed to close idb client", "streamId", s.id, "err", err)
+		// Remove loader socket.
+		if s.dirs.Socket != "" {
+			if err := os.Remove(s.dirs.Socket); err != nil && !os.IsNotExist(err) {
+				slog.Debug("Failed to remove socket", "streamId", s.id, "path", s.dirs.Socket, "err", err)
+			}
 		}
-	}
 
-	// Stop idb companion (video/HID).
-	if s.idbCompanion != nil {
-		if err := s.idbCompanion.Stop(); err != nil {
-			slog.Debug("Failed to stop idb companion", "streamId", s.id, "err", err)
+		// Close idb gRPC client.
+		if s.idbClient != nil {
+			if err := s.idbClient.Close(); err != nil {
+				slog.Debug("Failed to close idb client", "streamId", s.id, "err", err)
+			}
 		}
-	}
 
-	// Stop boot companion (simulator).
-	if s.bootCompanion != nil {
-		if err := s.bootCompanion.Stop(); err != nil {
-			slog.Debug("Failed to stop boot companion", "streamId", s.id, "err", err)
+		// Stop idb companion (video/HID).
+		if s.idbCompanion != nil {
+			if err := s.idbCompanion.Stop(); err != nil {
+				slog.Debug("Failed to stop idb companion", "streamId", s.id, "err", err)
+			}
 		}
-	}
 
-	// Release the device back to pool.
-	if s.deviceUDID != "" {
-		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := sm.pool.Release(releaseCtx, s.deviceUDID); err != nil {
-			slog.Warn("Failed to release device", "streamId", s.id, "udid", s.deviceUDID, "err", err)
+		// Stop boot companion (simulator).
+		if s.bootCompanion != nil {
+			if err := s.bootCompanion.Stop(); err != nil {
+				slog.Debug("Failed to stop boot companion", "streamId", s.id, "err", err)
+			}
 		}
-		releaseCancel()
-	}
+
+		// Release the device back to pool.
+		if s.deviceUDID != "" {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := sm.pool.Release(releaseCtx, s.deviceUDID); err != nil {
+				slog.Warn("Failed to release device", "streamId", s.id, "udid", s.deviceUDID, "err", err)
+			}
+			releaseCancel()
+		}
+	})
 }
 
 // ensurePrepared runs the full build pipeline (fetch settings, build if needed,

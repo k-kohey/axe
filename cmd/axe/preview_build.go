@@ -17,12 +17,17 @@ pre-warming the build cache so that subsequent preview commands
 start faster.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		pc, err := resolveProjectConfig()
-		if err != nil {
-			return err
-		}
-		return preview.RunBuild(pc)
+		return runBuildLogic()
 	},
+}
+
+// runBuildLogic executes the build-only preview pipeline.
+func runBuildLogic() error {
+	pc, err := resolveProjectConfig()
+	if err != nil {
+		return err
+	}
+	return preview.RunBuild(pc)
 }
 
 func init() {

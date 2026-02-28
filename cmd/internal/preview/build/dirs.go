@@ -25,7 +25,10 @@ func (d ProjectDirs) IndexStorePath() string {
 // the iOS Simulator via dlopen (separated runtimes cannot resolve host
 // /tmp paths).
 func NewProjectDirs(projectPath string) (ProjectDirs, error) {
-	abs, _ := filepath.Abs(projectPath)
+	abs, err := filepath.Abs(projectPath)
+	if err != nil {
+		return ProjectDirs{}, fmt.Errorf("resolving project path: %w", err)
+	}
 	h := sha256.Sum256([]byte(abs))
 	short := fmt.Sprintf("%x", h[:8])
 

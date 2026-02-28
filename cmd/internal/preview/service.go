@@ -441,13 +441,16 @@ func RunBuild(pc ProjectConfig) error {
 
 	dirs, err := build.NewProjectDirs(pc.PrimaryPath())
 	if err != nil {
-		return err
+		return fmt.Errorf("resolving build directories: %w", err)
 	}
 
+	// Only the build runner is needed; no simulator, app, or toolchain operations.
 	br := &runner.Build{}
 
 	step := &stepper{total: 1}
 	done := step.begin("Building...")
+	// Always build (reuse=false): the purpose of this command is to populate
+	// the build cache, so skipping the build would defeat its intent.
 	result, err := build.Prepare(ctx, pc, dirs, false, br)
 	done()
 	if err != nil {

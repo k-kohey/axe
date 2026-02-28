@@ -240,7 +240,112 @@ func TestFetchBuildSettings_PassesCorrectArgs(t *testing.T) {
 	}
 }
 
-// --- buildProject tests ---
+// --- build.Prepare tests ---
+
+func TestPrepare_Success(t *testing.T) {
+	t.Parallel()
+
+	output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`
+	br := &fakeBuildRunner{
+		fetchOutput: []byte(output),
+		buildOutput: []byte("BUILD SUCCEEDED"),
+	}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
+
+	result, err := build.Prepare(context.Background(), pc, dirs, false, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Settings.ModuleName != "TestModule" {
+		t.Errorf("ModuleName = %q, want %q", result.Settings.ModuleName, "TestModule")
+	}
+	if !result.Built {
+		t.Error("Built = false, want true")
+	}
+	if len(br.buildArgs) == 0 {
+		t.Error("Build was not called")
+	}
+}
+
+func TestPrepare_ReuseBuild(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dirs := build.ProjectDirs{Build: root}
+
+	// Create .app so HasPreviousBuild returns true.
+	appDir := filepath.Join(root, "Build", "Products", "Debug-iphonesimulator", "TestModule.app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`
+	br := &fakeBuildRunner{fetchOutput: []byte(output)}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+
+	result, err := build.Prepare(context.Background(), pc, dirs, true, br)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Built {
+		t.Error("Built = true, want false (should reuse)")
+	}
+	if len(br.buildArgs) != 0 {
+		t.Error("Build should not have been called when reusing")
+	}
+}
+
+func TestPrepare_FetchError(t *testing.T) {
+	t.Parallel()
+
+	br := &fakeBuildRunner{
+		fetchOutput: []byte("error"),
+		fetchErr:    errors.New("exit status 1"),
+	}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
+
+	_, err := build.Prepare(context.Background(), pc, dirs, false, br)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "xcodebuild -showBuildSettings failed") {
+		t.Errorf("error = %q, want to contain fetch failure message", err.Error())
+	}
+}
+
+func TestPrepare_BuildError(t *testing.T) {
+	t.Parallel()
+
+	output := `    PRODUCT_MODULE_NAME = TestModule
+    PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
+    IPHONEOS_DEPLOYMENT_TARGET = 17.0
+`
+	br := &fakeBuildRunner{
+		fetchOutput: []byte(output),
+		buildOutput: []byte("BUILD FAILED"),
+		buildErr:    errors.New("exit status 65"),
+	}
+	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
+
+	_, err := build.Prepare(context.Background(), pc, dirs, false, br)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "xcodebuild build failed") {
+		t.Errorf("error = %q, want to contain build failure message", err.Error())
+	}
+}
+
+// --- build.Run tests ---
 
 func TestBuildProject_Success(t *testing.T) {
 	t.Parallel()

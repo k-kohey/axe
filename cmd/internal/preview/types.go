@@ -18,7 +18,9 @@ import (
 type ProjectConfig = build.ProjectConfig
 
 // NewProjectConfig is forwarded from build.NewProjectConfig.
-var NewProjectConfig = build.NewProjectConfig
+func NewProjectConfig(project, workspace, scheme, configuration string) (ProjectConfig, error) {
+	return build.NewProjectConfig(project, workspace, scheme, configuration)
+}
 
 // RunOptions holds all parameters for a single-stream preview Run invocation.
 type RunOptions struct {
