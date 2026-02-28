@@ -6,7 +6,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"html"
+	htmlpkg "html"
+	"html/template"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -447,15 +448,15 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 			}
 
 			title := c.displayTitle()
-			alt := html.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
+			alt := htmlpkg.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
 			imgSrc := resolveImageSrc(c)
 			source := resolveSourceDisplay(c.file, cwd)
 
 			fmt.Fprintf(&b, "<td valign=\"top\" width=\"50%%\" align=\"center\">\n")
-			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" width=\"100%%\" />\n", html.EscapeString(imgSrc), alt)
+			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" width=\"100%%\" />\n", htmlpkg.EscapeString(imgSrc), alt)
 			fmt.Fprintf(&b, "<br/><strong>Preview %d</strong><br/>\n", c.index)
-			fmt.Fprintf(&b, "<sub>Title: <code>%s</code></sub><br/>\n", html.EscapeString(title))
-			fmt.Fprintf(&b, "<sub>Source: <code>%s:%d</code></sub>\n", html.EscapeString(source), c.startLine)
+			fmt.Fprintf(&b, "<sub>Title: <code>%s</code></sub><br/>\n", htmlpkg.EscapeString(title))
+			fmt.Fprintf(&b, "<sub>Source: <code>%s:%d</code></sub>\n", htmlpkg.EscapeString(source), c.startLine)
 			b.WriteString("</td>\n")
 
 			isRowEnd := i%columns == columns-1 || i == len(g.captures)-1
@@ -473,11 +474,34 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 	return b.String()
 }
 
-func renderHTMLReport(captures []reportCapture, cwd string) string {
-	groups := groupCapturesByFile(captures)
+// htmlReportData holds the data passed to the HTML report template.
+type htmlReportData struct {
+	FileCount    int
+	PreviewCount int
+	GeneratedAt  string
+	Groups       []htmlGroupData
+}
 
-	var b strings.Builder
-	b.WriteString(`<!DOCTYPE html>
+// htmlGroupData represents one source file and its preview cards.
+type htmlGroupData struct {
+	AnchorID     string
+	FileName     string
+	PreviewCount int
+	Cards        []htmlCardData
+}
+
+// htmlCardData represents a single preview card.
+type htmlCardData struct {
+	Index     int
+	Title     string
+	ImageSrc  template.URL // data: URIs and relative paths are both safe here
+	Alt       string
+	Source    string
+	StartLine int
+	Delay     string
+}
+
+var htmlReportTmpl = template.Must(template.New("report").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -625,52 +649,28 @@ footer {
 </style>
 </head>
 <body>
-`)
-
-	fmt.Fprintf(&b, "<header>\n<h1>SwiftUI Preview Report</h1>\n")
-	fmt.Fprintf(&b, "<p class=\"summary\">%d files &middot; %d previews &middot; Generated at %s</p>\n",
-		len(groups), len(captures), html.EscapeString(time.Now().Format(time.RFC3339)))
-	b.WriteString("</header>\n")
-
-	// TOC
-	b.WriteString("<nav><ul>\n")
-	for i, g := range groups {
-		anchorID := fmt.Sprintf("file-%d", i)
-		fmt.Fprintf(&b, "<li><a href=\"#%s\">%s (%d)</a></li>\n",
-			anchorID, html.EscapeString(filepath.Base(g.file)), len(g.captures))
-	}
-	b.WriteString("</ul></nav>\n")
-
-	// Sections
-	b.WriteString("<main>\n")
-	for i, g := range groups {
-		base := filepath.Base(g.file)
-		anchorID := fmt.Sprintf("file-%d", i)
-		fmt.Fprintf(&b, "<section id=\"%s\">\n<h2>%s <span class=\"summary\">(%d previews)</span></h2>\n<div class=\"grid\">\n",
-			anchorID, html.EscapeString(base), len(g.captures))
-		for j, c := range g.captures {
-			title := c.displayTitle()
-			alt := html.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
-			imgSrc := resolveImageSrc(c)
-			source := resolveSourceDisplay(c.file, cwd)
-			delay := float64(j) * 0.08
-
-			fmt.Fprintf(&b, "<div class=\"card\" style=\"animation-delay:%.2fs\">\n", delay)
-			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" data-lightbox />\n",
-				html.EscapeString(imgSrc), alt)
-			b.WriteString("<div class=\"card-body\">\n")
-			fmt.Fprintf(&b, "<div class=\"card-title\">Preview %d &mdash; %s</div>\n",
-				c.index, html.EscapeString(title))
-			fmt.Fprintf(&b, "<div class=\"card-meta\">%s:%d</div>\n",
-				html.EscapeString(source), c.startLine)
-			b.WriteString("</div>\n</div>\n")
-		}
-		b.WriteString("</div>\n</section>\n")
-	}
-	b.WriteString("</main>\n")
-
-	// Lightbox dialog + footer (event delegation for CSP compatibility — no inline handlers)
-	b.WriteString(`<dialog id="lightbox"><img src="" alt="preview" /><p class="hint">Click outside to close</p></dialog>
+<header>
+<h1>SwiftUI Preview Report</h1>
+<p class="summary">{{.FileCount}} files &middot; {{.PreviewCount}} previews &middot; Generated at {{.GeneratedAt}}</p>
+</header>
+<nav><ul>
+{{range .Groups}}<li><a href="#{{.AnchorID}}">{{.FileName}} ({{.PreviewCount}})</a></li>
+{{end}}</ul></nav>
+<main>
+{{range .Groups}}<section id="{{.AnchorID}}">
+<h2>{{.FileName}} <span class="summary">({{.PreviewCount}} previews)</span></h2>
+<div class="grid">
+{{range .Cards}}<div class="card" style="animation-delay:{{.Delay}}">
+<img src="{{.ImageSrc}}" alt="{{.Alt}}" data-lightbox />
+<div class="card-body">
+<div class="card-title">Preview {{.Index}} &mdash; {{.Title}}</div>
+<div class="card-meta">{{.Source}}:{{.StartLine}}</div>
+</div>
+</div>
+{{end}}</div>
+</section>
+{{end}}</main>
+<dialog id="lightbox"><img src="" alt="preview" /><p class="hint">Click outside to close</p></dialog>
 <script>
 (function() {
   var dialog = document.getElementById('lightbox');
@@ -694,6 +694,41 @@ footer {
 <footer>Generated by <code>axe preview report --format html</code></footer>
 </body>
 </html>
-`)
+`))
+
+func renderHTMLReport(captures []reportCapture, cwd string) string {
+	groups := groupCapturesByFile(captures)
+
+	data := htmlReportData{
+		FileCount:    len(groups),
+		PreviewCount: len(captures),
+		GeneratedAt:  time.Now().Format(time.RFC3339),
+	}
+	for i, g := range groups {
+		base := filepath.Base(g.file)
+		gd := htmlGroupData{
+			AnchorID:     fmt.Sprintf("file-%d", i),
+			FileName:     base,
+			PreviewCount: len(g.captures),
+		}
+		for j, c := range g.captures {
+			gd.Cards = append(gd.Cards, htmlCardData{
+				Index:     c.index,
+				Title:     c.displayTitle(),
+				ImageSrc:  template.URL(resolveImageSrc(c)), //nolint:gosec // resolveImageSrc returns only our generated data URIs or asset paths
+				Alt:       fmt.Sprintf("%s preview %d", base, c.index),
+				Source:    resolveSourceDisplay(c.file, cwd),
+				StartLine: c.startLine,
+				Delay:     fmt.Sprintf("%.2fs", float64(j)*0.08),
+			})
+		}
+		data.Groups = append(data.Groups, gd)
+	}
+
+	var b strings.Builder
+	if err := htmlReportTmpl.Execute(&b, data); err != nil {
+		slog.Error("failed to render HTML report template", "err", err)
+		return ""
+	}
 	return b.String()
 }
