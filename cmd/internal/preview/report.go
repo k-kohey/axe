@@ -9,6 +9,7 @@ import (
 	"html"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -151,6 +152,13 @@ func runReportDocument(
 		return err
 	}
 	slog.Info("preview report written", "destination", reportPath, "bytes", len(content))
+
+	if opener, err := exec.LookPath("open"); err == nil {
+		if err := exec.Command(opener, reportPath).Start(); err != nil {
+			slog.Warn("failed to open report", "err", err)
+		}
+	}
+
 	return nil
 }
 
@@ -477,23 +485,29 @@ func renderHTMLReport(captures []reportCapture, cwd string) string {
 <title>SwiftUI Preview Report</title>
 <style>
 :root {
-  --bg: #f5f5f7;
+  --bg: #fafaf9;
   --card-bg: #ffffff;
-  --text: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --border: #d2d2d7;
-  --shadow: rgba(0,0,0,0.08);
-  --accent: #0071e3;
+  --text: #1a1a1a;
+  --text-secondary: #737373;
+  --border: #e5e5e5;
+  --shadow: rgba(0,0,0,0.06);
+  --accent: #e25822;
+  --accent-hover: #c94a1a;
+  --header-from: #1a1a1a;
+  --header-to: #2d2d2d;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1d1d1f;
-    --card-bg: #2c2c2e;
-    --text: #f5f5f7;
-    --text-secondary: #a1a1a6;
-    --border: #48484a;
-    --shadow: rgba(0,0,0,0.3);
-    --accent: #2997ff;
+    --bg: #171717;
+    --card-bg: #262626;
+    --text: #fafafa;
+    --text-secondary: #a3a3a3;
+    --border: #404040;
+    --shadow: rgba(0,0,0,0.4);
+    --accent: #f97316;
+    --accent-hover: #fb923c;
+    --header-from: #0a0a0a;
+    --header-to: #171717;
   }
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -501,46 +515,72 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
-  padding: 2rem;
+  line-height: 1.6;
 }
-header { text-align: center; margin-bottom: 2rem; }
-header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
-.summary { color: var(--text-secondary); font-size: 0.9rem; }
-nav { margin: 1.5rem 0; }
+header {
+  background: linear-gradient(135deg, var(--header-from), var(--header-to));
+  color: #fafafa;
+  text-align: center;
+  padding: 3rem 2rem 2.5rem;
+}
+header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+header .summary { color: #a3a3a3; font-size: 0.85rem; }
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 2rem;
+}
 nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
 nav a {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
-  padding: 0.25rem 0.75rem;
+  padding: 0.3rem 0.85rem;
   border: 1px solid var(--border);
-  border-radius: 1rem;
-  font-size: 0.85rem;
-  transition: background 0.2s;
+  border-radius: 2rem;
+  font-size: 0.8rem;
+  transition: all 0.2s;
 }
-nav a:hover { background: var(--accent); color: #fff; }
-section { margin-bottom: 2.5rem; }
+nav a:hover { border-color: var(--accent); color: var(--accent); }
+main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+section { margin-bottom: 3rem; }
 section h2 {
-  font-size: 1.3rem;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2px solid var(--accent);
+  display: inline-block;
 }
+section h2 .summary { font-weight: 400; }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
 }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .card {
   background: var(--card-bg);
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 2px 8px var(--shadow);
+  border: 1px solid var(--border);
   transition: transform 0.2s, box-shadow 0.2s;
+  animation: card-in 0.4s ease both;
 }
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 16px var(--shadow);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px var(--shadow);
 }
 .card img {
   width: 100%;
@@ -548,26 +588,38 @@ section h2 {
   cursor: pointer;
   background: var(--bg);
 }
-.card-body {
-  padding: 0.75rem 1rem;
+.card-body { padding: 0.75rem 1rem; }
+.card-title { font-weight: 600; font-size: 0.9rem; }
+.card-meta {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 0.2rem;
+  font-family: "SF Mono", ui-monospace, monospace;
 }
-.card-title { font-weight: 600; font-size: 0.95rem; }
-.card-meta { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; }
 dialog {
   border: none;
   background: transparent;
   max-width: 90vw;
   max-height: 90vh;
   padding: 0;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.2s, transform 0.2s;
 }
-dialog::backdrop { background: rgba(0,0,0,0.7); }
-dialog img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+dialog[open] { opacity: 1; transform: scale(1); }
+dialog::backdrop { background: rgba(0,0,0,0.75); }
+dialog img { max-width: 90vw; max-height: 85vh; border-radius: 8px; display: block; }
+dialog .hint {
+  text-align: center;
+  color: #a3a3a3;
+  font-size: 0.75rem;
+  margin-top: 0.75rem;
+}
 footer {
   text-align: center;
   color: var(--text-secondary);
-  font-size: 0.8rem;
-  margin-top: 3rem;
-  padding-top: 1rem;
+  font-size: 0.75rem;
+  padding: 1.5rem 2rem;
   border-top: 1px solid var(--border);
 }
 </style>
@@ -590,18 +642,20 @@ footer {
 	b.WriteString("</ul></nav>\n")
 
 	// Sections
+	b.WriteString("<main>\n")
 	for i, g := range groups {
 		base := filepath.Base(g.file)
 		anchorID := fmt.Sprintf("file-%d", i)
 		fmt.Fprintf(&b, "<section id=\"%s\">\n<h2>%s <span class=\"summary\">(%d previews)</span></h2>\n<div class=\"grid\">\n",
 			anchorID, html.EscapeString(base), len(g.captures))
-		for _, c := range g.captures {
+		for j, c := range g.captures {
 			title := c.displayTitle()
 			alt := html.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
 			imgSrc := resolveImageSrc(c)
 			source := resolveSourceDisplay(c.file, cwd)
+			delay := float64(j) * 0.08
 
-			b.WriteString("<div class=\"card\">\n")
+			fmt.Fprintf(&b, "<div class=\"card\" style=\"animation-delay:%.2fs\">\n", delay)
 			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" data-lightbox />\n",
 				html.EscapeString(imgSrc), alt)
 			b.WriteString("<div class=\"card-body\">\n")
@@ -613,9 +667,10 @@ footer {
 		}
 		b.WriteString("</div>\n</section>\n")
 	}
+	b.WriteString("</main>\n")
 
 	// Lightbox dialog + footer (event delegation for CSP compatibility — no inline handlers)
-	b.WriteString(`<dialog id="lightbox"><img src="" alt="preview" /></dialog>
+	b.WriteString(`<dialog id="lightbox"><img src="" alt="preview" /><p class="hint">Click outside to close</p></dialog>
 <script>
 (function() {
   var dialog = document.getElementById('lightbox');
