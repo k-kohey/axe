@@ -182,6 +182,16 @@ func selectAvailableSimulator(devices []simDevice, defaultUDID string) (string, 
 	return "", false
 }
 
+// FindDefaultDeviceSpec returns the device type and runtime identifiers
+// for the latest available iPhone. Used by DevicePool.Acquire in report mode.
+func FindDefaultDeviceSpec(simctl SimctlRunner) (deviceType, runtime string, err error) {
+	dev, rt, err := findLatestIPhone(simctl)
+	if err != nil {
+		return "", "", err
+	}
+	return dev.DeviceTypeIdentifier, rt, nil
+}
+
 // findLatestIPhone selects the latest available iPhone from the default device set
 // without booting it. The selection prefers the highest iOS version and, among
 // devices on the same version, the lexicographically largest name.

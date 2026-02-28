@@ -41,6 +41,12 @@ type RunOptions struct {
 	// -showBuildSettings calls in report mode.
 	Preparer *build.Preparer
 
+	// DeviceUDID is a pre-acquired simulator UDID.
+	// When set, Run() skips ResolveAxeSimulator and uses this device directly.
+	// Used by parallel report mode where DevicePool manages device lifecycle.
+	DeviceUDID    string
+	DeviceSetPath string
+
 	// OnReady is called after the preview app has launched and is confirmed ready.
 	// Receives the simulator device UDID and device set path.
 	// Only invoked in oneshot mode (not watch, not serve).

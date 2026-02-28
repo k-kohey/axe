@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	reportOutput string
-	reportWait   time.Duration
-	reportFormat string
+	reportOutput      string
+	reportWait        time.Duration
+	reportFormat      string
+	reportConcurrency int
 )
 
 var previewReportCmd = &cobra.Command{
@@ -54,6 +55,7 @@ var previewReportCmd = &cobra.Command{
 			Format:      reportFormat,
 			PC:          pc,
 			Device:      previewDevice,
+			Concurrency: reportConcurrency,
 		})
 	},
 }
@@ -62,5 +64,7 @@ func init() {
 	previewReportCmd.Flags().StringVarP(&reportOutput, "output", "o", "", "output path (png: directory or file, md: directory)")
 	previewReportCmd.Flags().DurationVar(&reportWait, "wait", 10*time.Second, "rendering delay before screenshot capture")
 	previewReportCmd.Flags().StringVar(&reportFormat, "format", "png", "output format: png, md, or html")
+	previewReportCmd.Flags().IntVarP(&reportConcurrency, "concurrency", "j", 0,
+		"max parallel simulators (0 = auto, max 4)")
 	previewCmd.AddCommand(previewReportCmd)
 }

@@ -393,6 +393,50 @@ func TestParseDevicesJSON(t *testing.T) {
 	}
 }
 
+func TestFindDefaultDeviceSpec(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPhone 16 Pro", "udid": "DDD", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"},
+					{"name": "iPhone 16", "udid": "CCC", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16"}
+				]
+			}
+		}`),
+	}
+
+	deviceType, runtime, err := FindDefaultDeviceSpec(runner)
+	if err != nil {
+		t.Fatalf("FindDefaultDeviceSpec: %v", err)
+	}
+	if deviceType != "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro" {
+		t.Errorf("expected iPhone 16 Pro device type, got %s", deviceType)
+	}
+	if runtime != "com.apple.CoreSimulator.SimRuntime.iOS-18-2" {
+		t.Errorf("expected iOS 18.2 runtime, got %s", runtime)
+	}
+}
+
+func TestFindDefaultDeviceSpec_NoIPhone(t *testing.T) {
+	runner := &simFakeSimctlRunner{
+		allDevicesJSON: []byte(`{
+			"devices": {
+				"com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+					{"name": "iPad Air", "udid": "AAA", "state": "Shutdown",
+					 "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPad-Air"}
+				]
+			}
+		}`),
+	}
+
+	_, _, err := FindDefaultDeviceSpec(runner)
+	if err == nil {
+		t.Fatal("expected error when no iPhone found, got nil")
+	}
+}
+
 func TestParseDevicesJSON_MalformedJSON(t *testing.T) {
 	_, err := parseDevicesJSON([]byte(`{not json`))
 	if err == nil {

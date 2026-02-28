@@ -90,15 +90,25 @@ func Run(opts RunOptions) error {
 	step := &stepper{total: 6}
 
 	simctl := &platform.RealSimctlRunner{}
-	done := step.begin("Resolving simulator...")
-	device, deviceSetPath, isExternalDevice, err := platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
-	done()
-	if err != nil {
-		sendStopped("resource_error", err.Error(), "")
-		return err
+	var device, deviceSetPath string
+	var isExternalDevice bool
+	var done func()
+	var err error
+	if opts.DeviceUDID != "" {
+		device = opts.DeviceUDID
+		deviceSetPath = opts.DeviceSetPath
+	} else {
+		done = step.begin("Resolving simulator...")
+		device, deviceSetPath, isExternalDevice, err = platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
+		done()
+		if err != nil {
+			sendStopped("resource_error", err.Error(), "")
+			return err
+		}
 	}
 
-	dirs, err := newPreviewDirs(opts.PC.PrimaryPath(), device)
+	var dirs previewDirs
+	dirs, err = newPreviewDirs(opts.PC.PrimaryPath(), device)
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
 		return err

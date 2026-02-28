@@ -30,6 +30,7 @@ type ReportOptions struct {
 	Format      string        // png, md, or html
 	PC          ProjectConfig
 	Device      string
+	Concurrency int // 0 = auto, 1 = sequential (existing path)
 }
 
 const (
@@ -110,12 +111,27 @@ func RunReport(opts ReportOptions) error {
 	br := build.NewRunner()
 	preparer := build.NewPreparer(opts.PC, dirs, false, br)
 
+	useParallel := len(blocks) > 1 && opts.Concurrency != 1
+	if useParallel && opts.Device != "" {
+		slog.Warn("--device is ignored in parallel mode")
+		opts.Device = ""
+	}
+
 	switch format {
 	case reportFormatPNG:
+		if useParallel {
+			return runReportPNGParallel(opts, blocks, preparer)
+		}
 		return runReportPNG(opts, blocks, preparer)
 	case reportFormatMD:
+		if useParallel {
+			return runReportDocumentParallel(opts, blocks, markdownReportFileName, renderMarkdownReport, preparer)
+		}
 		return runReportDocument(opts, blocks, markdownReportFileName, renderMarkdownReport, preparer)
 	case reportFormatHTML:
+		if useParallel {
+			return runReportDocumentParallel(opts, blocks, htmlReportFileName, renderHTMLReport, preparer)
+		}
 		return runReportDocument(opts, blocks, htmlReportFileName, renderHTMLReport, preparer)
 	default:
 		// defensive: normalizeReportFormat should have caught this
@@ -205,13 +221,18 @@ func runReportDocument(
 }
 
 // captureOnce executes a single preview capture and returns the PNG data.
-func captureOnce(opts ReportOptions, file string, previewIndex int, preparer *build.Preparer) ([]byte, error) {
+// deviceUDID and deviceSetPath are optional; when non-empty, Run() skips
+// ResolveAxeSimulator and uses the pre-acquired device directly.
+func captureOnce(opts ReportOptions, file string, previewIndex int,
+	preparer *build.Preparer, deviceUDID, deviceSetPath string) ([]byte, error) {
 	runOpts := RunOptions{
 		SourceFile:      file,
 		PC:              opts.PC,
 		PreviewSelector: strconv.Itoa(previewIndex),
 		PreferredDevice: opts.Device,
 		Preparer:        preparer,
+		DeviceUDID:      deviceUDID,
+		DeviceSetPath:   deviceSetPath,
 	}
 	var png []byte
 	runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
@@ -245,7 +266,7 @@ func captureLoop(opts ReportOptions, blocks []fileBlocks, preparer *build.Prepar
 		for i, pb := range fb.previews {
 			fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 			slog.Info("preview report capture", "file", fb.file, "previewIndex", i)
-			png, err := captureOnce(opts, fb.file, i, preparer)
+			png, err := captureOnce(opts, fb.file, i, preparer, "", "")
 			if err != nil {
 				return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(fb.file), i, err)
 			}
@@ -271,7 +292,7 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks, preparer *build
 			for attempt := range captureMaxRetries {
 				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
-				png, lastErr = captureOnce(opts, fb.file, i, preparer)
+				png, lastErr = captureOnce(opts, fb.file, i, preparer, "", "")
 				if lastErr == nil {
 					break
 				}
