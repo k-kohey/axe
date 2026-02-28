@@ -91,7 +91,7 @@ func Run(opts RunOptions) error {
 
 	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
-	device, deviceSetPath, err := platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
+	device, deviceSetPath, isExternalDevice, err := platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
 	done()
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
@@ -167,24 +167,41 @@ func Run(opts RunOptions) error {
 	}
 	dylibPath := compileResult.DylibPath
 
-	// Boot the simulator via idb_companion (headless unless --no-headless is set).
-	// Stopping bootCompanion will terminate the process and shut down the simulator.
+	// Boot the simulator.
+	// For external (standard Xcode set) devices, use simctl boot (non-headless)
+	// and skip shutdown on exit since the user may be using the device elsewhere.
+	// For axe-managed devices, use idb_companion via bootWithRetry.
 	sendStatus("booting")
-	done = step.begin("Booting simulator...")
-	bootCompanion, err := bootWithRetry(ctx, device, deviceSetPath, !opts.NoHeadless)
-	done()
-	if err != nil {
-		sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
-		return fmt.Errorf("booting simulator: %w", err)
+	var bootCompanion *idb.Companion
+	if isExternalDevice {
+		done = step.begin("Booting simulator (standard set)...")
+		bootCtx, bootCancel := context.WithTimeout(ctx, 30*time.Second)
+		err = simctl.Boot(bootCtx, device)
+		bootCancel()
+		done()
+		if err != nil {
+			sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
+			return fmt.Errorf("booting simulator: %w", err)
+		}
+	} else {
+		done = step.begin("Booting simulator...")
+		bootCompanion, err = bootWithRetry(ctx, device, deviceSetPath, !opts.NoHeadless)
+		done()
+		if err != nil {
+			sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
+			return fmt.Errorf("booting simulator: %w", err)
+		}
 	}
 
 	// Verify the simulator didn't crash immediately after boot.
-	select {
-	case <-bootCompanion.Done():
-		msg := fmt.Sprintf("simulator crashed immediately after boot: %v", bootCompanion.Err())
-		sendStopped("boot_error", msg, "")
-		return fmt.Errorf("%s", msg)
-	default:
+	if bootCompanion != nil {
+		select {
+		case <-bootCompanion.Done():
+			msg := fmt.Sprintf("simulator crashed immediately after boot: %v", bootCompanion.Err())
+			sendStopped("boot_error", msg, "")
+			return fmt.Errorf("%s", msg)
+		default:
+		}
 	}
 
 	// Shared cleanup: runs on normal return, error return, and signal-triggered return.
@@ -211,8 +228,10 @@ func Run(opts RunOptions) error {
 				slog.Debug("Failed to stop idb companion", "err", err)
 			}
 		}
-		if err := bootCompanion.Stop(); err != nil {
-			slog.Debug("Failed to stop boot companion", "err", err)
+		if bootCompanion != nil {
+			if err := bootCompanion.Stop(); err != nil {
+				slog.Debug("Failed to stop boot companion", "err", err)
+			}
 		}
 	}()
 
@@ -297,13 +316,21 @@ func Run(opts RunOptions) error {
 		// Block until termination signal or fatal event.
 		// Without this, the deferred cleanup would run immediately, stopping
 		// the simulator and making the degraded preview useless.
+		var bootDiedCh <-chan struct{}
+		if bootCompanion != nil {
+			bootDiedCh = bootCompanion.Done()
+		}
+		// nil channel blocks forever in select, which is correct for external
+		// devices — the "simulator crashed" case is effectively disabled.
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-bootCompanion.Done():
+		case <-bootDiedCh:
 			msg := "simulator crashed unexpectedly"
-			if err := bootCompanion.Err(); err != nil {
-				msg = fmt.Sprintf("simulator crashed: %v", err)
+			if bootCompanion != nil {
+				if err := bootCompanion.Err(); err != nil {
+					msg = fmt.Sprintf("simulator crashed: %v", err)
+				}
 			}
 			sendStopped("runtime_error", msg, "")
 			return fmt.Errorf("boot companion died")
@@ -358,8 +385,12 @@ func Run(opts RunOptions) error {
 			}
 		}
 
+		var watchBootDiedCh <-chan struct{}
+		if bootCompanion != nil {
+			watchBootDiedCh = bootCompanion.Done()
+		}
 		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-		return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, bootCompanion.Done())
+		return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, watchBootDiedCh)
 	}
 
 	// Oneshot mode (no watch): verify runtime is ready, then exit silently.

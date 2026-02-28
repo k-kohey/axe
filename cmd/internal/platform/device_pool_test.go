@@ -103,6 +103,8 @@ func (f *fakeSimctlRunner) Shutdown(_ context.Context, udid, _ string) error {
 	return nil
 }
 
+func (f *fakeSimctlRunner) Boot(_ context.Context, _ string) error { return nil }
+
 func (f *fakeSimctlRunner) Delete(_ context.Context, udid, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

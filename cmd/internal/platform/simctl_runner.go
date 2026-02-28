@@ -15,6 +15,9 @@ type SimctlRunner interface {
 	Create(ctx context.Context, name, deviceType, runtime, setPath string) (string, error)
 	Shutdown(ctx context.Context, udid, setPath string) error
 	Delete(ctx context.Context, udid, setPath string) error
+	// Boot boots a simulator in the default (standard) device set.
+	// Returns nil if the device is already booted.
+	Boot(ctx context.Context, udid string) error
 
 	// ListAllDevices returns raw JSON for all simulator devices (no --set filter).
 	// If onlyAvailable is true, only available devices are listed.
@@ -71,6 +74,19 @@ func (r *RealSimctlRunner) Delete(ctx context.Context, udid, setPath string) err
 	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "delete", udid).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("simctl delete: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func (r *RealSimctlRunner) Boot(ctx context.Context, udid string) error {
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "boot", udid).CombinedOutput()
+	if err != nil {
+		// "Unable to boot device in current state: Booted" means it is
+		// already running — treat as success.
+		if strings.Contains(string(out), "current state: Booted") {
+			return nil
+		}
+		return fmt.Errorf("simctl boot: %w\n%s", err, out)
 	}
 	return nil
 }

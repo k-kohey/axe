@@ -47,6 +47,8 @@ func (f *managerFakeSimctlRunner) Shutdown(_ context.Context, _, _ string) error
 	return nil
 }
 
+func (f *managerFakeSimctlRunner) Boot(_ context.Context, _ string) error { return nil }
+
 func (f *managerFakeSimctlRunner) Delete(_ context.Context, udid, _ string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
