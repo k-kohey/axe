@@ -10,16 +10,6 @@ allowed-tools: Bash(axe *), Bash(cat *), Read, Edit, Glob, Grep
 
 Iteratively modify a SwiftUI View until its preview matches a target design image.
 
-## Prerequisites
-
-Before running, verify `axe` is installed:
-
-```bash
-command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
-```
-
-The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEME`) or the user must pass `--scheme`/`--project`/`--workspace` flags.
-
 ## Inputs
 
 - `$0`: Path to the SwiftUI source file
@@ -38,13 +28,7 @@ Read the SwiftUI source file at `$0` to understand the current implementation.
 ### 3. Capture the current preview
 
 ```bash
-PREVIEW_IMG="$(pwd)/axe-fix-ui-$(date +%s)-$$.png"
-ERR_LOG="$(pwd)/axe-fix-ui-err-$(date +%s)-$$.log"
-if ! axe preview report "$0" --output "$PREVIEW_IMG" 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  # If it failed because of multiple #Preview blocks, fall back to directory output or oneshot
-  exit 1
-fi
+axe preview report "$0" --output <output.png>
 ```
 
 `axe preview report` is preferred because it waits for rendering to complete and retries on failure.
@@ -75,12 +59,7 @@ Make targeted edits to the SwiftUI source file to address the identified differe
 Capture a new preview after the edits. Use `--reuse-build` to skip rebuilding since only the View source changed:
 
 ```bash
-PREVIEW_IMG="$(pwd)/axe-fix-ui-$(date +%s)-$$.png"
-ERR_LOG="$(pwd)/axe-fix-ui-err-$(date +%s)-$$.log"
-if ! axe preview report "$0" --output "$PREVIEW_IMG" --reuse-build 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  exit 1
-fi
+axe preview report "$0" --output <output.png> --reuse-build
 ```
 
 Read the new image and compare against the design.
@@ -100,3 +79,11 @@ Show the final preview image and summarize all changes made to the source file.
 - If the file has multiple `#Preview` blocks, use `--preview <title|index>` to target the correct one
 - If the design requires assets (images, custom fonts) not present in the project, note this to the user
 - If the design cannot be perfectly replicated due to platform constraints, explain the limitations
+
+## Prerequisites
+
+Run this if the command fails because `axe` is not found::
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh
+```

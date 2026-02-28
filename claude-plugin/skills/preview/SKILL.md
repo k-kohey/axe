@@ -9,16 +9,6 @@ allowed-tools: Bash(axe *), Bash(cat *), Read
 
 Capture a screenshot of a SwiftUI View's `#Preview` block using `axe preview report` (preferred) or `axe preview`.
 
-## Prerequisites
-
-Before running, verify `axe` is installed:
-
-```bash
-command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
-```
-
-The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEME`) or the user must pass `--scheme`/`--project`/`--workspace` flags.
-
 ## Steps
 
 ### Default: Use `axe preview report`
@@ -28,15 +18,10 @@ The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEM
 1. Run `axe preview report` to capture the preview as a PNG image:
 
 ```bash
-PREVIEW_IMG="$(pwd)/axe-preview-$(date +%s).png"
-ERR_LOG="$(pwd)/axe-preview-err-$(date +%s).log"
-if ! axe preview report $ARGUMENTS --output "$PREVIEW_IMG" 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  exit 1
-fi
+axe preview report $ARGUMENTS --output <output.png>
 ```
 
-2. Display the captured image using the Read tool on `$PREVIEW_IMG`.
+2. Display the captured image using the Read tool.
    - If the file contains multiple `#Preview` blocks, `--output` must be a directory. In that case, each screenshot is saved as `<basename>--preview-<index>.png`. Display all captured images.
 
 3. Describe what you see in the preview to the user.
@@ -48,12 +33,7 @@ Use `axe preview` when you need to select a specific preview from a file that co
 Note: oneshot mode captures immediately after the app signals readiness, with no rendering delay. This may result in a blank screenshot for views that require time to render.
 
 ```bash
-PREVIEW_IMG="$(pwd)/axe-preview-$(date +%s).png"
-ERR_LOG="$(pwd)/axe-preview-err-$(date +%s).log"
-if ! axe preview $ARGUMENTS > "$PREVIEW_IMG" 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  exit 1
-fi
+axe preview $ARGUMENTS > <output.png>
 ```
 
 ## Options
@@ -70,3 +50,11 @@ fi
   - `axe` or `idb_companion` not installed
 - The screenshot reflects the current state of the source code on disk. If the user has unsaved edits, remind them to save first.
 - Clean up generated screenshot and log files after they are no longer needed.
+
+## Prerequisites
+
+Run this if the command fails because `axe` is not found::
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh
+```

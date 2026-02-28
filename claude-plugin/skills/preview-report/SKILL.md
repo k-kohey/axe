@@ -10,16 +10,6 @@ allowed-tools: Bash(axe *), Bash(cat *), Bash(git diff *), Read, Glob, Grep
 
 Capture screenshots of all `#Preview` blocks across multiple SwiftUI files and generate a report.
 
-## Prerequisites
-
-Before running, verify `axe` is installed:
-
-```bash
-command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
-```
-
-The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEME`) or the user must pass `--scheme`/`--project`/`--workspace` flags.
-
 ## Steps
 
 ### 1. Determine target files
@@ -39,19 +29,13 @@ fi
 ### 2. Generate the report
 
 ```bash
-REPORT_DIR="$(pwd)/axe-report-$(date +%s)"
-mkdir -p "$REPORT_DIR"
-ERR_LOG="$(pwd)/axe-report-err-$(date +%s).log"
-if ! axe preview report $FILES --format md --output "$REPORT_DIR" 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  exit 1
-fi
+axe preview report $FILES --format md --output <output-dir>
 ```
 
 When `$ARGUMENTS` is provided, use `$ARGUMENTS` instead of `$FILES`:
 
 ```bash
-axe preview report $ARGUMENTS --format md --output "$REPORT_DIR" 2>"$ERR_LOG"
+axe preview report $ARGUMENTS --format md --output <output-dir>
 ```
 
 This generates:
@@ -80,3 +64,11 @@ Provide a summary of all captured previews, noting:
 - **PR review**: Capture all changed views before creating a pull request
 - **Visual regression**: Compare previews across branches
 - **Documentation**: Generate a visual catalog of UI components
+
+## Prerequisites
+
+Run this if the command fails because `axe` is not found::
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh
+```

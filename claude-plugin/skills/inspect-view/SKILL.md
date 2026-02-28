@@ -9,16 +9,6 @@ allowed-tools: Bash(axe *), Read, Grep
 
 Inspect the UIKit/SwiftUI view hierarchy of a running app to diagnose layout issues.
 
-## Prerequisites
-
-Before running, verify `axe` is installed:
-
-```bash
-command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
-```
-
-The `--app` flag or `APP_NAME` in `.axerc` is required for `axe view`. A simulator must be booted with the target app running. Use `axe ps` to list running app processes if needed.
-
 ## Steps
 
 ### 1. Identify the running app
@@ -70,3 +60,11 @@ Present:
 - Use `--depth 3` to limit output for deeply nested hierarchies
 - Use `--frontmost` to focus on the visible view controller
 - In detail mode output, the SwiftUI tree can be large. Focus on the relevant section.
+
+## Prerequisites
+
+Run this if the command fails because `axe` is not found::
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh
+```

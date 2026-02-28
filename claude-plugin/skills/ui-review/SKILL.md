@@ -9,28 +9,12 @@ allowed-tools: Bash(axe *), Bash(cat *), Read, Glob, Grep
 
 Capture a preview screenshot and perform a comprehensive UI/UX review.
 
-## Prerequisites
-
-Before running, verify `axe` is installed:
-
-```bash
-command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
-```
-
-The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEME`) or the user must pass `--scheme`/`--project`/`--workspace` flags.
-
 ## Steps
 
 ### 1. Capture the preview
 
 ```bash
-PREVIEW_IMG="$(pwd)/axe-ui-review-$(date +%s)-$$.png"
-ERR_LOG="$(pwd)/axe-ui-review-err-$(date +%s)-$$.log"
-if ! axe preview report $ARGUMENTS --output "$PREVIEW_IMG" 2>"$ERR_LOG"; then
-  cat "$ERR_LOG"
-  # If it failed because of multiple #Preview blocks, fall back to directory output or oneshot
-  exit 1
-fi
+axe preview report $ARGUMENTS --output <output.png>
 ```
 
 `axe preview report` is preferred over oneshot `axe preview` because it waits for rendering to complete (`--wait`, default 10s) and retries on failure.
@@ -84,3 +68,11 @@ Present findings organized by severity:
 3. **Good**: Aspects that are well-implemented
 
 For each finding, reference the specific line in the source code and suggest a concrete fix.
+
+## Prerequisites
+
+Run this if the command fails because `axe` is not found::
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh
+```
