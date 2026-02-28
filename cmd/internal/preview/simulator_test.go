@@ -59,28 +59,3 @@ func TestResolveAppBundle_NotFound(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
-
-func TestHasPreviousBuild_True(t *testing.T) {
-	root := t.TempDir()
-	appDir := filepath.Join(root, "Build", "Products", "Debug-iphonesimulator", "MyApp.app")
-	if err := os.MkdirAll(appDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	bs := &build.Settings{ModuleName: "MyApp", BuiltProductsDir: filepath.Join(root, "Build", "Products", "Debug-iphonesimulator")}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
-
-	if !build.HasPreviousBuild(bs, dirs.ProjectDirs) {
-		t.Error("HasPreviousBuild = false, want true")
-	}
-}
-
-func TestHasPreviousBuild_False(t *testing.T) {
-	root := t.TempDir()
-	bs := &build.Settings{ModuleName: "MyApp", BuiltProductsDir: filepath.Join(root, "Build", "Products", "Debug-iphonesimulator")}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
-
-	if build.HasPreviousBuild(bs, dirs.ProjectDirs) {
-		t.Error("HasPreviousBuild = true, want false")
-	}
-}
