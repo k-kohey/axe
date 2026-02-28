@@ -160,14 +160,14 @@ footer {
 <body>
 <header>
 <h1>SwiftUI Preview Report</h1>
-<p class="summary">{{.FileCount}} files &middot; {{.PreviewCount}} previews &middot; {{.Version}}</p>
+<p class="summary">{{.FileCount}} {{pluralize .FileCount "file" "files"}} &middot; {{.PreviewCount}} {{pluralize .PreviewCount "preview" "previews"}} &middot; {{.Version}}</p>
 </header>
 <nav><ul>
 {{range .Groups}}<li><a href="#{{.AnchorID}}">{{.FileName}} ({{.PreviewCount}})</a></li>
 {{end}}</ul></nav>
 <main>
 {{range .Groups}}<section id="{{.AnchorID}}">
-<h2>{{.FileName}} <span class="summary">({{.PreviewCount}} previews)</span></h2>
+<h2>{{.FileName}} <span class="summary">({{.PreviewCount}} {{pluralize .PreviewCount "preview" "previews"}})</span></h2>
 <div class="grid">
 {{range .Cards}}<div class="card" style="animation-delay:{{.Delay}}">
 <img src="{{.ImageSrc}}" alt="{{.Alt}}" data-lightbox />

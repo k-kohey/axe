@@ -41,7 +41,7 @@ _abc1234_
 
 ---
 
-## FugaView.swift (1 previews)
+## FugaView.swift (1 preview)
 
 <table>
 <tr>

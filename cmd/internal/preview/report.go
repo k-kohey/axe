@@ -50,11 +50,12 @@ type reportCapture struct {
 	imageRef  string
 }
 
-func (c reportCapture) displayTitle() string {
-	if c.title == "" {
+// displayTitle returns the title or "(Untitled)" fallback.
+func displayTitle(title string) string {
+	if title == "" {
 		return "(Untitled)"
 	}
-	return c.title
+	return title
 }
 
 // captureFailure records a preview that failed to capture after retries.
@@ -66,17 +67,25 @@ type captureFailure struct {
 	err       error
 }
 
-func (f captureFailure) displayTitle() string {
-	if f.title == "" {
-		return "(Untitled)"
-	}
-	return f.title
-}
-
 // captureResult holds the outcome of a captureLoopPartial run.
 type captureResult struct {
 	captures []reportCapture
 	failures []captureFailure
+}
+
+// escapeMDTableCell escapes characters that would break a Markdown table cell.
+func escapeMDTableCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
+}
+
+// pluralizeWord returns singular when count is 1, plural otherwise.
+func pluralizeWord(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 // RunReport captures previews and writes them in the requested output format.
@@ -138,7 +147,7 @@ func runReportDocument(
 	opts ReportOptions,
 	blocks []fileBlocks,
 	reportFileName string,
-	render func([]reportCapture, []captureFailure, string, string) string,
+	render func([]reportCapture, []captureFailure, string, string) (string, error),
 ) error {
 	reportPath, assetsDir, err := prepareReportOutputPaths(opts.Output, reportFileName)
 	if err != nil {
@@ -152,20 +161,22 @@ func runReportDocument(
 	slog.Info("preview report capture done",
 		"captureCount", len(result.captures), "failureCount", len(result.failures))
 
-	if len(result.captures) == 0 && len(result.failures) > 0 {
-		return fmt.Errorf("all %d preview captures failed", len(result.failures))
-	}
-
-	capturesWithRefs, err := writeReportAssets(assetsDir, filepath.Dir(reportPath), result.captures)
-	if err != nil {
-		return err
+	var capturesWithRefs []reportCapture
+	if len(result.captures) > 0 {
+		capturesWithRefs, err = writeReportAssets(assetsDir, filepath.Dir(reportPath), result.captures)
+		if err != nil {
+			return err
+		}
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		slog.Warn("failed to get working directory, source paths will use base names", "err", err)
 	}
 	version := resolveVersion()
-	content := render(capturesWithRefs, result.failures, cwd, version)
+	content, err := render(capturesWithRefs, result.failures, cwd, version)
+	if err != nil {
+		return fmt.Errorf("rendering report: %w", err)
+	}
 	if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
 		return err
 	}
@@ -184,49 +195,56 @@ func runReportDocument(
 	return nil
 }
 
+// captureOnce executes a single preview capture and returns the PNG data.
+func captureOnce(opts ReportOptions, file string, previewIndex int, reuseBuild bool) ([]byte, error) {
+	runOpts := RunOptions{
+		SourceFile:      file,
+		PC:              opts.PC,
+		PreviewSelector: strconv.Itoa(previewIndex),
+		PreferredDevice: opts.Device,
+		ReuseBuild:      reuseBuild,
+	}
+	var png []byte
+	runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
+		if opts.RenderDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(opts.RenderDelay):
+			}
+		}
+		data, err := platform.Screenshot(ctx, device, deviceSetPath)
+		if err != nil {
+			return err
+		}
+		png = data
+		return nil
+	}
+	if err := Run(runOpts); err != nil {
+		return nil, err
+	}
+	if len(png) == 0 {
+		return nil, fmt.Errorf("screenshot data was empty")
+	}
+	return png, nil
+}
+
 // captureLoop iterates all preview blocks, captures screenshots via the simulator,
 // and calls onCapture with the resulting PNG data for each preview.
 func captureLoop(opts ReportOptions, blocks []fileBlocks, onCapture func(file string, index int, pb analysis.PreviewBlock, png []byte) error) error {
-	firstRun := true
+	buildDone := false
 	for _, fb := range blocks {
 		for i, pb := range fb.previews {
-			runOpts := RunOptions{
-				SourceFile:      fb.file,
-				PC:              opts.PC,
-				PreviewSelector: strconv.Itoa(i),
-				PreferredDevice: opts.Device,
-				ReuseBuild:      !firstRun,
-			}
-
-			var png []byte
-			runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
-				if opts.RenderDelay > 0 {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-time.After(opts.RenderDelay):
-					}
-				}
-				data, err := platform.Screenshot(ctx, device, deviceSetPath)
-				if err != nil {
-					return err
-				}
-				png = data
-				return nil
-			}
-
 			fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 			slog.Info("preview report capture", "file", fb.file, "previewIndex", i)
-			if err := Run(runOpts); err != nil {
+			png, err := captureOnce(opts, fb.file, i, buildDone)
+			if err != nil {
 				return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(fb.file), i, err)
-			}
-			if len(png) == 0 {
-				return fmt.Errorf("capturing %s preview %d: screenshot data was empty", filepath.Base(fb.file), i)
 			}
 			if err := onCapture(fb.file, i, pb, png); err != nil {
 				return err
 			}
-			firstRun = false
+			buildDone = true
 		}
 	}
 	return nil
@@ -235,53 +253,29 @@ func captureLoop(opts ReportOptions, blocks []fileBlocks, onCapture func(file st
 const captureMaxRetries = 3
 
 // captureLoopPartial iterates all preview blocks, captures screenshots,
-// retries on failure, and continues past individual errors.
+// retries on failure with backoff, and continues past individual errors.
 // Used by runReportDocument (MD/HTML) to produce partial reports.
 func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
 	var result captureResult
-	firstRun := true
+	buildDone := false
 	for _, fb := range blocks {
 		for i, pb := range fb.previews {
 			var png []byte
 			var lastErr error
 			for attempt := range captureMaxRetries {
-				runOpts := RunOptions{
-					SourceFile:      fb.file,
-					PC:              opts.PC,
-					PreviewSelector: strconv.Itoa(i),
-					PreferredDevice: opts.Device,
-					ReuseBuild:      !firstRun,
-				}
-				runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
-					if opts.RenderDelay > 0 {
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-time.After(opts.RenderDelay):
-						}
-					}
-					data, err := platform.Screenshot(ctx, device, deviceSetPath)
-					if err != nil {
-						return err
-					}
-					png = data
-					return nil
-				}
-
 				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
-
-				lastErr = Run(runOpts)
-				if lastErr == nil && len(png) == 0 {
-					lastErr = fmt.Errorf("screenshot data was empty")
-				}
+				png, lastErr = captureOnce(opts, fb.file, i, buildDone)
 				if lastErr == nil {
+					buildDone = true
 					break
 				}
 				slog.Warn("preview capture failed",
 					"file", filepath.Base(fb.file), "previewIndex", i,
 					"attempt", attempt+1, "maxRetries", captureMaxRetries, "err", lastErr)
-				firstRun = false
+				if attempt < captureMaxRetries-1 {
+					time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+				}
 			}
 
 			if lastErr != nil {
@@ -303,7 +297,6 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
 					png:       append([]byte(nil), png...),
 				})
 			}
-			firstRun = false
 		}
 	}
 	return result
@@ -312,7 +305,9 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
 // resolveVersion returns a version string for the report.
 // Uses the git commit hash if available, otherwise falls back to a timestamp.
 func resolveVersion() string {
-	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--short", "HEAD").Output()
 	if err == nil {
 		hash := strings.TrimSpace(string(out))
 		if hash != "" {
@@ -529,7 +524,7 @@ func reportAssetName(sourceFile string, index int) string {
 	return fmt.Sprintf("%s--%x--preview-%d.png", sourceBaseName(sourceFile), sum[:4], index)
 }
 
-func renderMarkdownReport(captures []reportCapture, failures []captureFailure, cwd, version string) string {
+func renderMarkdownReport(captures []reportCapture, failures []captureFailure, cwd, version string) (string, error) {
 	const columns = 2
 
 	var b strings.Builder
@@ -541,13 +536,16 @@ func renderMarkdownReport(captures []reportCapture, failures []captureFailure, c
 	fmt.Fprintf(&b, "_%s_\n\n", version)
 	fmt.Fprintf(&b, "- Files: **%d**\n", len(groups))
 	fmt.Fprintf(&b, "- Previews: **%d**\n\n", len(captures))
-	b.WriteString("## Overview\n\n")
-	b.WriteString("| File | Preview Count |\n")
-	b.WriteString("| --- | ---: |\n")
-	for _, g := range groups {
-		fmt.Fprintf(&b, "| `%s` | %d |\n", filepath.Base(g.file), len(g.captures))
+
+	if len(groups) > 0 {
+		b.WriteString("## Overview\n\n")
+		b.WriteString("| File | Preview Count |\n")
+		b.WriteString("| --- | ---: |\n")
+		for _, g := range groups {
+			fmt.Fprintf(&b, "| `%s` | %d |\n", filepath.Base(g.file), len(g.captures))
+		}
+		b.WriteString("\n")
 	}
-	b.WriteString("\n")
 
 	if len(failures) > 0 {
 		fmt.Fprintf(&b, "## Failures (%d)\n\n", len(failures))
@@ -555,21 +553,21 @@ func renderMarkdownReport(captures []reportCapture, failures []captureFailure, c
 		b.WriteString("| --- | ---: | --- |\n")
 		for _, f := range failures {
 			fmt.Fprintf(&b, "| `%s` | %d — %s | %s |\n",
-				filepath.Base(f.file), f.index, f.displayTitle(), f.err.Error())
+				filepath.Base(f.file), f.index, displayTitle(f.title), escapeMDTableCell(f.err.Error()))
 		}
 		b.WriteString("\n")
 	}
 
 	for _, g := range groups {
 		base := filepath.Base(g.file)
-		fmt.Fprintf(&b, "## %s (%d previews)\n\n", base, len(g.captures))
+		fmt.Fprintf(&b, "## %s (%d %s)\n\n", base, len(g.captures), pluralizeWord(len(g.captures), "preview", "previews"))
 		b.WriteString("<table>\n")
 		for i, c := range g.captures {
 			if i%columns == 0 {
 				b.WriteString("<tr>\n")
 			}
 
-			title := c.displayTitle()
+			title := displayTitle(c.title)
 			alt := htmlpkg.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
 			imgSrc := resolveImageSrc(c)
 			source := resolveSourceDisplay(c.file, cwd)
@@ -593,7 +591,7 @@ func renderMarkdownReport(captures []reportCapture, failures []captureFailure, c
 		b.WriteString("---\n\n")
 	}
 
-	return b.String()
+	return b.String(), nil
 }
 
 // htmlReportData holds the data passed to the HTML report template.
@@ -635,9 +633,13 @@ type htmlCardData struct {
 //go:embed templates/report.html
 var htmlReportTmplSource string
 
-var htmlReportTmpl = template.Must(template.New("report").Parse(htmlReportTmplSource))
+var htmlReportTmpl = template.Must(
+	template.New("report").Funcs(template.FuncMap{
+		"pluralize": pluralizeWord,
+	}).Parse(htmlReportTmplSource),
+)
 
-func renderHTMLReport(captures []reportCapture, failures []captureFailure, cwd, version string) string {
+func renderHTMLReport(captures []reportCapture, failures []captureFailure, cwd, version string) (string, error) {
 	groups := groupCapturesByFile(captures)
 
 	data := htmlReportData{
@@ -655,7 +657,7 @@ func renderHTMLReport(captures []reportCapture, failures []captureFailure, cwd, 
 		for j, c := range g.captures {
 			gd.Cards = append(gd.Cards, htmlCardData{
 				Index:     c.index,
-				Title:     c.displayTitle(),
+				Title:     displayTitle(c.title),
 				ImageSrc:  template.URL(resolveImageSrc(c)), //nolint:gosec // resolveImageSrc returns only our generated data URIs or asset paths
 				Alt:       fmt.Sprintf("%s preview %d", base, c.index),
 				Source:    resolveSourceDisplay(c.file, cwd),
@@ -669,15 +671,14 @@ func renderHTMLReport(captures []reportCapture, failures []captureFailure, cwd, 
 		data.Failures = append(data.Failures, htmlFailureData{
 			FileName: filepath.Base(f.file),
 			Index:    f.index,
-			Title:    f.displayTitle(),
+			Title:    displayTitle(f.title),
 			ErrorMsg: f.err.Error(),
 		})
 	}
 
 	var b strings.Builder
 	if err := htmlReportTmpl.Execute(&b, data); err != nil {
-		slog.Error("failed to render HTML report template", "err", err)
-		return ""
+		return "", fmt.Errorf("executing HTML report template: %w", err)
 	}
-	return b.String()
+	return b.String(), nil
 }

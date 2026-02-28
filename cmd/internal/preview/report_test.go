@@ -327,7 +327,7 @@ func TestPrepareReportOutputPaths_HTML(t *testing.T) {
 
 func TestRenderMarkdownReport(t *testing.T) {
 	png := []byte("fake-png")
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -336,6 +336,9 @@ func TestRenderMarkdownReport(t *testing.T) {
 			png:       png,
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(md, "# SwiftUI Preview Report") {
 		t.Fatal("missing report title")
@@ -360,7 +363,7 @@ func TestRenderMarkdownReport(t *testing.T) {
 }
 
 func TestRenderMarkdownReport_MultiplePathsAndPreviews(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -383,6 +386,9 @@ func TestRenderMarkdownReport_MultiplePathsAndPreviews(t *testing.T) {
 			png:       []byte("bar-0"),
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(md, "## FooView.swift") {
 		t.Fatal("missing first file section")
@@ -455,7 +461,7 @@ func TestWriteReportAssets(t *testing.T) {
 }
 
 func TestRenderMarkdownReport_UsesImageRefsWhenProvided(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -465,6 +471,9 @@ func TestRenderMarkdownReport_UsesImageRefsWhenProvided(t *testing.T) {
 			imageRef:  reportAssetsDirName + "/FooView--deadbeef--preview-0.png",
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(md, reportAssetsDirName+"/FooView--deadbeef--preview-0.png") {
 		t.Fatal("missing imageRef")
@@ -475,7 +484,7 @@ func TestRenderMarkdownReport_UsesImageRefsWhenProvided(t *testing.T) {
 }
 
 func TestRenderMarkdownReport_RelativeSource(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{
 			file:      "/project/Sources/FooView.swift",
 			index:     0,
@@ -484,6 +493,9 @@ func TestRenderMarkdownReport_RelativeSource(t *testing.T) {
 			png:       []byte("x"),
 		},
 	}, nil, "/project", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(md, "<code>Sources/FooView.swift:10</code>") {
 		t.Fatal("expected relative source path when cwd is set")
@@ -491,7 +503,7 @@ func TestRenderMarkdownReport_RelativeSource(t *testing.T) {
 }
 
 func TestRenderMarkdownReport_OutsideCwdUsesBaseName(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{
 			file:      "/other/path/FooView.swift",
 			index:     0,
@@ -500,6 +512,9 @@ func TestRenderMarkdownReport_OutsideCwdUsesBaseName(t *testing.T) {
 			png:       []byte("x"),
 		},
 	}, nil, "/project", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(md, "<code>FooView.swift:5</code>") {
 		t.Fatal("expected base name for file outside cwd")
@@ -602,7 +617,7 @@ func TestResolveImageSrc(t *testing.T) {
 
 func TestRenderHTMLReport(t *testing.T) {
 	png := []byte("fake-png")
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -611,6 +626,9 @@ func TestRenderHTMLReport(t *testing.T) {
 			png:       png,
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(html, "<!DOCTYPE html>") {
 		t.Fatal("missing DOCTYPE")
@@ -634,7 +652,7 @@ func TestRenderHTMLReport(t *testing.T) {
 }
 
 func TestRenderHTMLReport_MultiplePathsAndPreviews(t *testing.T) {
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -657,6 +675,9 @@ func TestRenderHTMLReport_MultiplePathsAndPreviews(t *testing.T) {
 			png:       []byte("bar-0"),
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(html, "FooView.swift") {
 		t.Fatal("missing first file section")
@@ -682,7 +703,7 @@ func TestRenderHTMLReport_MultiplePathsAndPreviews(t *testing.T) {
 }
 
 func TestRenderHTMLReport_UsesImageRefsWhenProvided(t *testing.T) {
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -692,6 +713,9 @@ func TestRenderHTMLReport_UsesImageRefsWhenProvided(t *testing.T) {
 			imageRef:  reportAssetsDirName + "/FooView--deadbeef--preview-0.png",
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(html, reportAssetsDirName+"/FooView--deadbeef--preview-0.png") {
 		t.Fatal("missing imageRef in src")
@@ -702,7 +726,7 @@ func TestRenderHTMLReport_UsesImageRefsWhenProvided(t *testing.T) {
 }
 
 func TestRenderHTMLReport_DarkModeCSS(t *testing.T) {
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{
 			file:      "/tmp/FooView.swift",
 			index:     0,
@@ -711,6 +735,9 @@ func TestRenderHTMLReport_DarkModeCSS(t *testing.T) {
 			png:       []byte("x"),
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(html, "prefers-color-scheme: dark") {
 		t.Fatal("missing dark mode media query")
@@ -719,7 +746,7 @@ func TestRenderHTMLReport_DarkModeCSS(t *testing.T) {
 
 func TestRenderHTMLReport_HTMLEscaping(t *testing.T) {
 	// File name uses a payload without '/' to avoid filepath.Base splitting.
-	out := renderHTMLReport([]reportCapture{
+	out, err := renderHTMLReport([]reportCapture{
 		{
 			file:      "/tmp/<b>evil<b>.swift",
 			index:     0,
@@ -728,6 +755,9 @@ func TestRenderHTMLReport_HTMLEscaping(t *testing.T) {
 			png:       []byte("x"),
 		},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if strings.Contains(out, "<b>evil<b>") {
 		t.Fatal("XSS: unescaped HTML tag in file name")
@@ -744,9 +774,12 @@ func TestRenderHTMLReport_HTMLEscaping(t *testing.T) {
 }
 
 func TestRenderHTMLReport_LightboxScript(t *testing.T) {
-	out := renderHTMLReport([]reportCapture{
+	out, err := renderHTMLReport([]reportCapture{
 		{file: "/tmp/Foo.swift", index: 0, title: "T", startLine: 1, png: []byte("x")},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !strings.Contains(out, `id="lightbox"`) {
 		t.Fatal("missing lightbox dialog element")
@@ -769,7 +802,10 @@ func TestRenderMarkdownReport_WithFailures(t *testing.T) {
 	failures := []captureFailure{
 		{file: "/tmp/HogeView.swift", index: 1, title: "Dark", startLine: 20, err: fmt.Errorf("simulator timeout")},
 	}
-	md := renderMarkdownReport(captures, failures, "", "abc1234")
+	md, err := renderMarkdownReport(captures, failures, "", "abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(md, "## Failures") {
 		t.Fatal("missing failures section")
 	}
@@ -779,9 +815,12 @@ func TestRenderMarkdownReport_WithFailures(t *testing.T) {
 }
 
 func TestRenderMarkdownReport_NoFailures(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(md, "Failures") {
 		t.Fatal("should not show failures section when there are none")
 	}
@@ -794,7 +833,10 @@ func TestRenderHTMLReport_WithFailures(t *testing.T) {
 	failures := []captureFailure{
 		{file: "/tmp/HogeView.swift", index: 1, title: "Dark", startLine: 20, err: fmt.Errorf("simulator timeout")},
 	}
-	html := renderHTMLReport(captures, failures, "", "abc1234")
+	html, err := renderHTMLReport(captures, failures, "", "abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(html, "Failures") {
 		t.Fatal("missing failures section")
 	}
@@ -804,40 +846,47 @@ func TestRenderHTMLReport_WithFailures(t *testing.T) {
 }
 
 func TestRenderHTMLReport_NoFailures(t *testing.T) {
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
 	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(html, "Failures") {
 		t.Fatal("should not show failures section when there are none")
 	}
 }
 
 func TestRenderHTMLReport_Version(t *testing.T) {
-	html := renderHTMLReport([]reportCapture{
+	html, err := renderHTMLReport([]reportCapture{
 		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
 	}, nil, "", "abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(html, "abc1234") {
 		t.Fatal("expected version string in HTML report")
 	}
 }
 
 func TestRenderMarkdownReport_Version(t *testing.T) {
-	md := renderMarkdownReport([]reportCapture{
+	md, err := renderMarkdownReport([]reportCapture{
 		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
 	}, nil, "", "abc1234")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(md, "abc1234") {
 		t.Fatal("expected version string in markdown report")
 	}
 }
 
-func TestCaptureFailure_DisplayTitle(t *testing.T) {
-	f := captureFailure{title: "Dark Mode"}
-	if f.displayTitle() != "Dark Mode" {
-		t.Fatalf("expected 'Dark Mode', got %q", f.displayTitle())
+func TestDisplayTitle_Function(t *testing.T) {
+	if displayTitle("Dark Mode") != "Dark Mode" {
+		t.Fatalf("expected 'Dark Mode', got %q", displayTitle("Dark Mode"))
 	}
-	f2 := captureFailure{title: ""}
-	if f2.displayTitle() != "(Untitled)" {
-		t.Fatalf("expected '(Untitled)', got %q", f2.displayTitle())
+	if displayTitle("") != "(Untitled)" {
+		t.Fatalf("expected '(Untitled)', got %q", displayTitle(""))
 	}
 }
 
@@ -885,14 +934,33 @@ func TestWriteReportAssets_CollisionFallback(t *testing.T) {
 	}
 }
 
-func TestDisplayTitle(t *testing.T) {
-	c := reportCapture{title: "Dark Mode"}
-	if c.displayTitle() != "Dark Mode" {
-		t.Fatalf("expected 'Dark Mode', got %q", c.displayTitle())
+func TestEscapeMDTableCell(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"simple error", "simple error"},
+		{"pipe|char", "pipe\\|char"},
+		{"line1\nline2", "line1 line2"},
+		{"both|and\nnewline", "both\\|and newline"},
 	}
-	c2 := reportCapture{title: ""}
-	if c2.displayTitle() != "(Untitled)" {
-		t.Fatalf("expected '(Untitled)', got %q", c2.displayTitle())
+	for _, tt := range tests {
+		got := escapeMDTableCell(tt.in)
+		if got != tt.want {
+			t.Errorf("escapeMDTableCell(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestPluralizeWord(t *testing.T) {
+	if pluralizeWord(0, "preview", "previews") != "previews" {
+		t.Fatal("0 should use plural")
+	}
+	if pluralizeWord(1, "preview", "previews") != "preview" {
+		t.Fatal("1 should use singular")
+	}
+	if pluralizeWord(2, "preview", "previews") != "previews" {
+		t.Fatal("2 should use plural")
 	}
 }
 
@@ -910,6 +978,65 @@ func TestSourceBaseName(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("sourceBaseName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestResolveVersion(t *testing.T) {
+	v := resolveVersion()
+	if v == "" {
+		t.Fatal("resolveVersion() returned empty string")
+	}
+	// In a git repo, should return a short hex hash.
+	// If not in a git repo, falls back to RFC3339 timestamp.
+	if len(v) < 7 {
+		t.Logf("resolveVersion() returned %q (may be timestamp fallback)", v)
+	}
+}
+
+func TestRenderMarkdownReport_FailureEscaping(t *testing.T) {
+	captures := []reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}
+	failures := []captureFailure{
+		{file: "/tmp/HogeView.swift", index: 1, title: "Bad", startLine: 20,
+			err: fmt.Errorf("pipe|char and\nnewline")},
+	}
+	md, err := renderMarkdownReport(captures, failures, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md, `pipe\|char and newline`) {
+		t.Fatal("expected pipe and newline to be escaped in markdown failures table")
+	}
+}
+
+func TestRenderMarkdownReport_SinglePreviewGrammar(t *testing.T) {
+	md, err := renderMarkdownReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "Solo", startLine: 10, png: []byte("x")},
+	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(md, "(1 preview)") {
+		t.Fatal("expected singular 'preview' for count 1")
+	}
+	if strings.Contains(md, "(1 previews)") {
+		t.Fatal("should not have '1 previews'")
+	}
+}
+
+func TestRenderHTMLReport_SinglePreviewGrammar(t *testing.T) {
+	html, err := renderHTMLReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "Solo", startLine: 10, png: []byte("x")},
+	}, nil, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(html, "1 preview") {
+		t.Fatal("expected singular 'preview' for count 1")
+	}
+	if strings.Contains(html, "1 previews") {
+		t.Fatal("should not have '1 previews'")
 	}
 }
 
@@ -965,31 +1092,49 @@ func goldenFailures() []captureFailure {
 }
 
 func TestGolden_MD_Single(t *testing.T) {
-	got := renderMarkdownReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	got, err := renderMarkdownReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_md_single.md"), got)
 }
 
 func TestGolden_MD_Multiple(t *testing.T) {
-	got := renderMarkdownReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	got, err := renderMarkdownReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_md_multiple.md"), got)
 }
 
 func TestGolden_MD_WithFailures(t *testing.T) {
-	got := renderMarkdownReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	got, err := renderMarkdownReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_md_with_failures.md"), got)
 }
 
 func TestGolden_HTML_Single(t *testing.T) {
-	got := renderHTMLReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	got, err := renderHTMLReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_html_single.html"), got)
 }
 
 func TestGolden_HTML_Multiple(t *testing.T) {
-	got := renderHTMLReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	got, err := renderHTMLReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_html_multiple.html"), got)
 }
 
 func TestGolden_HTML_WithFailures(t *testing.T) {
-	got := renderHTMLReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	got, err := renderHTMLReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertGolden(t, filepath.Join("testdata", "golden_html_with_failures.html"), got)
 }

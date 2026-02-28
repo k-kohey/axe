@@ -13,7 +13,7 @@ _abc1234_
 | --- | ---: |
 | `HogeView.swift` | 1 |
 
-## HogeView.swift (1 previews)
+## HogeView.swift (1 preview)
 
 <table>
 <tr>
