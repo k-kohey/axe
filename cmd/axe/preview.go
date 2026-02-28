@@ -44,9 +44,10 @@ var previewCmd = &cobra.Command{
 	to stdout (PNG), then clean up and exit. Exit 0 on success, exit 1 on failure.
 
 	Subcommands:
-	  watch    — watch a source file and hot-reload on changes
-	  serve    — run as multi-stream IDE backend (JSON Lines protocol)
-	  report   — capture screenshots of all #Preview blocks
+	  build     — build the project (xcodebuild phase only)
+	  watch     — watch a source file and hot-reload on changes
+	  serve     — run as multi-stream IDE backend (JSON Lines protocol)
+	  report    — capture screenshots of all #Preview blocks
 	  simulator — manage simulators for preview
 
 	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,

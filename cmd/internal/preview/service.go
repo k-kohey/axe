@@ -430,3 +430,41 @@ func RunServe(pc ProjectConfig, strict bool) error {
 
 	return nil
 }
+
+// RunBuild executes only the xcodebuild build phase.
+// This builds the project with the flags required for axe preview
+// (dynamic replacement and private imports) without launching a simulator
+// or compiling thunks. Useful for pre-warming the build cache.
+func RunBuild(pc ProjectConfig) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
+	dirs, err := build.NewProjectDirs(pc.PrimaryPath())
+	if err != nil {
+		return err
+	}
+
+	br := &runner.Build{}
+
+	step := &stepper{total: 2}
+
+	done := step.begin("Fetching build settings...")
+	s, err := build.FetchSettings(ctx, pc, dirs, br)
+	done()
+	if err != nil {
+		return err
+	}
+
+	done = step.begin("Building project...")
+	if err := build.Run(ctx, pc, dirs, br); err != nil {
+		return err
+	}
+	done()
+
+	build.ExtractCompilerPaths(ctx, s, dirs)
+
+	fmt.Fprintf(os.Stderr, "\nBuild complete.\n")
+	fmt.Fprintf(os.Stderr, "  Module:    %s\n", s.ModuleName)
+	fmt.Fprintf(os.Stderr, "  Build dir: %s\n", dirs.Build)
+	return nil
+}
