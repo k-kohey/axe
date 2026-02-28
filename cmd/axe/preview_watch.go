@@ -8,7 +8,7 @@ var (
 	watchSelector   string
 	watchReuseBuild bool
 	watchStrict     bool
-	watchHeadless bool
+	watchHeadless   bool
 )
 
 var previewWatchCmd = &cobra.Command{
