@@ -1,0 +1,79 @@
+---
+name: ui-review
+description: Capture a SwiftUI preview and review its UI/UX quality. Checks layout, spacing, HIG compliance, accessibility, and visual consistency. Use when the user asks for UI feedback or wants a design review of a View.
+argument-hint: <file.swift> [--preview <title|index>]
+allowed-tools: Bash(axe *), Bash(mktemp *), Read, Glob, Grep
+---
+
+# SwiftUI UI/UX Review
+
+Capture a preview screenshot and perform a comprehensive UI/UX review.
+
+## Prerequisites
+
+Before running, verify `axe` is installed:
+
+```bash
+command -v axe >/dev/null || { echo "axe is not installed. Install with: curl -fsSL https://raw.githubusercontent.com/k-kohey/axe/main/install.sh | sh"; exit 1; }
+```
+
+The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEME`) or the user must pass `--scheme`/`--project`/`--workspace` flags.
+
+## Steps
+
+### 1. Capture the preview
+
+```bash
+PREVIEW_IMG=$(mktemp /tmp/axe-ui-review-XXXXXX.png)
+ERR_LOG=$(mktemp /tmp/axe-ui-review-XXXXXX.log)
+if ! axe preview $ARGUMENTS > "$PREVIEW_IMG" 2>"$ERR_LOG"; then
+  cat "$ERR_LOG"
+  exit 1
+fi
+```
+
+Read the captured image with the Read tool.
+
+### 2. Read the source code
+
+Extract the file path from `$0` (the first argument) and read the SwiftUI source file to understand the implementation alongside the visual output.
+
+### 3. Review the UI
+
+Evaluate the preview image and source code against these criteria:
+
+#### Layout & Spacing
+- Consistent padding and margins
+- Proper alignment of elements
+- No clipped or overflowing content
+- Appropriate use of spacing between elements
+
+#### Typography
+- Readable font sizes (minimum 11pt for body text)
+- Proper font weight hierarchy (title > headline > body)
+- Text truncation handled gracefully
+
+#### Color & Contrast
+- Sufficient contrast ratios for text readability
+- Consistent color usage across elements
+- Check source code for semantic colors (`.foregroundStyle` / `.background`) vs hardcoded values for Dark Mode support
+
+#### Apple HIG Compliance
+- Standard navigation patterns
+- Appropriate use of system components
+- Touch target sizes (minimum 44x44pt)
+- Safe area handling
+
+#### Accessibility (source code check)
+- Dynamic Type support (look for fixed font sizes vs `.font(.body)` etc.)
+- VoiceOver considerations (`.accessibilityLabel`, `.accessibilityHint`)
+- Color-only information indicators (should have alternative cues)
+
+### 4. Report findings
+
+Present findings organized by severity:
+1. **Issues**: Problems that should be fixed (layout bugs, readability issues, HIG violations)
+2. **Suggestions**: Improvements that would enhance quality
+3. **Good**: Aspects that are well-implemented
+
+For each finding, reference the specific line in the source code and suggest a concrete fix.

@@ -1,0 +1,14 @@
+{
+  "name": "axe",
+  "owner": {
+    "name": "k-kohey",
+    "url": "https://github.com/k-kohey"
+  },
+  "plugins": [
+    {
+      "name": "axe-preview",
+      "source": "./claude-plugin",
+      "description": "SwiftUI preview integration for AI coding. Capture, review, and iterate on SwiftUI views using axe CLI."
+    }
+  ]
+}

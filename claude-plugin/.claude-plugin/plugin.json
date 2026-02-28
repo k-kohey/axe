@@ -1,0 +1,13 @@
+{
+  "name": "axe-preview",
+  "version": "0.1.0",
+  "description": "SwiftUI preview integration for AI coding. Capture, review, and iterate on SwiftUI views using axe CLI.",
+  "author": {
+    "name": "k-kohey",
+    "url": "https://github.com/k-kohey"
+  },
+  "homepage": "https://github.com/k-kohey/axe",
+  "repository": "https://github.com/k-kohey/axe",
+  "license": "MIT",
+  "keywords": ["swiftui", "preview", "ios", "xcode", "ui-review", "visual-feedback"]
+}
