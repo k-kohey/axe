@@ -31,7 +31,8 @@ type ReportOptions struct {
 	Format      string        // png, md, or html
 	PC          build.ProjectConfig
 	Device      string
-	Concurrency int // 0 = auto, 1 = sequential (existing path)
+	Concurrency int  // 0 = auto, 1 = sequential (existing path)
+	ReuseBuild  bool // skip xcodebuild and reuse artifacts from a previous build
 }
 
 const (
@@ -110,7 +111,7 @@ func RunReport(opts ReportOptions) error {
 		return fmt.Errorf("resolving build directories: %w", err)
 	}
 	br := build.NewRunner()
-	preparer := build.NewPreparer(opts.PC, dirs, false, br)
+	preparer := build.NewPreparer(opts.PC, dirs, opts.ReuseBuild, br)
 
 	useParallel := len(blocks) > 1 && opts.Concurrency != 1
 	if useParallel && opts.Device != "" {

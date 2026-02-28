@@ -14,6 +14,7 @@ var (
 	reportWait        time.Duration
 	reportFormat      string
 	reportConcurrency int
+	reportReuseBuild  bool
 )
 
 var previewReportCmd = &cobra.Command{
@@ -56,6 +57,7 @@ var previewReportCmd = &cobra.Command{
 			PC:          pc,
 			Device:      previewDevice,
 			Concurrency: reportConcurrency,
+			ReuseBuild:  reportReuseBuild,
 		})
 	},
 }
@@ -66,5 +68,7 @@ func init() {
 	previewReportCmd.Flags().StringVar(&reportFormat, "format", "png", "output format: png, md, or html")
 	previewReportCmd.Flags().IntVarP(&reportConcurrency, "concurrency", "j", 0,
 		"max parallel simulators (0 = auto)")
+	previewReportCmd.Flags().BoolVar(&reportReuseBuild, "reuse-build", false,
+		"skip xcodebuild and reuse artifacts from a previous build")
 	previewCmd.AddCommand(previewReportCmd)
 }
