@@ -40,4 +40,4 @@ jobs:
       - name: Run Go tests
         run: |
           go test -C cmd -run='^TestParseSourceFile$' -count=1 -timeout 20m ./internal/preview/analysis/
-          go test -C cmd ./... -cover -timeout 15m
+          go test -C cmd -skip='^TestParseSourceFile$' ./... -cover -timeout 15m
