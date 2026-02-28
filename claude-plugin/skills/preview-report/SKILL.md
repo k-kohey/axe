@@ -14,7 +14,7 @@ Capture screenshots of all `#Preview` blocks across multiple SwiftUI files and g
 
 ### 1. Determine target files
 
-If `$ARGUMENTS` specifies files, use those directly.
+If `$ARGUMENTS` specifies files, use those directly. `$ARGUMENTS` may contain only View names (e.g. `ContentView`) instead of file paths, so resolve each to a `.swift` path (e.g. `TodoApp/ContentView.swift`) using Glob.
 
 If no arguments are provided, detect changed Swift files:
 

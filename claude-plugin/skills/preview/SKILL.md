@@ -15,10 +15,12 @@ Capture a screenshot of a SwiftUI View's `#Preview` block using `axe preview rep
 
 `axe preview report` is preferred because it waits for rendering to complete (`--wait`, default 10s) and retries on failure. Use this unless you need to select a specific preview from multiple `#Preview` blocks.
 
-1. Run `axe preview report` to capture the preview as a PNG image:
+1. Resolve `$ARGUMENTS` to a `.swift` file path. `$ARGUMENTS` may contain only a View name (e.g. `ContentView`), so use Glob to find the actual path (e.g. `TodoApp/ContentView.swift`).
+
+2. Run `axe preview report` to capture the preview as a PNG image:
 
 ```bash
-axe preview report $ARGUMENTS --output <output.png>
+axe preview report <path/to/File.swift> --output <output.png>
 ```
 
 2. Display the captured image using the Read tool.
@@ -33,7 +35,7 @@ Use `axe preview` when you need to select a specific preview from a file that co
 Note: oneshot mode captures immediately after the app signals readiness, with no rendering delay. This may result in a blank screenshot for views that require time to render.
 
 ```bash
-axe preview $ARGUMENTS > <output.png>
+axe preview <path/to/File.swift> > <output.png>
 ```
 
 ## Options

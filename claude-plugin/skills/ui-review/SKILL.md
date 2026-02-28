@@ -13,8 +13,10 @@ Capture a preview screenshot and perform a comprehensive UI/UX review.
 
 ### 1. Capture the preview
 
+Resolve `$ARGUMENTS` to a `.swift` file path. `$ARGUMENTS` may contain only a View name (e.g. `ContentView`), so use Glob to find the actual path (e.g. `TodoApp/ContentView.swift`).
+
 ```bash
-axe preview report $ARGUMENTS --output <output.png>
+axe preview report <path/to/File.swift> --output <output.png>
 ```
 
 `axe preview report` is preferred over oneshot `axe preview` because it waits for rendering to complete (`--wait`, default 10s) and retries on failure.
@@ -27,7 +29,7 @@ Read the captured image with the Read tool.
 
 ### 2. Read the source code
 
-Extract the file path from `$ARGUMENTS` (the first positional argument) and read the SwiftUI source file to understand the implementation alongside the visual output.
+Read the SwiftUI source file (resolved in the previous step) to understand the implementation alongside the visual output.
 
 ### 3. Review the UI
 

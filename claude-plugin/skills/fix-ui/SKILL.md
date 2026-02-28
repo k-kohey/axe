@@ -12,20 +12,24 @@ Iteratively modify a SwiftUI View until its preview matches a target design imag
 
 ## Inputs
 
-- `$0`: Path to the SwiftUI source file
+- `$0`: Path to the SwiftUI source file (`.swift`)
 - `$1`: Path to the design image (PNG, JPG, etc.)
 
 ## Procedure
 
-### 1. Read the design target
+### 1. Resolve inputs
+
+`$0` may contain only a View name (e.g. `ContentView`) instead of a file path. Resolve it to a `.swift` path (e.g. `TodoApp/ContentView.swift`) using Glob.
+
+### 2. Read the design target
 
 Read the design image at `$1` using the Read tool to understand the target appearance.
 
-### 2. Read the source code
+### 3. Read the source code
 
-Read the SwiftUI source file at `$0` to understand the current implementation.
+Read the SwiftUI source file to understand the current implementation.
 
-### 3. Capture the current preview
+### 4. Capture the current preview
 
 ```bash
 axe preview report "$0" --output <output.png>
@@ -39,7 +43,7 @@ If the file has multiple `#Preview` blocks, `--output file.png` will fail (it re
 
 Read the captured image to see the current appearance.
 
-### 4. Compare and identify differences
+### 5. Compare and identify differences
 
 Compare the current preview against the design image. Focus on:
 - Layout structure (VStack/HStack/ZStack arrangement)
@@ -50,11 +54,11 @@ Compare the current preview against the design image. Focus on:
 - Image sizing and aspect ratios
 - Text content and alignment
 
-### 5. Edit the source code
+### 6. Edit the source code
 
 Make targeted edits to the SwiftUI source file to address the identified differences. Prioritize the most visually impactful changes first.
 
-### 6. Re-capture and verify
+### 7. Re-capture and verify
 
 Capture a new preview after the edits. Use `--reuse-build` to skip rebuilding since only the View source changed:
 
@@ -64,11 +68,11 @@ axe preview report "$0" --output <output.png> --reuse-build
 
 Read the new image and compare against the design.
 
-### 7. Iterate
+### 8. Iterate
 
-Repeat steps 4-6 until the preview closely matches the design image. Stop after at most 5 iterations. If the design still does not match, report remaining differences to the user.
+Repeat steps 5-7 until the preview closely matches the design image. Stop after at most 5 iterations. If the design still does not match, report remaining differences to the user.
 
-### 8. Report
+### 9. Report
 
 Show the final preview image and summarize all changes made to the source file.
 
