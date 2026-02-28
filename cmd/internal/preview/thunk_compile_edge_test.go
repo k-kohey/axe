@@ -685,10 +685,17 @@ func TestThunkCompilation_EdgeCases(t *testing.T) {
 		},
 	}
 
+	// Build a single shared module from all edge-case fixtures.
+	allSourceSets := make([]map[string]string, len(tests))
+	for i, tt := range tests {
+		allSourceSets[i] = tt.sources
+	}
+	moduleDir, cache, srcDir := collectAndBuildSharedModule(t, sdk, allSourceSets)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			runThunkCompileTest(t, sdk, tt.sources, tt.target)
+			runThunkTestWithSharedModule(t, sdk, tt.sources, tt.target, moduleDir, cache, srcDir)
 		})
 	}
 }
@@ -700,13 +707,46 @@ func TestThunkCompilation_EdgeCases(t *testing.T) {
 func TestThunkCompilation_Limitations(t *testing.T) {
 	sdk := simulatorSDKPath(t)
 
+	classViewMain := `import SwiftUI
+
+struct ClassUserView: View {
+    @StateObject var model = ClassBasedView()
+    var body: some View {
+        Text(model.formatted)
+    }
+}
+
+#Preview {
+    ClassUserView()
+}
+`
+
+	// Build a single shared module from all limitation fixtures.
+	allSourceSets := []map[string]string{
+		{"GetSetView.swift": fixtureLimitGetSet},
+		{"GenericMethodView.swift": fixtureLimitGenericMethod},
+		{"SubscriptView.swift": fixtureLimitSubscript},
+		{"StaticPropView.swift": fixtureLimitStaticProperty},
+		{"ObserverView.swift": fixtureLimitWillSetDidSet},
+		{"OverloadView.swift": fixtureLimitOverloadedMethods},
+		{"ViewBuilderView.swift": fixtureLimitViewBuilder},
+		{"GenericInitView.swift": fixtureLimitGenericInit},
+		{"FreeFuncView.swift": fixtureLimitFreeFunction},
+		{"MultiPreviewView.swift": fixtureLimitMultipleUnnamedPreviews},
+		{"GenericTypeView.swift": fixtureLimitGenericTypeAnnotation},
+		{"ClassUserView.swift": classViewMain, "ClassBasedView.swift": fixtureClassView},
+		{"ActorView.swift": fixtureLimitActorView, "DataStore.swift": fixtureLimitActorStore},
+	}
+	moduleDir, cache, srcDir := collectAndBuildSharedModule(t, sdk, allSourceSets)
+
 	t.Run("GetSetProperty_SkipsAccessor", func(t *testing.T) {
 		t.Parallel()
 		// get/set properties are skipped by the parser. The body property
 		// still gets a thunk, but the get/set 'title' property does not.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"GetSetView.swift": fixtureLimitGetSet},
 			"GetSetView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -730,9 +770,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		t.Parallel()
 		// Generic methods are skipped because @_dynamicReplacement
 		// does not support generic parameters.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"GenericMethodView.swift": fixtureLimitGenericMethod},
 			"GenericMethodView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -752,9 +793,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 	t.Run("Subscript_NotExtracted", func(t *testing.T) {
 		t.Parallel()
 		// Subscripts are never extracted by MemberSourceExtractor.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"SubscriptView.swift": fixtureLimitSubscript},
 			"SubscriptView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -775,9 +817,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		t.Parallel()
 		// Static members are filtered out by combineWithIndexStore
 		// (only INSTANCE_PROPERTY/INSTANCE_METHOD pass).
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"StaticPropView.swift": fixtureLimitStaticProperty},
 			"StaticPropView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -798,9 +841,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		t.Parallel()
 		// willSet/didSet are stored property observers, not computed properties.
 		// Index Store reports isComputed=false, so they are filtered out.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"ObserverView.swift": fixtureLimitWillSetDidSet},
 			"ObserverView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -822,9 +866,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		// Overloaded methods with the same argument label (value:) may cause
 		// the Index Store to report them as a single member, or the fallback
 		// map may collapse them. This test documents the current behavior.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"OverloadView.swift": fixtureLimitOverloadedMethods},
 			"OverloadView.swift",
+			moduleDir, cache, srcDir,
 		)
 		foundProcess := 0
 		for _, p := range thunkPaths {
@@ -849,17 +894,19 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		// @ViewBuilder properties may or may not compile as thunks depending on
 		// whether the replacement preserves the builder attribute.
 		// This test documents the current behavior.
-		runThunkCompileTest(t, sdk,
+		runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"ViewBuilderView.swift": fixtureLimitViewBuilder},
 			"ViewBuilderView.swift",
+			moduleDir, cache, srcDir,
 		)
 	})
 
 	t.Run("GenericInit_Skipped", func(t *testing.T) {
 		t.Parallel()
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"GenericInitView.swift": fixtureLimitGenericInit},
 			"GenericInitView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -879,9 +926,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 	t.Run("FreeFunction_NotExtracted", func(t *testing.T) {
 		t.Parallel()
 		// Free functions are outside type context and not extracted.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"FreeFuncView.swift": fixtureLimitFreeFunction},
 			"FreeFuncView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if strings.Contains(filepath.Base(p), "_main") {
@@ -901,9 +949,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 	t.Run("MultipleUnnamedPreviews_FirstSelected", func(t *testing.T) {
 		t.Parallel()
 		// When multiple unnamed #Preview blocks exist, only the first is used.
-		thunkPaths, _ := runThunkCompileTestWithPaths(t, sdk,
+		thunkPaths, _ := runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"MultiPreviewView.swift": fixtureLimitMultipleUnnamedPreviews},
 			"MultiPreviewView.swift",
+			moduleDir, cache, srcDir,
 		)
 		for _, p := range thunkPaths {
 			if !strings.Contains(filepath.Base(p), "_main") {
@@ -929,9 +978,10 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		t.Parallel()
 		// Properties with generic type annotations like Array<String>
 		// should compile correctly.
-		runThunkCompileTest(t, sdk,
+		runThunkTestWithSharedModule(t, sdk,
 			map[string]string{"GenericTypeView.swift": fixtureLimitGenericTypeAnnotation},
 			"GenericTypeView.swift",
+			moduleDir, cache, srcDir,
 		)
 	})
 
@@ -939,25 +989,13 @@ func TestThunkCompilation_Limitations(t *testing.T) {
 		t.Parallel()
 		// Class-based observable objects as dependency files should
 		// produce valid thunks (computed properties are still replaceable).
-		const classViewMain = `import SwiftUI
-
-struct ClassUserView: View {
-    @StateObject var model = ClassBasedView()
-    var body: some View {
-        Text(model.formatted)
-    }
-}
-
-#Preview {
-    ClassUserView()
-}
-`
-		runThunkCompileTest(t, sdk,
+		runThunkTestWithSharedModule(t, sdk,
 			map[string]string{
 				"ClassUserView.swift":  classViewMain,
 				"ClassBasedView.swift": fixtureClassView,
 			},
 			"ClassUserView.swift",
+			moduleDir, cache, srcDir,
 		)
 	})
 
@@ -965,12 +1003,13 @@ struct ClassUserView: View {
 		t.Parallel()
 		// Actor types as dependencies: the thunk should compile
 		// even though runtime behavior with actor isolation is uncertain.
-		runThunkCompileTest(t, sdk,
+		runThunkTestWithSharedModule(t, sdk,
 			map[string]string{
 				"ActorView.swift": fixtureLimitActorView,
 				"DataStore.swift": fixtureLimitActorStore,
 			},
 			"ActorView.swift",
+			moduleDir, cache, srcDir,
 		)
 	})
 }

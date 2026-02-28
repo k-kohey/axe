@@ -154,6 +154,91 @@ func stripPreviewBlocks(src string) string {
 	return strings.Join(result, "\n")
 }
 
+// collectAndBuildSharedModule collects all fixture sources from multiple test
+// entries into a single directory and builds one shared module. This avoids
+// the expensive swiftc + axe-index-reader invocation per subtest.
+// All file names across sourceSets must be unique.
+func collectAndBuildSharedModule(t *testing.T, sdk string, sourceSets []map[string]string,
+) (moduleDir string, cache *analysis.IndexStoreCache, srcDir string) {
+	t.Helper()
+	srcDir = t.TempDir()
+	seen := make(map[string]bool)
+	var srcPaths []string
+	for _, sources := range sourceSets {
+		for name, src := range sources {
+			if seen[name] {
+				t.Fatalf("duplicate fixture file name across test entries: %s", name)
+			}
+			seen[name] = true
+			stripped := stripPreviewBlocks(src)
+			srcPaths = append(srcPaths, writeFixtureFile(t, srcDir, name, stripped))
+		}
+	}
+	moduleDir, cache = buildFixtureModule(t, srcPaths, compileTestModuleName, sdk)
+	return moduleDir, cache, srcDir
+}
+
+// runThunkTestWithSharedModule generates and typechecks thunks for a single
+// subtest using a pre-built shared module. The shared module's cache is
+// remapped from sharedSrcDir paths to the subtest's own parseDir paths.
+func runThunkTestWithSharedModule(t *testing.T, sdk string,
+	sources map[string]string, target string,
+	sharedModuleDir string, sharedCache *analysis.IndexStoreCache, sharedSrcDir string,
+) (thunkPaths []string, thunkDir string) {
+	t.Helper()
+
+	parseDir := t.TempDir()
+	for name, src := range sources {
+		writeFixtureFile(t, parseDir, name, src)
+	}
+
+	// Remap cache: sharedSrcDir paths → parseDir paths.
+	remappedFiles := make(map[string]*pb.IndexFileData)
+	for name := range sources {
+		parsePath := filepath.Join(parseDir, name)
+		sharedPath := filepath.Join(sharedSrcDir, name)
+		data := sharedCache.FileData(sharedPath)
+		if data == nil {
+			t.Fatalf("shared cache missing index data for %s", sharedPath)
+		}
+		remappedFiles[parsePath] = data
+	}
+	remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
+
+	targetPath := filepath.Join(parseDir, target)
+	thunkDir = filepath.Join(t.TempDir(), "thunk")
+
+	var files []analysis.FileThunkData
+	for name := range sources {
+		path := filepath.Join(parseDir, name)
+		var types []analysis.TypeInfo
+		var imports []string
+		var err error
+		if name == target {
+			types, imports, err = analysis.SourceFile(path, remappedCache)
+		} else {
+			types, imports, err = analysis.DependencyFile(path, remappedCache)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, analysis.FileThunkData{
+			FileName:   name,
+			AbsPath:    path,
+			Types:      types,
+			Imports:    imports,
+			ModuleName: remappedCache.FileModuleName(path),
+		})
+	}
+	thunkPaths, err := codegen.GenerateThunks(files, compileTestModuleName, thunkDir, "", targetPath, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	typecheckGeneratedThunks(t, thunkPaths, sharedModuleDir, compileTestModuleName, sdk)
+	return thunkPaths, thunkDir
+}
+
 // --- Fixture Swift sources ---
 //
 // Minimal, self-contained Swift files that exercise different
@@ -623,7 +708,7 @@ struct CatchPatternView: View {
 // errors in Swift without a custom ~= operator.
 const fixtureErrorIfCasePattern = `import SwiftUI
 
-enum AppError: Error {
+enum IfCaseAppError: Error {
     case networkFailure
     case timeout
 }
@@ -634,9 +719,9 @@ struct IfCaseErrorView: View {
     }
 
     func describeError(error: Error) -> String {
-        if case AppError.networkFailure = error {
+        if case IfCaseAppError.networkFailure = error {
             return "Network Failure"
-        } else if case AppError.timeout = error {
+        } else if case IfCaseAppError.timeout = error {
             return "Timeout"
         }
         return "Unknown"
@@ -959,76 +1044,18 @@ func TestThunkCompilation(t *testing.T) {
 		},
 	}
 
+	// Build a single shared module from all test fixtures to avoid
+	// repeated swiftc + axe-index-reader invocations per subtest.
+	allSourceSets := make([]map[string]string, len(tests))
+	for i, tt := range tests {
+		allSourceSets[i] = tt.sources
+	}
+	moduleDir, cache, srcDir := collectAndBuildSharedModule(t, sdk, allSourceSets)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			parseDir := t.TempDir()
-			moduleSrcDir := t.TempDir()
-
-			// Write full sources to parseDir (for axe-parser).
-			for name, src := range tt.sources {
-				writeFixtureFile(t, parseDir, name, src)
-			}
-
-			// Write stripped sources (no #Preview) to moduleSrcDir and build module.
-			// #Preview blocks are stripped because the preview macros may not be
-			// available at module-build time, but they are parsed by axe-parser
-			// (which uses swift-syntax, not swiftc) for thunk generation.
-			var moduleSrcPaths []string
-			for name, src := range tt.sources {
-				stripped := stripPreviewBlocks(src)
-				moduleSrcPaths = append(moduleSrcPaths, writeFixtureFile(t, moduleSrcDir, name, stripped))
-			}
-			moduleDir, cache := buildFixtureModule(t, moduleSrcPaths, compileTestModuleName, sdk)
-
-			// Generate thunks.
-			// Use the parse directory sources (with #Preview blocks) for axe-parser,
-			// but use the cache from the module build (stripped sources) for Index Store data.
-			// The cache is keyed by module source paths; we need to remap to parse paths.
-			targetPath := filepath.Join(parseDir, tt.target)
-			dirs := previewDirs{Thunk: filepath.Join(t.TempDir(), "thunk")}
-
-			// Build a remapped cache: moduleSrcDir paths → parseDir paths.
-			remappedFiles := make(map[string]*pb.IndexFileData)
-			for name := range tt.sources {
-				parsePath := filepath.Join(parseDir, name)
-				modulePath := filepath.Join(moduleSrcDir, name)
-				if data := cache.FileData(modulePath); data != nil {
-					remappedFiles[parsePath] = data
-				}
-			}
-			remappedCache := analysis.NewIndexStoreCache(remappedFiles, map[string][]string{})
-
-			var files []analysis.FileThunkData
-			for name := range tt.sources {
-				path := filepath.Join(parseDir, name)
-				var types []analysis.TypeInfo
-				var imports []string
-				var err error
-				if name == tt.target {
-					types, imports, err = analysis.SourceFile(path, remappedCache)
-				} else {
-					types, imports, err = analysis.DependencyFile(path, remappedCache)
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				files = append(files, analysis.FileThunkData{
-					FileName:   name,
-					AbsPath:    path,
-					Types:      types,
-					Imports:    imports,
-					ModuleName: remappedCache.FileModuleName(path),
-				})
-			}
-			thunkPaths, err := codegen.GenerateThunks(files, compileTestModuleName, dirs.Thunk, "", targetPath, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Typecheck the generated thunks against the fixture module.
-			typecheckGeneratedThunks(t, thunkPaths, moduleDir, compileTestModuleName, sdk)
+			runThunkTestWithSharedModule(t, sdk, tt.sources, tt.target, moduleDir, cache, srcDir)
 		})
 	}
 }
