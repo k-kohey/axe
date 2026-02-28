@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -22,17 +23,19 @@ type ReportOptions struct {
 	Files       []string
 	Output      string        // directory or file path
 	RenderDelay time.Duration // wait time before screenshot
-	Format      string        // png or md
+	Format      string        // png, md, or html
 	PC          ProjectConfig
 	Device      string
 }
 
 const (
-	reportFormatPNG = "png"
-	reportFormatMD  = "md"
+	reportFormatPNG  = "png"
+	reportFormatMD   = "md"
+	reportFormatHTML = "html"
 
 	markdownReportFileName = "axe_swiftui_preview_report.md"
-	markdownAssetsDirName  = "axe_swiftui_preview_report_assets"
+	htmlReportFileName     = "axe_swiftui_preview_report.html"
+	reportAssetsDirName    = "axe_swiftui_preview_report_assets"
 )
 
 type reportCapture struct {
@@ -42,6 +45,13 @@ type reportCapture struct {
 	startLine int
 	png       []byte
 	imageRef  string
+}
+
+func (c reportCapture) displayTitle() string {
+	if c.title == "" {
+		return "(Untitled)"
+	}
+	return c.title
 }
 
 // RunReport captures previews and writes them in the requested output format.
@@ -62,7 +72,9 @@ func RunReport(opts ReportOptions) error {
 	case reportFormatPNG:
 		return runReportPNG(opts, blocks)
 	case reportFormatMD:
-		return runReportMarkdown(opts, blocks)
+		return runReportDocument(opts, blocks, markdownReportFileName, renderMarkdownReport)
+	case reportFormatHTML:
+		return runReportDocument(opts, blocks, htmlReportFileName, renderHTMLReport)
 	default:
 		// defensive: normalizeReportFormat should have caught this
 		return fmt.Errorf("unsupported format: %s", format)
@@ -97,13 +109,18 @@ func runReportPNG(opts ReportOptions, blocks []fileBlocks) error {
 	})
 }
 
-func runReportMarkdown(opts ReportOptions, blocks []fileBlocks) error {
-	mdPath, assetsDir, err := prepareMarkdownOutputPaths(opts.Output)
+func runReportDocument(
+	opts ReportOptions,
+	blocks []fileBlocks,
+	reportFileName string,
+	render func([]reportCapture, string) string,
+) error {
+	reportPath, assetsDir, err := prepareReportOutputPaths(opts.Output, reportFileName)
 	if err != nil {
 		return err
 	}
 
-	slog.Info("preview report markdown capture begin", "fileCount", len(blocks))
+	slog.Info("preview report capture begin", "format", reportFileName, "fileCount", len(blocks))
 
 	var captures []reportCapture
 	err = captureLoop(opts, blocks, func(file string, index int, pb analysis.PreviewBlock, png []byte) error {
@@ -119,18 +136,21 @@ func runReportMarkdown(opts ReportOptions, blocks []fileBlocks) error {
 	if err != nil {
 		return err
 	}
-	slog.Info("preview report markdown capture done", "captureCount", len(captures))
+	slog.Info("preview report capture done", "captureCount", len(captures))
 
-	capturesWithRefs, err := writeMarkdownAssets(assetsDir, filepath.Dir(mdPath), captures)
+	capturesWithRefs, err := writeReportAssets(assetsDir, filepath.Dir(reportPath), captures)
 	if err != nil {
 		return err
 	}
-	cwd, _ := os.Getwd()
-	md := renderMarkdownReport(capturesWithRefs, cwd)
-	if err := os.WriteFile(mdPath, []byte(md), 0o644); err != nil {
+	cwd, err := os.Getwd()
+	if err != nil {
+		slog.Warn("failed to get working directory, source paths will use base names", "err", err)
+	}
+	content := render(capturesWithRefs, cwd)
+	if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
 		return err
 	}
-	slog.Info("preview report markdown written", "destination", mdPath, "bytes", len(md))
+	slog.Info("preview report written", "destination", reportPath, "bytes", len(content))
 	return nil
 }
 
@@ -169,6 +189,9 @@ func captureLoop(opts ReportOptions, blocks []fileBlocks, onCapture func(file st
 			slog.Info("preview report capture", "file", fb.file, "previewIndex", i)
 			if err := Run(runOpts); err != nil {
 				return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(fb.file), i, err)
+			}
+			if len(png) == 0 {
+				return fmt.Errorf("capturing %s preview %d: screenshot data was empty", filepath.Base(fb.file), i)
 			}
 			if err := onCapture(fb.file, i, pb, png); err != nil {
 				return err
@@ -262,13 +285,17 @@ func checkOutputCollisions(output string, blocks []fileBlocks) error {
 	return nil
 }
 
+// sourceBaseName returns the file name without directory and extension.
+func sourceBaseName(sourceFile string) string {
+	return strings.TrimSuffix(filepath.Base(sourceFile), filepath.Ext(sourceFile))
+}
+
 // computeOutputPath returns the file path for a screenshot.
 func computeOutputPath(output, sourceFile string, index int, isDir bool) string {
 	if !isDir {
 		return output
 	}
-	base := strings.TrimSuffix(filepath.Base(sourceFile), filepath.Ext(sourceFile))
-	return filepath.Join(output, fmt.Sprintf("%s--preview-%d.png", base, index))
+	return filepath.Join(output, fmt.Sprintf("%s--preview-%d.png", sourceBaseName(sourceFile), index))
 }
 
 func normalizeReportFormat(format string) (string, error) {
@@ -277,37 +304,83 @@ func normalizeReportFormat(format string) (string, error) {
 		f = reportFormatPNG
 	}
 	switch f {
-	case reportFormatPNG, reportFormatMD:
+	case reportFormatPNG, reportFormatMD, reportFormatHTML:
 		return f, nil
 	default:
-		return "", fmt.Errorf("unsupported --format %q (supported: png, md)", format)
+		return "", fmt.Errorf("unsupported --format %q (supported: png, md, html)", format)
 	}
 }
 
-func prepareMarkdownOutputPaths(output string) (string, string, error) {
+// captureGroup groups captures belonging to the same source file.
+type captureGroup struct {
+	file     string
+	captures []reportCapture
+}
+
+// groupCapturesByFile groups captures by source file, preserving encounter order.
+func groupCapturesByFile(captures []reportCapture) []captureGroup {
+	var groups []captureGroup
+	index := make(map[string]int)
+	for _, c := range captures {
+		i, ok := index[c.file]
+		if !ok {
+			i = len(groups)
+			index[c.file] = i
+			groups = append(groups, captureGroup{file: c.file})
+		}
+		groups[i].captures = append(groups[i].captures, c)
+	}
+	return groups
+}
+
+// resolveSourceDisplay returns a display-friendly source path.
+// If the file is under cwd, a relative path is returned; otherwise filepath.Base.
+func resolveSourceDisplay(file, cwd string) string {
+	if cwd != "" {
+		if rel, err := filepath.Rel(cwd, file); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return filepath.Base(file)
+}
+
+// resolveImageSrc returns the image src string for a capture.
+// Prefers imageRef (file path) over inline base64 data URI.
+func resolveImageSrc(c reportCapture) string {
+	if c.imageRef != "" {
+		return c.imageRef
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(c.png)
+}
+
+func prepareReportOutputPaths(output, reportFileName string) (string, string, error) {
 	if strings.TrimSpace(output) == "" {
-		return "", "", fmt.Errorf("--output is required for --format md")
+		return "", "", fmt.Errorf("--output is required for document report formats")
 	}
 	// Check existing path first: an existing directory (even with dots in name) is valid.
-	if info, err := os.Stat(output); err == nil && !info.IsDir() {
-		return "", "", fmt.Errorf("for --format md, --output must be a directory path: %s", output)
+	if info, err := os.Stat(output); err == nil {
+		if !info.IsDir() {
+			return "", "", fmt.Errorf("--output must be a directory path: %s", output)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", "", fmt.Errorf("checking output path %s: %w", output, err)
 	}
 	if err := os.MkdirAll(output, 0o755); err != nil {
-		return "", "", fmt.Errorf("creating markdown output directory: %w", err)
+		return "", "", fmt.Errorf("creating report output directory: %w", err)
 	}
-	assetsDir := filepath.Join(output, markdownAssetsDirName)
+	assetsDir := filepath.Join(output, reportAssetsDirName)
 	if err := os.MkdirAll(assetsDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("creating markdown assets directory: %w", err)
+		return "", "", fmt.Errorf("creating report assets directory: %w", err)
 	}
-	mdPath := filepath.Join(output, markdownReportFileName)
-	return mdPath, assetsDir, nil
+	reportPath := filepath.Join(output, reportFileName)
+	return reportPath, assetsDir, nil
 }
 
-func writeMarkdownAssets(assetsDir, markdownDir string, captures []reportCapture) ([]reportCapture, error) {
+func writeReportAssets(assetsDir, reportDir string, captures []reportCapture) ([]reportCapture, error) {
 	out := make([]reportCapture, len(captures))
 	seen := make(map[string]struct{})
 	for i, c := range captures {
-		assetName := markdownAssetName(c.file, c.index)
+		assetName := reportAssetName(c.file, c.index)
 		if _, exists := seen[assetName]; exists {
 			assetName = fmt.Sprintf("%s-%d.png", strings.TrimSuffix(assetName, ".png"), i)
 		}
@@ -315,26 +388,25 @@ func writeMarkdownAssets(assetsDir, markdownDir string, captures []reportCapture
 
 		assetPath := filepath.Join(assetsDir, assetName)
 		if err := os.WriteFile(assetPath, c.png, 0o644); err != nil {
-			return nil, fmt.Errorf("writing markdown asset %s: %w", assetName, err)
+			return nil, fmt.Errorf("writing report asset %s: %w", assetName, err)
 		}
 
-		relRef, err := filepath.Rel(markdownDir, assetPath)
+		relRef, err := filepath.Rel(reportDir, assetPath)
 		if err != nil {
-			return nil, fmt.Errorf("computing markdown asset path: %w", err)
+			return nil, fmt.Errorf("computing report asset path: %w", err)
 		}
 
 		out[i] = c
 		out[i].imageRef = filepath.ToSlash(relRef)
 	}
 
-	slog.Info("preview report markdown assets written", "directory", assetsDir, "count", len(captures))
+	slog.Info("preview report assets written", "directory", assetsDir, "count", len(captures))
 	return out, nil
 }
 
-func markdownAssetName(sourceFile string, index int) string {
-	base := strings.TrimSuffix(filepath.Base(sourceFile), filepath.Ext(sourceFile))
+func reportAssetName(sourceFile string, index int) string {
 	sum := sha256.Sum256([]byte(sourceFile))
-	return fmt.Sprintf("%s--%x--preview-%d.png", base, sum[:4], index)
+	return fmt.Sprintf("%s--%x--preview-%d.png", sourceBaseName(sourceFile), sum[:4], index)
 }
 
 func renderMarkdownReport(captures []reportCapture, cwd string) string {
@@ -343,28 +415,11 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 	var b strings.Builder
 	b.WriteString("# SwiftUI Preview Report\n\n")
 
-	groups := make([]struct {
-		file     string
-		captures []reportCapture
-	}, 0)
-	groupIndex := make(map[string]int)
-	for _, c := range captures {
-		i, ok := groupIndex[c.file]
-		if !ok {
-			i = len(groups)
-			groupIndex[c.file] = i
-			groups = append(groups, struct {
-				file     string
-				captures []reportCapture
-			}{file: c.file})
-		}
-		groups[i].captures = append(groups[i].captures, c)
-	}
+	groups := groupCapturesByFile(captures)
 
-	fileCount := len(groups)
 	fmt.Fprintf(&b, "_Generated by `axe preview report --format md`_\n\n")
 	fmt.Fprintf(&b, "_Generated at: %s_\n\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(&b, "- Files: **%d**\n", fileCount)
+	fmt.Fprintf(&b, "- Files: **%d**\n", len(groups))
 	fmt.Fprintf(&b, "- Previews: **%d**\n\n", len(captures))
 	b.WriteString("## Overview\n\n")
 	b.WriteString("| File | Preview Count |\n")
@@ -383,23 +438,10 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 				b.WriteString("<tr>\n")
 			}
 
-			title := c.title
-			if title == "" {
-				title = "(Untitled)"
-			}
+			title := c.displayTitle()
 			alt := html.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
-			imgSrc := c.imageRef
-			if imgSrc == "" {
-				encoded := base64.StdEncoding.EncodeToString(c.png)
-				imgSrc = "data:image/png;base64," + encoded
-			}
-
-			source := filepath.Base(c.file)
-			if cwd != "" {
-				if rel, err := filepath.Rel(cwd, c.file); err == nil && !strings.HasPrefix(rel, "..") {
-					source = rel
-				}
-			}
+			imgSrc := resolveImageSrc(c)
+			source := resolveSourceDisplay(c.file, cwd)
 
 			fmt.Fprintf(&b, "<td valign=\"top\" width=\"50%%\" align=\"center\">\n")
 			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" width=\"100%%\" />\n", html.EscapeString(imgSrc), alt)
@@ -420,5 +462,183 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 		b.WriteString("---\n\n")
 	}
 
+	return b.String()
+}
+
+func renderHTMLReport(captures []reportCapture, cwd string) string {
+	groups := groupCapturesByFile(captures)
+
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwiftUI Preview Report</title>
+<style>
+:root {
+  --bg: #f5f5f7;
+  --card-bg: #ffffff;
+  --text: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --border: #d2d2d7;
+  --shadow: rgba(0,0,0,0.08);
+  --accent: #0071e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1d1f;
+    --card-bg: #2c2c2e;
+    --text: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --border: #48484a;
+    --shadow: rgba(0,0,0,0.3);
+    --accent: #2997ff;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  padding: 2rem;
+}
+header { text-align: center; margin-bottom: 2rem; }
+header h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+.summary { color: var(--text-secondary); font-size: 0.9rem; }
+nav { margin: 1.5rem 0; }
+nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+nav a {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  font-size: 0.85rem;
+  transition: background 0.2s;
+}
+nav a:hover { background: var(--accent); color: #fff; }
+section { margin-bottom: 2.5rem; }
+section h2 {
+  font-size: 1.3rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+.card {
+  background: var(--card-bg);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px var(--shadow);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px var(--shadow);
+}
+.card img {
+  width: 100%;
+  display: block;
+  cursor: pointer;
+  background: var(--bg);
+}
+.card-body {
+  padding: 0.75rem 1rem;
+}
+.card-title { font-weight: 600; font-size: 0.95rem; }
+.card-meta { color: var(--text-secondary); font-size: 0.8rem; margin-top: 0.25rem; }
+dialog {
+  border: none;
+  background: transparent;
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 0;
+}
+dialog::backdrop { background: rgba(0,0,0,0.7); }
+dialog img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+footer {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+`)
+
+	fmt.Fprintf(&b, "<header>\n<h1>SwiftUI Preview Report</h1>\n")
+	fmt.Fprintf(&b, "<p class=\"summary\">%d files &middot; %d previews &middot; Generated at %s</p>\n",
+		len(groups), len(captures), html.EscapeString(time.Now().Format(time.RFC3339)))
+	b.WriteString("</header>\n")
+
+	// TOC
+	b.WriteString("<nav><ul>\n")
+	for i, g := range groups {
+		anchorID := fmt.Sprintf("file-%d", i)
+		fmt.Fprintf(&b, "<li><a href=\"#%s\">%s (%d)</a></li>\n",
+			anchorID, html.EscapeString(filepath.Base(g.file)), len(g.captures))
+	}
+	b.WriteString("</ul></nav>\n")
+
+	// Sections
+	for i, g := range groups {
+		base := filepath.Base(g.file)
+		anchorID := fmt.Sprintf("file-%d", i)
+		fmt.Fprintf(&b, "<section id=\"%s\">\n<h2>%s <span class=\"summary\">(%d previews)</span></h2>\n<div class=\"grid\">\n",
+			anchorID, html.EscapeString(base), len(g.captures))
+		for _, c := range g.captures {
+			title := c.displayTitle()
+			alt := html.EscapeString(fmt.Sprintf("%s preview %d", base, c.index))
+			imgSrc := resolveImageSrc(c)
+			source := resolveSourceDisplay(c.file, cwd)
+
+			b.WriteString("<div class=\"card\">\n")
+			fmt.Fprintf(&b, "<img src=\"%s\" alt=\"%s\" data-lightbox />\n",
+				html.EscapeString(imgSrc), alt)
+			b.WriteString("<div class=\"card-body\">\n")
+			fmt.Fprintf(&b, "<div class=\"card-title\">Preview %d &mdash; %s</div>\n",
+				c.index, html.EscapeString(title))
+			fmt.Fprintf(&b, "<div class=\"card-meta\">%s:%d</div>\n",
+				html.EscapeString(source), c.startLine)
+			b.WriteString("</div>\n</div>\n")
+		}
+		b.WriteString("</div>\n</section>\n")
+	}
+
+	// Lightbox dialog + footer (event delegation for CSP compatibility — no inline handlers)
+	b.WriteString(`<dialog id="lightbox"><img src="" alt="preview" /></dialog>
+<script>
+(function() {
+  var dialog = document.getElementById('lightbox');
+  var dialogImg = dialog ? dialog.querySelector('img') : null;
+  if (!dialog || !dialogImg || typeof dialog.showModal !== 'function') return;
+  document.addEventListener('click', function(e) {
+    if (!(e.target instanceof HTMLImageElement)) return;
+    if (!e.target.hasAttribute('data-lightbox')) return;
+    dialogImg.src = e.target.src;
+    dialogImg.alt = e.target.alt;
+    dialog.showModal();
+  });
+  dialog.addEventListener('click', function(e) {
+    var rect = dialogImg.getBoundingClientRect();
+    var inside = e.clientX >= rect.left && e.clientX <= rect.right &&
+                 e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (!inside) dialog.close();
+  });
+})();
+</script>
+<footer>Generated by <code>axe preview report --format html</code></footer>
+</body>
+</html>
+`)
 	return b.String()
 }
