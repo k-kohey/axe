@@ -12,6 +12,7 @@ import (
 var (
 	reportOutput string
 	reportWait   time.Duration
+	reportFormat string
 )
 
 var previewReportCmd = &cobra.Command{
@@ -21,11 +22,16 @@ var previewReportCmd = &cobra.Command{
 
 	When --output is a directory, each screenshot is saved as <basename>--preview-<index>.png.
 	When --output is a file path (has extension), exactly one preview across all files is required.
+	When --format=md or --format=html, --output must be a directory. The command writes:
+	  - axe_swiftui_preview_report.md (or .html)
+	  - axe_swiftui_preview_report_assets/*.png
 
 	Examples:
 	  axe preview report Sources/FooView.swift --output ./screenshots/
 	  axe preview report Sources/FooView.swift --output ./out.png
-	  axe preview report Sources/FooView.swift Sources/BarView.swift --output ./screenshots/`,
+	  axe preview report Sources/FooView.swift Sources/BarView.swift --output ./screenshots/
+	  axe preview report Sources/FooView.swift Sources/BarView.swift --format md --output ./preview-report
+	  axe preview report Sources/FooView.swift Sources/BarView.swift --format html --output ./preview-report`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		pc, err := resolveProjectConfig()
@@ -45,6 +51,7 @@ var previewReportCmd = &cobra.Command{
 			Files:       args,
 			Output:      reportOutput,
 			RenderDelay: reportWait,
+			Format:      reportFormat,
 			PC:          pc,
 			Device:      previewDevice,
 		})
@@ -52,7 +59,8 @@ var previewReportCmd = &cobra.Command{
 }
 
 func init() {
-	previewReportCmd.Flags().StringVarP(&reportOutput, "output", "o", "", "output path (directory or file)")
+	previewReportCmd.Flags().StringVarP(&reportOutput, "output", "o", "", "output path (png: directory or file, md: directory)")
 	previewReportCmd.Flags().DurationVar(&reportWait, "wait", 10*time.Second, "rendering delay before screenshot capture")
+	previewReportCmd.Flags().StringVar(&reportFormat, "format", "png", "output format: png, md, or html")
 	previewCmd.AddCommand(previewReportCmd)
 }

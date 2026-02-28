@@ -145,7 +145,7 @@ All flags fall back to `.axerc` values when not specified.
 
 #### `axe preview report`
 
-Capture screenshots of all `#Preview` blocks in one or more Swift files.
+Capture all `#Preview` blocks in one or more Swift files as screenshots (`png`), a Markdown report (`md`), or an HTML report (`html`).
 
 ```bash
 # Single file → single file
@@ -153,14 +153,24 @@ axe preview report Sources/FooView.swift -o screenshot.png
 
 # Multiple files → directory (auto-created)
 axe preview report Sources/FooView.swift Sources/BarView.swift -o ./screenshots/
+
+# Markdown report + external PNG assets (directory required)
+axe preview report Sources/FooView.swift Sources/BarView.swift --format md -o ./preview-report
+
+# HTML report (responsive, dark-mode, lightbox) + external PNG assets
+axe preview report Sources/FooView.swift Sources/BarView.swift --format html -o ./preview-report
 ```
 
 When `--output` is a directory, screenshots are saved as `<basename>--preview-<index>.png`.
+For `--format md` or `--format html`, `--output` must be a directory, and axe writes:
+- `axe_swiftui_preview_report.md` (or `.html`)
+- `axe_swiftui_preview_report_assets/*.png`
 The project build is reused automatically after the first capture.
 
 | Flag | Description |
 |---|---|
-| `-o`, `--output` | Output path (directory or file) — required |
+| `-o`, `--output` | Output path. Required. For `--format png`: directory or file. For `--format md`/`html`: directory only |
+| `--format` | Output format: `png` (default), `md`, or `html` |
 | `--wait` | Rendering delay before capture (default `10s`) |
 
 Project flags (`--project`, `--scheme`, etc.) are shared with the parent `preview` command.

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwiftUI Preview Report</title>
+<style>
+:root {
+  --bg: #fafaf9;
+  --card-bg: #ffffff;
+  --text: #1a1a1a;
+  --text-secondary: #737373;
+  --border: #e5e5e5;
+  --shadow: rgba(0,0,0,0.06);
+  --accent: #e25822;
+  --accent-hover: #c94a1a;
+  --header-from: #1a1a1a;
+  --header-to: #2d2d2d;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171717;
+    --card-bg: #262626;
+    --text: #fafafa;
+    --text-secondary: #a3a3a3;
+    --border: #404040;
+    --shadow: rgba(0,0,0,0.4);
+    --accent: #f97316;
+    --accent-hover: #fb923c;
+    --header-from: #0a0a0a;
+    --header-to: #171717;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}
+header {
+  background: linear-gradient(135deg, var(--header-from), var(--header-to));
+  color: #fafafa;
+  text-align: center;
+  padding: 3rem 2rem 2.5rem;
+}
+header h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+header .summary { color: #a3a3a3; font-size: 0.85rem; }
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 2rem;
+}
+nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+nav a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 2rem;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+nav a:hover { border-color: var(--accent); color: var(--accent); }
+main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+section { margin-bottom: 3rem; }
+section h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--accent);
+  display: inline-block;
+}
+section h2 .summary { font-weight: 400; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.card {
+  background: var(--card-bg);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  transition: transform 0.2s, box-shadow 0.2s;
+  animation: card-in 0.4s ease both;
+}
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.card img {
+  width: 100%;
+  display: block;
+  cursor: pointer;
+  background: var(--bg);
+}
+.card-body { padding: 0.75rem 1rem; }
+.card-title { font-weight: 600; font-size: 0.9rem; }
+.card-meta {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 0.2rem;
+  font-family: "SF Mono", ui-monospace, monospace;
+}
+dialog {
+  border: none;
+  background: transparent;
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 0;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.2s, transform 0.2s;
+}
+dialog[open] { opacity: 1; transform: scale(1); }
+dialog::backdrop { background: rgba(0,0,0,0.75); }
+dialog img { max-width: 90vw; max-height: 85vh; border-radius: 8px; display: block; }
+dialog .hint {
+  text-align: center;
+  color: #a3a3a3;
+  font-size: 0.75rem;
+  margin-top: 0.75rem;
+}
+.failures table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.failures th, .failures td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.failures th { font-weight: 600; color: var(--text-secondary); }
+.failures code { font-size: 0.8rem; color: var(--accent); }
+footer {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 1.5rem 2rem;
+  border-top: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+<header>
+<h1>SwiftUI Preview Report</h1>
+<p class="summary">{{.FileCount}} {{pluralize .FileCount "file" "files"}} &middot; {{.PreviewCount}} {{pluralize .PreviewCount "preview" "previews"}} &middot; {{.Version}}</p>
+</header>
+<nav><ul>
+{{range .Groups}}<li><a href="#{{.AnchorID}}">{{.FileName}} ({{.PreviewCount}})</a></li>
+{{end}}</ul></nav>
+<main>
+{{range .Groups}}<section id="{{.AnchorID}}">
+<h2>{{.FileName}} <span class="summary">({{.PreviewCount}} {{pluralize .PreviewCount "preview" "previews"}})</span></h2>
+<div class="grid">
+{{range .Cards}}<div class="card" style="animation-delay:{{.Delay}}">
+<img src="{{.ImageSrc}}" alt="{{.Alt}}" data-lightbox />
+<div class="card-body">
+<div class="card-title">Preview {{.Index}} &mdash; {{.Title}}</div>
+<div class="card-meta">{{.Source}}:{{.StartLine}}</div>
+</div>
+</div>
+{{end}}</div>
+</section>
+{{end}}{{if .Failures}}<section class="failures">
+<h2>Failures <span class="summary">({{len .Failures}})</span></h2>
+<table>
+<thead><tr><th>File</th><th>Preview</th><th>Error</th></tr></thead>
+<tbody>
+{{range .Failures}}<tr>
+<td>{{.FileName}}</td>
+<td>{{.Index}} &mdash; {{.Title}}</td>
+<td><code>{{.ErrorMsg}}</code></td>
+</tr>{{end}}
+</tbody>
+</table>
+</section>
+{{end}}</main>
+<dialog id="lightbox"><img src="" alt="preview" /><p class="hint">Click outside to close</p></dialog>
+<script>
+(function() {
+  var dialog = document.getElementById('lightbox');
+  var dialogImg = dialog ? dialog.querySelector('img') : null;
+  if (!dialog || !dialogImg || typeof dialog.showModal !== 'function') return;
+  document.addEventListener('click', function(e) {
+    if (!(e.target instanceof HTMLImageElement)) return;
+    if (!e.target.hasAttribute('data-lightbox')) return;
+    dialogImg.src = e.target.src;
+    dialogImg.alt = e.target.alt;
+    dialog.showModal();
+  });
+  dialog.addEventListener('click', function(e) {
+    var rect = dialogImg.getBoundingClientRect();
+    var inside = e.clientX >= rect.left && e.clientX <= rect.right &&
+                 e.clientY >= rect.top && e.clientY <= rect.bottom;
+    if (!inside) dialog.close();
+  });
+})();
+</script>
+<footer>Generated by <code>axe preview report --format html</code></footer>
+</body>
+</html>
