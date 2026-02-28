@@ -3,11 +3,12 @@ package preview
 import (
 	"context"
 	"errors"
-	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/k-kohey/axe/internal/preview/build"
 )
 
 // --- Fake BuildRunner ---
@@ -33,7 +34,7 @@ func (f *fakeBuildRunner) Build(_ context.Context, args []string) ([]byte, error
 	return f.buildOutput, f.buildErr
 }
 
-// --- fetchBuildSettings tests ---
+// --- build.FetchSettings tests ---
 
 func TestFetchBuildSettings_ParsesAllFields(t *testing.T) {
 	t.Parallel()
@@ -47,9 +48,9 @@ func TestFetchBuildSettings_ParsesAllFields(t *testing.T) {
 `
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	bs, err := build.FetchSettings(context.Background(), pc, dirs, br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,9 +107,9 @@ func TestFetchBuildSettings_BuiltProductsDir(t *testing.T) {
 				Scheme:        "TestScheme",
 				Configuration: tt.configuration,
 			}
-			dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: "/tmp/build"}}
+			dirs := build.ProjectDirs{Build: "/tmp/build"}
 
-			bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+			bs, err := build.FetchSettings(context.Background(), pc, dirs, br)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -157,9 +158,9 @@ func TestFetchBuildSettings_MissingFields(t *testing.T) {
 
 			br := &fakeBuildRunner{fetchOutput: []byte(tt.output)}
 			pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-			dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+			dirs := build.ProjectDirs{Build: t.TempDir()}
 
-			_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+			_, err := build.FetchSettings(context.Background(), pc, dirs, br)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -173,16 +174,16 @@ func TestFetchBuildSettings_MissingFields(t *testing.T) {
 func TestFetchBuildSettings_SwiftVersionOptional(t *testing.T) {
 	t.Parallel()
 
-	// SwiftVersion is not required; fetchBuildSettings should succeed without it.
+	// SwiftVersion is not required; FetchSettings should succeed without it.
 	output := `    PRODUCT_MODULE_NAME = TestModule
     PRODUCT_BUNDLE_IDENTIFIER = com.example.TestModule
     IPHONEOS_DEPLOYMENT_TARGET = 17.0
 `
 	br := &fakeBuildRunner{fetchOutput: []byte(output)}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	bs, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	bs, err := build.FetchSettings(context.Background(), pc, dirs, br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -199,9 +200,9 @@ func TestFetchBuildSettings_RunnerError(t *testing.T) {
 		fetchErr:    errors.New("exit status 1"),
 	}
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	_, err := build.FetchSettings(context.Background(), pc, dirs, br)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -222,9 +223,9 @@ func TestFetchBuildSettings_PassesCorrectArgs(t *testing.T) {
 		Workspace: "/tmp/TestWorkspace.xcworkspace",
 		Scheme:    "TestScheme",
 	}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
-	_, err := fetchBuildSettings(context.Background(), pc, dirs, br)
+	_, err := build.FetchSettings(context.Background(), pc, dirs, br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -288,7 +289,7 @@ func TestExtractCompilerPaths_IncludePaths(t *testing.T) {
 -I
 /path/split/across/lines
 `)
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 3 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 3", len(bs.ExtraIncludePaths))
@@ -308,7 +309,7 @@ func TestExtractCompilerPaths_SkipsHmapAndBuiltProducts(t *testing.T) {
 `)
 	bs.BuiltProductsDir = "/products/dir"
 
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 1 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 1", len(bs.ExtraIncludePaths))
@@ -326,7 +327,7 @@ func TestExtractCompilerPaths_FrameworkPaths(t *testing.T) {
 `)
 	bs.BuiltProductsDir = "/products/dir"
 
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraFrameworkPaths) != 1 {
 		t.Fatalf("ExtraFrameworkPaths count = %d, want 1", len(bs.ExtraFrameworkPaths))
@@ -340,7 +341,7 @@ func TestExtractCompilerPaths_ModuleMapFiles(t *testing.T) {
 	bs, dirs := setupRespFile(t, `-fmodule-map-file=/path/to/FirebaseCore.modulemap
 -fmodule-map-file=/path/to/nanopb.modulemap
 `)
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraModuleMapFiles) != 2 {
 		t.Fatalf("ExtraModuleMapFiles count = %d, want 2", len(bs.ExtraModuleMapFiles))
@@ -355,7 +356,7 @@ func TestExtractCompilerPaths_DeduplicatesIncludePaths(t *testing.T) {
 -I/path/to/headers
 -I/path/to/other
 `)
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 2 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 2", len(bs.ExtraIncludePaths))
@@ -364,10 +365,10 @@ func TestExtractCompilerPaths_DeduplicatesIncludePaths(t *testing.T) {
 
 func TestExtractCompilerPaths_NoRespFile(t *testing.T) {
 	bs := &build.Settings{ModuleName: "NoSuchModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
+	dirs := build.ProjectDirs{Build: t.TempDir()}
 
 	// Should not panic or error, just silently return.
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 0 {
 		t.Errorf("ExtraIncludePaths should be empty, got %d", len(bs.ExtraIncludePaths))
@@ -384,7 +385,7 @@ arm64-apple-ios17.0-simulator
 -swift-version
 5
 `)
-	extractCompilerPaths(context.Background(), bs, dirs)
+	build.ExtractCompilerPaths(context.Background(), bs, dirs)
 
 	if len(bs.ExtraIncludePaths) != 1 {
 		t.Fatalf("ExtraIncludePaths count = %d, want 1", len(bs.ExtraIncludePaths))
@@ -393,10 +394,10 @@ arm64-apple-ios17.0-simulator
 
 // setupRespFile creates a temporary directory structure mimicking the xcodebuild
 // intermediates layout and writes content as a swiftc response file.
-func setupRespFile(t *testing.T, content string) (*build.Settings, previewDirs) {
+func setupRespFile(t *testing.T, content string) (*build.Settings, build.ProjectDirs) {
 	t.Helper()
 	root := t.TempDir()
-	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
+	dirs := build.ProjectDirs{Build: root}
 	bs := &build.Settings{ModuleName: "TestModule", BuiltProductsDir: "/products/dir"}
 
 	respDir := filepath.Join(root, "Build", "Intermediates.noindex",

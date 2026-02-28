@@ -446,25 +446,16 @@ func RunBuild(pc ProjectConfig) error {
 
 	br := &runner.Build{}
 
-	step := &stepper{total: 2}
-
-	done := step.begin("Fetching build settings...")
-	s, err := build.FetchSettings(ctx, pc, dirs, br)
+	step := &stepper{total: 1}
+	done := step.begin("Building...")
+	result, err := build.Prepare(ctx, pc, dirs, false, br)
 	done()
 	if err != nil {
 		return err
 	}
 
-	done = step.begin("Building project...")
-	if err := build.Run(ctx, pc, dirs, br); err != nil {
-		return err
-	}
-	done()
-
-	build.ExtractCompilerPaths(ctx, s, dirs)
-
 	fmt.Fprintf(os.Stderr, "\nBuild complete.\n")
-	fmt.Fprintf(os.Stderr, "  Module:    %s\n", s.ModuleName)
+	fmt.Fprintf(os.Stderr, "  Module:    %s\n", result.Settings.ModuleName)
 	fmt.Fprintf(os.Stderr, "  Build dir: %s\n", dirs.Build)
 	return nil
 }

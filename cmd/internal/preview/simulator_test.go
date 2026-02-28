@@ -70,8 +70,8 @@ func TestHasPreviousBuild_True(t *testing.T) {
 	bs := &build.Settings{ModuleName: "MyApp", BuiltProductsDir: filepath.Join(root, "Build", "Products", "Debug-iphonesimulator")}
 	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
 
-	if !hasPreviousBuild(bs, dirs) {
-		t.Error("hasPreviousBuild = false, want true")
+	if !build.HasPreviousBuild(bs, dirs.ProjectDirs) {
+		t.Error("HasPreviousBuild = false, want true")
 	}
 }
 
@@ -80,7 +80,7 @@ func TestHasPreviousBuild_False(t *testing.T) {
 	bs := &build.Settings{ModuleName: "MyApp", BuiltProductsDir: filepath.Join(root, "Build", "Products", "Debug-iphonesimulator")}
 	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: root}}
 
-	if hasPreviousBuild(bs, dirs) {
-		t.Error("hasPreviousBuild = true, want false")
+	if build.HasPreviousBuild(bs, dirs.ProjectDirs) {
+		t.Error("HasPreviousBuild = true, want false")
 	}
 }

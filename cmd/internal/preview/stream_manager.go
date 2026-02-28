@@ -461,7 +461,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 			compileResCh <- res
 			return
 		}
-		bs := prepared.Settings
+		// Clone Settings so that each stream has an independent copy.
+		// ExtractCompilerPaths mutates slice fields, so sharing the pointer
+		// across concurrent streams would cause a data race.
+		bs := prepared.Settings.Clone()
 		res.bs = bs
 		builtThisLaunch := prepared.Built
 
