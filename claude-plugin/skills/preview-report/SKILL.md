@@ -3,7 +3,7 @@ name: preview-report
 description: Capture previews of multiple SwiftUI files and generate a visual report. Use when the user wants to see all previews at once, create PR documentation, or batch-check UI across files.
 argument-hint: <file1.swift> [file2.swift...]
 disable-model-invocation: true
-allowed-tools: Bash(axe *), Bash(mktemp *), Bash(git diff *), Read, Glob, Grep
+allowed-tools: Bash(axe *), Bash(cat *), Bash(git diff *), Read, Glob, Grep
 ---
 
 # Batch Preview Report
@@ -39,8 +39,9 @@ fi
 ### 2. Generate the report
 
 ```bash
-REPORT_DIR=$(mktemp -d /tmp/axe-report-XXXXXX)
-ERR_LOG=$(mktemp /tmp/axe-report-XXXXXX.log)
+REPORT_DIR="$(pwd)/axe-report-$(date +%s)"
+mkdir -p "$REPORT_DIR"
+ERR_LOG="$(pwd)/axe-report-err-$(date +%s).log"
 if ! axe preview report $FILES --format md --output "$REPORT_DIR" 2>"$ERR_LOG"; then
   cat "$ERR_LOG"
   exit 1

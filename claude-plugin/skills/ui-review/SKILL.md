@@ -2,7 +2,7 @@
 name: ui-review
 description: Capture a SwiftUI preview and review its UI/UX quality. Checks layout, spacing, HIG compliance, accessibility, and visual consistency. Use when the user asks for UI feedback or wants a design review of a View.
 argument-hint: <file.swift> [--preview <title|index>]
-allowed-tools: Bash(axe *), Bash(mktemp *), Read, Glob, Grep
+allowed-tools: Bash(axe *), Bash(cat *), Read, Glob, Grep
 ---
 
 # SwiftUI UI/UX Review
@@ -24,19 +24,26 @@ The project must have a valid `.axerc` (with `PROJECT` or `WORKSPACE` and `SCHEM
 ### 1. Capture the preview
 
 ```bash
-PREVIEW_IMG=$(mktemp /tmp/axe-ui-review-XXXXXX.png)
-ERR_LOG=$(mktemp /tmp/axe-ui-review-XXXXXX.log)
-if ! axe preview $ARGUMENTS > "$PREVIEW_IMG" 2>"$ERR_LOG"; then
+PREVIEW_IMG="$(pwd)/axe-ui-review-$(date +%s)-$$.png"
+ERR_LOG="$(pwd)/axe-ui-review-err-$(date +%s)-$$.log"
+if ! axe preview report $ARGUMENTS --output "$PREVIEW_IMG" 2>"$ERR_LOG"; then
   cat "$ERR_LOG"
+  # If it failed because of multiple #Preview blocks, fall back to directory output or oneshot
   exit 1
 fi
 ```
+
+`axe preview report` is preferred over oneshot `axe preview` because it waits for rendering to complete (`--wait`, default 10s) and retries on failure.
+
+If the file has multiple `#Preview` blocks, `--output file.png` will fail (it requires exactly one preview). In that case:
+- Use a directory as `--output` to capture all, then review each
+- Or fall back to `axe preview --preview <title|index>` (oneshot, no render wait)
 
 Read the captured image with the Read tool.
 
 ### 2. Read the source code
 
-Extract the file path from `$0` (the first argument) and read the SwiftUI source file to understand the implementation alongside the visual output.
+Extract the file path from `$ARGUMENTS` (the first positional argument) and read the SwiftUI source file to understand the implementation alongside the visual output.
 
 ### 3. Review the UI
 

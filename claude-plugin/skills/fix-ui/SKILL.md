@@ -3,7 +3,7 @@ name: fix-ui
 description: Iteratively fix a SwiftUI View to match a design image. Captures previews with axe, compares against the target design, and modifies the code until the UI matches. Use when the user provides a design image and wants the View adjusted to match it.
 argument-hint: <file.swift> <design-image-path>
 disable-model-invocation: true
-allowed-tools: Bash(axe *), Bash(mktemp *), Read, Edit, Glob, Grep
+allowed-tools: Bash(axe *), Bash(cat *), Read, Edit, Glob, Grep
 ---
 
 # Design-Driven UI Fix Loop
@@ -38,13 +38,20 @@ Read the SwiftUI source file at `$0` to understand the current implementation.
 ### 3. Capture the current preview
 
 ```bash
-PREVIEW_IMG=$(mktemp /tmp/axe-fix-ui-XXXXXX.png)
-ERR_LOG=$(mktemp /tmp/axe-fix-ui-XXXXXX.log)
-if ! axe preview "$0" > "$PREVIEW_IMG" 2>"$ERR_LOG"; then
+PREVIEW_IMG="$(pwd)/axe-fix-ui-$(date +%s)-$$.png"
+ERR_LOG="$(pwd)/axe-fix-ui-err-$(date +%s)-$$.log"
+if ! axe preview report "$0" --output "$PREVIEW_IMG" 2>"$ERR_LOG"; then
   cat "$ERR_LOG"
+  # If it failed because of multiple #Preview blocks, fall back to directory output or oneshot
   exit 1
 fi
 ```
+
+`axe preview report` is preferred because it waits for rendering to complete and retries on failure.
+
+If the file has multiple `#Preview` blocks, `--output file.png` will fail (it requires exactly one preview). In that case:
+- Use a directory as `--output` to capture all, then pick the relevant one
+- Or fall back to `axe preview "$0" --preview <title|index>` (oneshot, no render wait)
 
 Read the captured image to see the current appearance.
 
@@ -65,12 +72,12 @@ Make targeted edits to the SwiftUI source file to address the identified differe
 
 ### 6. Re-capture and verify
 
-Capture a new preview after the edits:
+Capture a new preview after the edits. Use `--reuse-build` to skip rebuilding since only the View source changed:
 
 ```bash
-PREVIEW_IMG=$(mktemp /tmp/axe-fix-ui-XXXXXX.png)
-ERR_LOG=$(mktemp /tmp/axe-fix-ui-XXXXXX.log)
-if ! axe preview "$0" > "$PREVIEW_IMG" 2>"$ERR_LOG"; then
+PREVIEW_IMG="$(pwd)/axe-fix-ui-$(date +%s)-$$.png"
+ERR_LOG="$(pwd)/axe-fix-ui-err-$(date +%s)-$$.log"
+if ! axe preview report "$0" --output "$PREVIEW_IMG" --reuse-build 2>"$ERR_LOG"; then
   cat "$ERR_LOG"
   exit 1
 fi
