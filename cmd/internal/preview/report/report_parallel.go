@@ -14,9 +14,27 @@ import (
 	"time"
 
 	"github.com/k-kohey/axe/internal/platform"
+	"github.com/k-kohey/axe/internal/preview"
 	"github.com/k-kohey/axe/internal/preview/build"
 	"golang.org/x/sync/errgroup"
 )
+
+// errBox wraps an error so that atomic.Pointer stores a uniform concrete type,
+// avoiding the panic that atomic.Value triggers when CompareAndSwap receives
+// different concrete error types from concurrent workers.
+type errBox struct{ err error }
+
+// sleepWithContext blocks for at most d, returning early if ctx is cancelled.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
 
 const defaultMaxConcurrency = 4
 
@@ -135,7 +153,7 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 
 	// 5. Worker goroutines
 	var wg sync.WaitGroup
-	var firstErr atomic.Value // for failFast
+	var firstErr atomic.Pointer[errBox] // for failFast
 
 	for workerIdx := range conc {
 		wg.Add(1)
@@ -143,11 +161,57 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 		go func() {
 			defer wg.Done()
 
-			for {
-				if failFast {
-					if v := firstErr.Load(); v != nil {
-						return
+			// Create a PreviewSession per worker. Build is cached by Preparer,
+			// so only Boot + Install + Loader run per worker.
+			br, tc, ar, fc := preview.DefaultSessionRunners()
+			sess, sessErr := preview.NewPreviewSession(ctx, preview.SessionConfig{
+				PC:            opts.PC,
+				DeviceUDID:    udid,
+				DeviceSetPath: setPath,
+				Preparer:      preparer,
+				ReuseBuild:    opts.ReuseBuild,
+				BuildRunner:   br,
+				Toolchain:     tc,
+				AppRunner:     ar,
+				Copier:        fc,
+			})
+			if sessErr != nil {
+				slog.Error("worker session creation failed",
+					"worker", workerIdx, "udid", udid, "err", sessErr)
+				// Drain the queue: mark all remaining jobs as failed.
+				for {
+					job := queue.Dequeue()
+					if job == nil {
+						break
 					}
+					resultMu.Lock()
+					for i, pb := range job.fb.previews {
+						results[job.fileIdx][i] = outcome{
+							failure: &captureFailure{
+								file:      job.fb.file,
+								index:     i,
+								title:     pb.Title,
+								startLine: pb.StartLine,
+								err:       sessErr,
+							},
+						}
+					}
+					resultMu.Unlock()
+					queue.Finish()
+					if failFast {
+						firstErr.CompareAndSwap(nil, &errBox{err: sessErr})
+					}
+				}
+				return
+			}
+			defer sess.Close()
+
+			for {
+				if ctx.Err() != nil {
+					return
+				}
+				if failFast && firstErr.Load() != nil {
+					return
 				}
 
 				job := queue.Dequeue()
@@ -160,7 +224,7 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 				for i, pb := range job.fb.previews {
 					fmt.Fprintf(os.Stderr, "[worker %d] Capturing %s (preview %d)\n",
 						workerIdx, filepath.Base(job.fb.file), i)
-					png, err := captureOnce(opts, job.fb.file, i, preparer, udid, setPath)
+					png, err := captureWithSession(ctx, sess, job.fb.file, i, opts.RenderDelay)
 					if err != nil {
 						fileErr = err
 						break // retry the whole file
@@ -190,7 +254,9 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 							results[job.fileIdx][i] = outcome{}
 						}
 						resultMu.Unlock()
-						time.Sleep(time.Duration(job.retryCount) * 500 * time.Millisecond)
+						if err := sleepWithContext(ctx, time.Duration(job.retryCount)*500*time.Millisecond); err != nil {
+							return
+						}
 						queue.Retry(job)
 						continue
 					}
@@ -212,7 +278,7 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 					queue.Finish()
 
 					if failFast {
-						firstErr.CompareAndSwap(nil, fileErr)
+						firstErr.CompareAndSwap(nil, &errBox{err: fileErr})
 					}
 					continue
 				}
@@ -229,8 +295,8 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 	//    Fill any zero-value outcomes as failures so callers see complete results.
 	var failFastErr error
 	if failFast {
-		if v := firstErr.Load(); v != nil {
-			failFastErr, _ = v.(error)
+		if b := firstErr.Load(); b != nil {
+			failFastErr = b.err
 		}
 	}
 
@@ -283,7 +349,8 @@ func runReportPNGParallel(opts ReportOptions, blocks []fileBlocks, preparer *bui
 
 	result := runParallelCapture(ctx, opts, blocks, preparer, true)
 	if len(result.failures) > 0 {
-		return result.failures[0].err
+		f := result.failures[0]
+		return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(f.file), f.index, f.err)
 	}
 
 	for _, c := range result.captures {
