@@ -241,6 +241,18 @@ func (c *Companion) Stop() error {
 	}
 }
 
+// Boot boots a simulator (with Simulator.app window) via idb_companion.
+// The returned Companion's Stop() will terminate idb_companion and shut down
+// the simulator automatically.
+func Boot(udid, deviceSetPath string) (*Companion, error) {
+	return BootWith(DefaultCommander(), udid, deviceSetPath)
+}
+
+// BootWith boots a simulator using the given Commander.
+func BootWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
+	return bootSimulator(cmdr, udid, deviceSetPath, false)
+}
+
 // BootHeadless boots a simulator headlessly via idb_companion.
 // The returned Companion's Stop() will terminate idb_companion and shut down
 // the simulator automatically.
@@ -250,7 +262,15 @@ func BootHeadless(udid, deviceSetPath string) (*Companion, error) {
 
 // BootHeadlessWith boots a simulator headlessly using the given Commander.
 func BootHeadlessWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
-	args := []string{"--boot", udid, "--headless", "1"}
+	return bootSimulator(cmdr, udid, deviceSetPath, true)
+}
+
+// bootSimulator is the shared implementation for Boot and BootHeadless.
+func bootSimulator(cmdr Commander, udid, deviceSetPath string, headless bool) (*Companion, error) {
+	args := []string{"--boot", udid}
+	if headless {
+		args = append(args, "--headless", "1")
+	}
 	if deviceSetPath != "" {
 		args = append(args, "--device-set-path", deviceSetPath)
 	}

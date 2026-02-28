@@ -215,6 +215,31 @@ func TestStartWith_DeviceSetPath(t *testing.T) {
 	}
 }
 
+func TestBootWith_Success(t *testing.T) {
+	cmdr := newFakeCommander()
+
+	go writeToPipe(cmdr, `{"state":"Booted","udid":"ABCD-1234"}`+"\n")
+
+	companion, err := BootWith(cmdr, "ABCD-1234", "/tmp/axe-devices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if companion == nil {
+		t.Fatal("expected non-nil companion")
+	}
+
+	args := strings.Join(cmdr.lastArgs, " ")
+	if !strings.Contains(args, "--boot ABCD-1234") {
+		t.Errorf("expected --boot ABCD-1234 in args: %s", args)
+	}
+	if strings.Contains(args, "--headless") {
+		t.Errorf("non-headless boot should not include --headless in args: %s", args)
+	}
+	if !strings.Contains(args, "--device-set-path /tmp/axe-devices") {
+		t.Errorf("expected --device-set-path in args: %s", args)
+	}
+}
+
 func TestBootHeadlessWith_Success(t *testing.T) {
 	cmdr := newFakeCommander()
 

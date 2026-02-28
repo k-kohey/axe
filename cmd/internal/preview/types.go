@@ -90,6 +90,7 @@ type RunOptions struct {
 	ReuseBuild      bool
 	FullThunk       bool
 	Strict          bool
+	NoHeadless      bool
 
 	// OnReady is called after the preview app has launched and is confirmed ready.
 	// Receives the simulator device UDID and device set path.

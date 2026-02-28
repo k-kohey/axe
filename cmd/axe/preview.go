@@ -113,7 +113,7 @@ func runOneshotLogic(sourceArg string) error {
 }
 
 // runWatchLogic starts preview in watch mode with hot-reload.
-func runWatchLogic(sourceArg, selector string, reuseBuild, strict bool) error {
+func runWatchLogic(sourceArg, selector string, reuseBuild, strict, noHeadless bool) error {
 	pc, err := previewPreamble()
 	if err != nil {
 		return err
@@ -131,6 +131,7 @@ func runWatchLogic(sourceArg, selector string, reuseBuild, strict bool) error {
 		PreferredDevice: previewDevice,
 		ReuseBuild:      reuseBuild,
 		Strict:          strict,
+		NoHeadless:      noHeadless,
 	})
 }
 
