@@ -2,6 +2,8 @@ package preview
 
 import (
 	"encoding/base64"
+	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,49 @@ import (
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
 )
+
+var updateGolden = flag.Bool("update", false, "update golden files")
+
+const goldenVersion = "abc1234"
+
+// assertGolden compares got against the golden file at path.
+// If -update is set, it writes got to the golden file instead.
+func assertGolden(t *testing.T, goldenPath string, got string) {
+	t.Helper()
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("creating golden dir: %v", err)
+		}
+		if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+			t.Fatalf("updating golden file: %v", err)
+		}
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("reading golden file %s: %v (run with -update to create)", goldenPath, err)
+	}
+	if string(want) != got {
+		// Find first difference for a useful error message.
+		wantLines := strings.Split(string(want), "\n")
+		gotLines := strings.Split(got, "\n")
+		for i := 0; i < len(wantLines) || i < len(gotLines); i++ {
+			var wl, gl string
+			if i < len(wantLines) {
+				wl = wantLines[i]
+			}
+			if i < len(gotLines) {
+				gl = gotLines[i]
+			}
+			if wl != gl {
+				t.Fatalf("golden mismatch in %s at line %d:\n  want: %q\n  got:  %q",
+					filepath.Base(goldenPath), i+1, wl, gl)
+			}
+		}
+		t.Fatalf("golden mismatch in %s (different lengths: want %d lines, got %d lines)",
+			filepath.Base(goldenPath), len(wantLines), len(gotLines))
+	}
+}
 
 func TestValidateReportFiles_NotSwift(t *testing.T) {
 	_, err := validateReportFiles([]string{"foo.txt"})
@@ -290,7 +335,7 @@ func TestRenderMarkdownReport(t *testing.T) {
 			startLine: 12,
 			png:       png,
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(md, "# SwiftUI Preview Report") {
 		t.Fatal("missing report title")
@@ -337,7 +382,7 @@ func TestRenderMarkdownReport_MultiplePathsAndPreviews(t *testing.T) {
 			startLine: 11,
 			png:       []byte("bar-0"),
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(md, "## FooView.swift") {
 		t.Fatal("missing first file section")
@@ -419,7 +464,7 @@ func TestRenderMarkdownReport_UsesImageRefsWhenProvided(t *testing.T) {
 			png:       []byte("fake-png"),
 			imageRef:  reportAssetsDirName + "/FooView--deadbeef--preview-0.png",
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(md, reportAssetsDirName+"/FooView--deadbeef--preview-0.png") {
 		t.Fatal("missing imageRef")
@@ -438,7 +483,7 @@ func TestRenderMarkdownReport_RelativeSource(t *testing.T) {
 			startLine: 10,
 			png:       []byte("x"),
 		},
-	}, "/project")
+	}, nil, "/project", "test")
 
 	if !strings.Contains(md, "<code>Sources/FooView.swift:10</code>") {
 		t.Fatal("expected relative source path when cwd is set")
@@ -454,7 +499,7 @@ func TestRenderMarkdownReport_OutsideCwdUsesBaseName(t *testing.T) {
 			startLine: 5,
 			png:       []byte("x"),
 		},
-	}, "/project")
+	}, nil, "/project", "test")
 
 	if !strings.Contains(md, "<code>FooView.swift:5</code>") {
 		t.Fatal("expected base name for file outside cwd")
@@ -565,7 +610,7 @@ func TestRenderHTMLReport(t *testing.T) {
 			startLine: 12,
 			png:       png,
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(html, "<!DOCTYPE html>") {
 		t.Fatal("missing DOCTYPE")
@@ -611,7 +656,7 @@ func TestRenderHTMLReport_MultiplePathsAndPreviews(t *testing.T) {
 			startLine: 11,
 			png:       []byte("bar-0"),
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(html, "FooView.swift") {
 		t.Fatal("missing first file section")
@@ -646,7 +691,7 @@ func TestRenderHTMLReport_UsesImageRefsWhenProvided(t *testing.T) {
 			png:       []byte("fake-png"),
 			imageRef:  reportAssetsDirName + "/FooView--deadbeef--preview-0.png",
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(html, reportAssetsDirName+"/FooView--deadbeef--preview-0.png") {
 		t.Fatal("missing imageRef in src")
@@ -665,7 +710,7 @@ func TestRenderHTMLReport_DarkModeCSS(t *testing.T) {
 			startLine: 1,
 			png:       []byte("x"),
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(html, "prefers-color-scheme: dark") {
 		t.Fatal("missing dark mode media query")
@@ -682,7 +727,7 @@ func TestRenderHTMLReport_HTMLEscaping(t *testing.T) {
 			startLine: 1,
 			png:       []byte("x"),
 		},
-	}, "")
+	}, nil, "", "test")
 
 	if strings.Contains(out, "<b>evil<b>") {
 		t.Fatal("XSS: unescaped HTML tag in file name")
@@ -701,7 +746,7 @@ func TestRenderHTMLReport_HTMLEscaping(t *testing.T) {
 func TestRenderHTMLReport_LightboxScript(t *testing.T) {
 	out := renderHTMLReport([]reportCapture{
 		{file: "/tmp/Foo.swift", index: 0, title: "T", startLine: 1, png: []byte("x")},
-	}, "")
+	}, nil, "", "test")
 
 	if !strings.Contains(out, `id="lightbox"`) {
 		t.Fatal("missing lightbox dialog element")
@@ -714,6 +759,85 @@ func TestRenderHTMLReport_LightboxScript(t *testing.T) {
 	}
 	if strings.Contains(out, "onclick=") {
 		t.Fatal("should not use inline onclick handler (CSP)")
+	}
+}
+
+func TestRenderMarkdownReport_WithFailures(t *testing.T) {
+	captures := []reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}
+	failures := []captureFailure{
+		{file: "/tmp/HogeView.swift", index: 1, title: "Dark", startLine: 20, err: fmt.Errorf("simulator timeout")},
+	}
+	md := renderMarkdownReport(captures, failures, "", "abc1234")
+	if !strings.Contains(md, "## Failures") {
+		t.Fatal("missing failures section")
+	}
+	if !strings.Contains(md, "simulator timeout") {
+		t.Fatal("missing error message in failures")
+	}
+}
+
+func TestRenderMarkdownReport_NoFailures(t *testing.T) {
+	md := renderMarkdownReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}, nil, "", "test")
+	if strings.Contains(md, "Failures") {
+		t.Fatal("should not show failures section when there are none")
+	}
+}
+
+func TestRenderHTMLReport_WithFailures(t *testing.T) {
+	captures := []reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}
+	failures := []captureFailure{
+		{file: "/tmp/HogeView.swift", index: 1, title: "Dark", startLine: 20, err: fmt.Errorf("simulator timeout")},
+	}
+	html := renderHTMLReport(captures, failures, "", "abc1234")
+	if !strings.Contains(html, "Failures") {
+		t.Fatal("missing failures section")
+	}
+	if !strings.Contains(html, "simulator timeout") {
+		t.Fatal("missing error message in failures")
+	}
+}
+
+func TestRenderHTMLReport_NoFailures(t *testing.T) {
+	html := renderHTMLReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}, nil, "", "test")
+	if strings.Contains(html, "Failures") {
+		t.Fatal("should not show failures section when there are none")
+	}
+}
+
+func TestRenderHTMLReport_Version(t *testing.T) {
+	html := renderHTMLReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}, nil, "", "abc1234")
+	if !strings.Contains(html, "abc1234") {
+		t.Fatal("expected version string in HTML report")
+	}
+}
+
+func TestRenderMarkdownReport_Version(t *testing.T) {
+	md := renderMarkdownReport([]reportCapture{
+		{file: "/tmp/HogeView.swift", index: 0, title: "OK", startLine: 10, png: []byte("x")},
+	}, nil, "", "abc1234")
+	if !strings.Contains(md, "abc1234") {
+		t.Fatal("expected version string in markdown report")
+	}
+}
+
+func TestCaptureFailure_DisplayTitle(t *testing.T) {
+	f := captureFailure{title: "Dark Mode"}
+	if f.displayTitle() != "Dark Mode" {
+		t.Fatalf("expected 'Dark Mode', got %q", f.displayTitle())
+	}
+	f2 := captureFailure{title: ""}
+	if f2.displayTitle() != "(Untitled)" {
+		t.Fatalf("expected '(Untitled)', got %q", f2.displayTitle())
 	}
 }
 
@@ -787,4 +911,85 @@ func TestSourceBaseName(t *testing.T) {
 			t.Errorf("sourceBaseName(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
+}
+
+// --- Golden file tests ---
+// Run with -update to regenerate: go test ./internal/preview/ -run Golden -update
+
+func goldenSingleCaptures() []reportCapture {
+	return []reportCapture{
+		{
+			file:      "/project/Sources/HogeView.swift",
+			index:     0,
+			title:     "Dark Mode",
+			startLine: 12,
+			png:       []byte("fake-png"),
+			imageRef:  reportAssetsDirName + "/HogeView--aabbccdd--preview-0.png",
+		},
+	}
+}
+
+func goldenMultipleCaptures() []reportCapture {
+	return []reportCapture{
+		{
+			file:      "/project/Sources/HogeView.swift",
+			index:     0,
+			title:     "",
+			startLine: 8,
+			png:       []byte("hoge-0"),
+			imageRef:  reportAssetsDirName + "/HogeView--aabbccdd--preview-0.png",
+		},
+		{
+			file:      "/project/Sources/HogeView.swift",
+			index:     1,
+			title:     "Dark Mode",
+			startLine: 20,
+			png:       []byte("hoge-1"),
+			imageRef:  reportAssetsDirName + "/HogeView--aabbccdd--preview-1.png",
+		},
+		{
+			file:      "/project/Sources/FugaView.swift",
+			index:     0,
+			title:     "Fuga",
+			startLine: 11,
+			png:       []byte("fuga-0"),
+			imageRef:  reportAssetsDirName + "/FugaView--11223344--preview-0.png",
+		},
+	}
+}
+
+func goldenFailures() []captureFailure {
+	return []captureFailure{
+		{file: "/project/Sources/HogeView.swift", index: 2, title: "Broken", startLine: 30, err: fmt.Errorf("simulator timeout")},
+	}
+}
+
+func TestGolden_MD_Single(t *testing.T) {
+	got := renderMarkdownReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_md_single.md"), got)
+}
+
+func TestGolden_MD_Multiple(t *testing.T) {
+	got := renderMarkdownReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_md_multiple.md"), got)
+}
+
+func TestGolden_MD_WithFailures(t *testing.T) {
+	got := renderMarkdownReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_md_with_failures.md"), got)
+}
+
+func TestGolden_HTML_Single(t *testing.T) {
+	got := renderHTMLReport(goldenSingleCaptures(), nil, "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_html_single.html"), got)
+}
+
+func TestGolden_HTML_Multiple(t *testing.T) {
+	got := renderHTMLReport(goldenMultipleCaptures(), nil, "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_html_multiple.html"), got)
+}
+
+func TestGolden_HTML_WithFailures(t *testing.T) {
+	got := renderHTMLReport(goldenMultipleCaptures(), goldenFailures(), "/project", goldenVersion)
+	assertGolden(t, filepath.Join("testdata", "golden_html_with_failures.html"), got)
 }

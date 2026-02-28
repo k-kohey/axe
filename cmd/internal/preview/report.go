@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -54,6 +55,28 @@ func (c reportCapture) displayTitle() string {
 		return "(Untitled)"
 	}
 	return c.title
+}
+
+// captureFailure records a preview that failed to capture after retries.
+type captureFailure struct {
+	file      string
+	index     int
+	title     string
+	startLine int
+	err       error
+}
+
+func (f captureFailure) displayTitle() string {
+	if f.title == "" {
+		return "(Untitled)"
+	}
+	return f.title
+}
+
+// captureResult holds the outcome of a captureLoopPartial run.
+type captureResult struct {
+	captures []reportCapture
+	failures []captureFailure
 }
 
 // RunReport captures previews and writes them in the requested output format.
@@ -115,7 +138,7 @@ func runReportDocument(
 	opts ReportOptions,
 	blocks []fileBlocks,
 	reportFileName string,
-	render func([]reportCapture, string) string,
+	render func([]reportCapture, []captureFailure, string, string) string,
 ) error {
 	reportPath, assetsDir, err := prepareReportOutputPaths(opts.Output, reportFileName)
 	if err != nil {
@@ -124,23 +147,16 @@ func runReportDocument(
 
 	slog.Info("preview report capture begin", "format", reportFileName, "fileCount", len(blocks))
 
-	var captures []reportCapture
-	err = captureLoop(opts, blocks, func(file string, index int, pb analysis.PreviewBlock, png []byte) error {
-		captures = append(captures, reportCapture{
-			file:      file,
-			index:     index,
-			title:     pb.Title,
-			startLine: pb.StartLine,
-			png:       append([]byte(nil), png...),
-		})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	slog.Info("preview report capture done", "captureCount", len(captures))
+	result := captureLoopPartial(opts, blocks)
 
-	capturesWithRefs, err := writeReportAssets(assetsDir, filepath.Dir(reportPath), captures)
+	slog.Info("preview report capture done",
+		"captureCount", len(result.captures), "failureCount", len(result.failures))
+
+	if len(result.captures) == 0 && len(result.failures) > 0 {
+		return fmt.Errorf("all %d preview captures failed", len(result.failures))
+	}
+
+	capturesWithRefs, err := writeReportAssets(assetsDir, filepath.Dir(reportPath), result.captures)
 	if err != nil {
 		return err
 	}
@@ -148,7 +164,8 @@ func runReportDocument(
 	if err != nil {
 		slog.Warn("failed to get working directory, source paths will use base names", "err", err)
 	}
-	content := render(capturesWithRefs, cwd)
+	version := resolveVersion()
+	content := render(capturesWithRefs, result.failures, cwd, version)
 	if err := os.WriteFile(reportPath, []byte(content), 0o644); err != nil {
 		return err
 	}
@@ -160,6 +177,10 @@ func runReportDocument(
 		}
 	}
 
+	if len(result.failures) > 0 {
+		return fmt.Errorf("%d of %d preview captures failed (report generated with partial results)",
+			len(result.failures), len(result.captures)+len(result.failures))
+	}
 	return nil
 }
 
@@ -209,6 +230,96 @@ func captureLoop(opts ReportOptions, blocks []fileBlocks, onCapture func(file st
 		}
 	}
 	return nil
+}
+
+const captureMaxRetries = 3
+
+// captureLoopPartial iterates all preview blocks, captures screenshots,
+// retries on failure, and continues past individual errors.
+// Used by runReportDocument (MD/HTML) to produce partial reports.
+func captureLoopPartial(opts ReportOptions, blocks []fileBlocks) captureResult {
+	var result captureResult
+	firstRun := true
+	for _, fb := range blocks {
+		for i, pb := range fb.previews {
+			var png []byte
+			var lastErr error
+			for attempt := range captureMaxRetries {
+				runOpts := RunOptions{
+					SourceFile:      fb.file,
+					PC:              opts.PC,
+					PreviewSelector: strconv.Itoa(i),
+					PreferredDevice: opts.Device,
+					ReuseBuild:      !firstRun,
+				}
+				runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
+					if opts.RenderDelay > 0 {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-time.After(opts.RenderDelay):
+						}
+					}
+					data, err := platform.Screenshot(ctx, device, deviceSetPath)
+					if err != nil {
+						return err
+					}
+					png = data
+					return nil
+				}
+
+				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
+				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
+
+				lastErr = Run(runOpts)
+				if lastErr == nil && len(png) == 0 {
+					lastErr = fmt.Errorf("screenshot data was empty")
+				}
+				if lastErr == nil {
+					break
+				}
+				slog.Warn("preview capture failed",
+					"file", filepath.Base(fb.file), "previewIndex", i,
+					"attempt", attempt+1, "maxRetries", captureMaxRetries, "err", lastErr)
+				firstRun = false
+			}
+
+			if lastErr != nil {
+				fmt.Fprintf(os.Stderr, "  Failed after %d attempts: %s preview %d: %v\n",
+					captureMaxRetries, filepath.Base(fb.file), i, lastErr)
+				result.failures = append(result.failures, captureFailure{
+					file:      fb.file,
+					index:     i,
+					title:     pb.Title,
+					startLine: pb.StartLine,
+					err:       lastErr,
+				})
+			} else {
+				result.captures = append(result.captures, reportCapture{
+					file:      fb.file,
+					index:     i,
+					title:     pb.Title,
+					startLine: pb.StartLine,
+					png:       append([]byte(nil), png...),
+				})
+			}
+			firstRun = false
+		}
+	}
+	return result
+}
+
+// resolveVersion returns a version string for the report.
+// Uses the git commit hash if available, otherwise falls back to a timestamp.
+func resolveVersion() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err == nil {
+		hash := strings.TrimSpace(string(out))
+		if hash != "" {
+			return hash
+		}
+	}
+	return time.Now().Format(time.RFC3339)
 }
 
 // fileBlocks pairs a source file with its parsed #Preview blocks.
@@ -418,7 +529,7 @@ func reportAssetName(sourceFile string, index int) string {
 	return fmt.Sprintf("%s--%x--preview-%d.png", sourceBaseName(sourceFile), sum[:4], index)
 }
 
-func renderMarkdownReport(captures []reportCapture, cwd string) string {
+func renderMarkdownReport(captures []reportCapture, failures []captureFailure, cwd, version string) string {
 	const columns = 2
 
 	var b strings.Builder
@@ -427,7 +538,7 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 	groups := groupCapturesByFile(captures)
 
 	fmt.Fprintf(&b, "_Generated by `axe preview report --format md`_\n\n")
-	fmt.Fprintf(&b, "_Generated at: %s_\n\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "_%s_\n\n", version)
 	fmt.Fprintf(&b, "- Files: **%d**\n", len(groups))
 	fmt.Fprintf(&b, "- Previews: **%d**\n\n", len(captures))
 	b.WriteString("## Overview\n\n")
@@ -437,6 +548,17 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 		fmt.Fprintf(&b, "| `%s` | %d |\n", filepath.Base(g.file), len(g.captures))
 	}
 	b.WriteString("\n")
+
+	if len(failures) > 0 {
+		fmt.Fprintf(&b, "## Failures (%d)\n\n", len(failures))
+		b.WriteString("| File | Preview | Error |\n")
+		b.WriteString("| --- | ---: | --- |\n")
+		for _, f := range failures {
+			fmt.Fprintf(&b, "| `%s` | %d — %s | %s |\n",
+				filepath.Base(f.file), f.index, f.displayTitle(), f.err.Error())
+		}
+		b.WriteString("\n")
+	}
 
 	for _, g := range groups {
 		base := filepath.Base(g.file)
@@ -478,8 +600,17 @@ func renderMarkdownReport(captures []reportCapture, cwd string) string {
 type htmlReportData struct {
 	FileCount    int
 	PreviewCount int
-	GeneratedAt  string
+	Version      string
 	Groups       []htmlGroupData
+	Failures     []htmlFailureData
+}
+
+// htmlFailureData represents a failed preview capture in the HTML report.
+type htmlFailureData struct {
+	FileName string
+	Index    int
+	Title    string
+	ErrorMsg string
 }
 
 // htmlGroupData represents one source file and its preview cards.
@@ -501,208 +632,18 @@ type htmlCardData struct {
 	Delay     string
 }
 
-var htmlReportTmpl = template.Must(template.New("report").Parse(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SwiftUI Preview Report</title>
-<style>
-:root {
-  --bg: #fafaf9;
-  --card-bg: #ffffff;
-  --text: #1a1a1a;
-  --text-secondary: #737373;
-  --border: #e5e5e5;
-  --shadow: rgba(0,0,0,0.06);
-  --accent: #e25822;
-  --accent-hover: #c94a1a;
-  --header-from: #1a1a1a;
-  --header-to: #2d2d2d;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #171717;
-    --card-bg: #262626;
-    --text: #fafafa;
-    --text-secondary: #a3a3a3;
-    --border: #404040;
-    --shadow: rgba(0,0,0,0.4);
-    --accent: #f97316;
-    --accent-hover: #fb923c;
-    --header-from: #0a0a0a;
-    --header-to: #171717;
-  }
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.6;
-}
-header {
-  background: linear-gradient(135deg, var(--header-from), var(--header-to));
-  color: #fafafa;
-  text-align: center;
-  padding: 3rem 2rem 2.5rem;
-}
-header h1 {
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 0.5rem;
-}
-header .summary { color: #a3a3a3; font-size: 0.85rem; }
-nav {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  padding: 0.75rem 2rem;
-}
-nav ul { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
-nav a {
-  color: var(--text);
-  text-decoration: none;
-  padding: 0.3rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 2rem;
-  font-size: 0.8rem;
-  transition: all 0.2s;
-}
-nav a:hover { border-color: var(--accent); color: var(--accent); }
-main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
-section { margin-bottom: 3rem; }
-section h2 {
-  font-size: 1.2rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 2px solid var(--accent);
-  display: inline-block;
-}
-section h2 .summary { font-weight: 400; }
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
-@keyframes card-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.card {
-  background: var(--card-bg);
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  transition: transform 0.2s, box-shadow 0.2s;
-  animation: card-in 0.4s ease both;
-}
-.card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px var(--shadow);
-}
-.card img {
-  width: 100%;
-  display: block;
-  cursor: pointer;
-  background: var(--bg);
-}
-.card-body { padding: 0.75rem 1rem; }
-.card-title { font-weight: 600; font-size: 0.9rem; }
-.card-meta {
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  margin-top: 0.2rem;
-  font-family: "SF Mono", ui-monospace, monospace;
-}
-dialog {
-  border: none;
-  background: transparent;
-  max-width: 90vw;
-  max-height: 90vh;
-  padding: 0;
-  opacity: 0;
-  transform: scale(0.95);
-  transition: opacity 0.2s, transform 0.2s;
-}
-dialog[open] { opacity: 1; transform: scale(1); }
-dialog::backdrop { background: rgba(0,0,0,0.75); }
-dialog img { max-width: 90vw; max-height: 85vh; border-radius: 8px; display: block; }
-dialog .hint {
-  text-align: center;
-  color: #a3a3a3;
-  font-size: 0.75rem;
-  margin-top: 0.75rem;
-}
-footer {
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  padding: 1.5rem 2rem;
-  border-top: 1px solid var(--border);
-}
-</style>
-</head>
-<body>
-<header>
-<h1>SwiftUI Preview Report</h1>
-<p class="summary">{{.FileCount}} files &middot; {{.PreviewCount}} previews &middot; Generated at {{.GeneratedAt}}</p>
-</header>
-<nav><ul>
-{{range .Groups}}<li><a href="#{{.AnchorID}}">{{.FileName}} ({{.PreviewCount}})</a></li>
-{{end}}</ul></nav>
-<main>
-{{range .Groups}}<section id="{{.AnchorID}}">
-<h2>{{.FileName}} <span class="summary">({{.PreviewCount}} previews)</span></h2>
-<div class="grid">
-{{range .Cards}}<div class="card" style="animation-delay:{{.Delay}}">
-<img src="{{.ImageSrc}}" alt="{{.Alt}}" data-lightbox />
-<div class="card-body">
-<div class="card-title">Preview {{.Index}} &mdash; {{.Title}}</div>
-<div class="card-meta">{{.Source}}:{{.StartLine}}</div>
-</div>
-</div>
-{{end}}</div>
-</section>
-{{end}}</main>
-<dialog id="lightbox"><img src="" alt="preview" /><p class="hint">Click outside to close</p></dialog>
-<script>
-(function() {
-  var dialog = document.getElementById('lightbox');
-  var dialogImg = dialog ? dialog.querySelector('img') : null;
-  if (!dialog || !dialogImg || typeof dialog.showModal !== 'function') return;
-  document.addEventListener('click', function(e) {
-    if (!(e.target instanceof HTMLImageElement)) return;
-    if (!e.target.hasAttribute('data-lightbox')) return;
-    dialogImg.src = e.target.src;
-    dialogImg.alt = e.target.alt;
-    dialog.showModal();
-  });
-  dialog.addEventListener('click', function(e) {
-    var rect = dialogImg.getBoundingClientRect();
-    var inside = e.clientX >= rect.left && e.clientX <= rect.right &&
-                 e.clientY >= rect.top && e.clientY <= rect.bottom;
-    if (!inside) dialog.close();
-  });
-})();
-</script>
-<footer>Generated by <code>axe preview report --format html</code></footer>
-</body>
-</html>
-`))
+//go:embed templates/report.html
+var htmlReportTmplSource string
 
-func renderHTMLReport(captures []reportCapture, cwd string) string {
+var htmlReportTmpl = template.Must(template.New("report").Parse(htmlReportTmplSource))
+
+func renderHTMLReport(captures []reportCapture, failures []captureFailure, cwd, version string) string {
 	groups := groupCapturesByFile(captures)
 
 	data := htmlReportData{
 		FileCount:    len(groups),
 		PreviewCount: len(captures),
-		GeneratedAt:  time.Now().Format(time.RFC3339),
+		Version:      version,
 	}
 	for i, g := range groups {
 		base := filepath.Base(g.file)
@@ -723,6 +664,14 @@ func renderHTMLReport(captures []reportCapture, cwd string) string {
 			})
 		}
 		data.Groups = append(data.Groups, gd)
+	}
+	for _, f := range failures {
+		data.Failures = append(data.Failures, htmlFailureData{
+			FileName: filepath.Base(f.file),
+			Index:    f.index,
+			Title:    f.displayTitle(),
+			ErrorMsg: f.err.Error(),
+		})
 	}
 
 	var b strings.Builder
