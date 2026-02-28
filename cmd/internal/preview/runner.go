@@ -38,7 +38,6 @@ type SourceLister interface {
 
 // Compile-time interface compliance checks.
 var (
-	_ build.Runner    = (*runner.Build)(nil)
 	_ ToolchainRunner = (*runner.Toolchain)(nil)
 	_ AppRunner       = (*runner.App)(nil)
 	_ FileCopier      = (*runner.FileCopy)(nil)

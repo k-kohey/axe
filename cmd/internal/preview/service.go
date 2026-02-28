@@ -43,7 +43,7 @@ const defaultStreamID = "default"
 
 // defaultRunners creates the production implementations of all runner interfaces.
 func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
-	return &runner.Build{}, &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
+	return build.NewRunner(), &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
 }
 
 func Run(opts RunOptions) error {
@@ -445,7 +445,7 @@ func RunBuild(pc ProjectConfig) error {
 	}
 
 	// Only the build runner is needed; no simulator, app, or toolchain operations.
-	br := &runner.Build{}
+	br := build.NewRunner()
 
 	step := &stepper{total: 1}
 	done := step.begin("Building...")

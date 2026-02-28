@@ -1,6 +1,7 @@
 // Package runner provides production implementations of the runner interfaces
 // defined in the parent preview package. Each type wraps external CLI tools
-// (xcodebuild, swiftc, simctl, git, etc.) via os/exec.
+// (swiftc, simctl, git, etc.) via os/exec.
+// xcodebuild operations are handled by the build package.
 package runner
 
 import (
@@ -13,19 +14,6 @@ import (
 
 	"github.com/k-kohey/axe/internal/procgroup"
 )
-
-// --- Build ---
-
-// Build executes real xcodebuild commands.
-type Build struct{}
-
-func (r *Build) FetchBuildSettings(ctx context.Context, args []string) ([]byte, error) {
-	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
-}
-
-func (r *Build) Build(ctx context.Context, args []string) ([]byte, error) {
-	return procgroup.Command(ctx, args[0], args[1:]...).CombinedOutput()
-}
 
 // --- Toolchain ---
 
