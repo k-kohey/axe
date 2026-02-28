@@ -67,6 +67,15 @@ func Run(opts RunOptions) error {
 		}
 	}
 
+	br, tc, ar, fc, sl := defaultRunners()
+
+	// Oneshot mode: delegate to PreviewSession for a single Build+Boot cycle.
+	if !opts.Watch && !opts.Serve {
+		return runOneshot(ctx, opts, br, tc, ar, fc)
+	}
+
+	// --- Watch/Serve mode below (unchanged) ---
+
 	// sendStatus sends a StreamStatus event in serve mode (no-op otherwise).
 	sendStatus := func(phase string) {
 		if ew != nil {
@@ -84,8 +93,6 @@ func Run(opts RunOptions) error {
 			}
 		}
 	}
-
-	br, tc, ar, fc, sl := defaultRunners()
 
 	step := &stepper{total: 6}
 
@@ -319,7 +326,7 @@ func Run(opts RunOptions) error {
 		go protocol.RelayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
 	}
 
-	if opts.Watch && compileResult.Degraded {
+	if compileResult.Degraded {
 		sendStatus("degraded")
 		slog.Warn("Running in degraded mode: hot-reload not available")
 		if err := codegen.WaitForReady(ctx, dirs.Socket); err != nil {
@@ -359,69 +366,104 @@ func Run(opts RunOptions) error {
 		}
 	}
 
-	if opts.Watch {
-		// Compute initial skeleton hashes for all tracked files.
-		skeletonMap := buildSkeletonMap(trackedFiles)
+	// Compute initial skeleton hashes for all tracked files.
+	skeletonMap := buildSkeletonMap(trackedFiles)
 
-		wctx := watchContext{
-			device:        device,
-			deviceSetPath: deviceSetPath,
-			loaderPath:    loaderPath,
-			streamID:      defaultStreamID,
-			serve:         opts.Serve,
-			ew:            ew,
-			build:         br,
-			toolchain:     tc,
-			app:           ar,
-			copier:        fc,
-			sources:       sl,
-		}
-
-		initialIndex := 0
-		if idx, err := strconv.Atoi(opts.PreviewSelector); err == nil {
-			initialIndex = idx
-		}
-
-		ws := &watchState{
-			reloadCounter:   1, // 0 was used for the initial launch
-			previewSelector: opts.PreviewSelector,
-			previewIndex:    initialIndex,
-			previewCount:    previewCount,
-			skeletonMap:     skeletonMap,
-			trackedFiles:    trackedFiles,
-			depGraph:        depGraph,
-			indexCache:      indexCache,
-		}
-
-		var hid *protocol.HIDHandler
-		if idbClient != nil {
-			if w, h, err := idbClient.ScreenSize(context.Background()); err == nil {
-				hid = protocol.NewHIDHandler(idbClient, w, h)
-			}
-		}
-
-		var watchBootDiedCh <-chan struct{}
-		if bootCompanion != nil {
-			watchBootDiedCh = bootCompanion.Done()
-		}
-		fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-		return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, watchBootDiedCh)
+	wctx := watchContext{
+		device:        device,
+		deviceSetPath: deviceSetPath,
+		loaderPath:    loaderPath,
+		streamID:      defaultStreamID,
+		serve:         opts.Serve,
+		ew:            ew,
+		build:         br,
+		toolchain:     tc,
+		app:           ar,
+		copier:        fc,
+		sources:       sl,
 	}
 
-	// Oneshot mode (no watch): verify runtime is ready, then exit silently.
-	// Cleanup (terminate app, stop simulator, remove socket) runs via defer.
-	if err := codegen.WaitForReady(ctx, dirs.Socket); err != nil {
-		sendStopped("runtime_error", err.Error(), "")
+	initialIndex := 0
+	if idx, err := strconv.Atoi(opts.PreviewSelector); err == nil {
+		initialIndex = idx
+	}
+
+	ws := &watchState{
+		reloadCounter:   1, // 0 was used for the initial launch
+		previewSelector: opts.PreviewSelector,
+		previewIndex:    initialIndex,
+		previewCount:    previewCount,
+		skeletonMap:     skeletonMap,
+		trackedFiles:    trackedFiles,
+		depGraph:        depGraph,
+		indexCache:      indexCache,
+	}
+
+	var hid *protocol.HIDHandler
+	if idbClient != nil {
+		if w, h, err := idbClient.ScreenSize(context.Background()); err == nil {
+			hid = protocol.NewHIDHandler(idbClient, w, h)
+		}
+	}
+
+	var watchBootDiedCh <-chan struct{}
+	if bootCompanion != nil {
+		watchBootDiedCh = bootCompanion.Done()
+	}
+	fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
+	return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, watchBootDiedCh)
+}
+
+// runOneshot handles the oneshot preview mode (no watch, no serve) using
+// PreviewSession. Build and Boot run in parallel, then a single
+// CapturePreview captures the preview.
+func runOneshot(ctx context.Context, opts RunOptions, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier) error {
+	step := &stepper{total: 3}
+
+	simctl := &platform.RealSimctlRunner{}
+	var device, deviceSetPath string
+	var isExternalDevice bool
+	if opts.DeviceUDID != "" {
+		device = opts.DeviceUDID
+		deviceSetPath = opts.DeviceSetPath
+	} else {
+		done := step.begin("Resolving simulator...")
+		var err error
+		device, deviceSetPath, isExternalDevice, err = platform.ResolveAxeSimulator(simctl, opts.PreferredDevice)
+		done()
+		if err != nil {
+			return err
+		}
+	}
+
+	done := step.begin("Preparing session...")
+	sess, err := NewPreviewSession(ctx, SessionConfig{
+		PC:               opts.PC,
+		DeviceUDID:       device,
+		DeviceSetPath:    deviceSetPath,
+		IsExternalDevice: isExternalDevice,
+		NoHeadless:       opts.NoHeadless,
+		Preparer:         opts.Preparer,
+		ReuseBuild:       opts.ReuseBuild,
+		BuildRunner:      br,
+		Toolchain:        tc,
+		AppRunner:        ar,
+		Copier:           fc,
+	})
+	done()
+	if err != nil {
 		return err
 	}
+	defer sess.Close()
 
-	// OnReady callback (screenshot etc.) runs before cleanup.
-	if opts.OnReady != nil {
-		if err := opts.OnReady(ctx, device, deviceSetPath); err != nil {
-			return fmt.Errorf("on-ready: %w", err)
-		}
-	}
-	return nil
+	done = step.begin("Capturing preview...")
+	err = sess.CapturePreview(ctx, CaptureRequest{
+		SourceFile:      opts.SourceFile,
+		PreviewSelector: opts.PreviewSelector,
+		OnReady:         opts.OnReady,
+	})
+	done()
+	return err
 }
 
 // RunServe is the multi-stream entry point for serve mode.
