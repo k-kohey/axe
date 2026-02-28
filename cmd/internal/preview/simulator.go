@@ -7,11 +7,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/buildlock"
 	"howett.net/plist"
 )
 
-func terminateApp(ctx context.Context, bs *buildSettings, device, deviceSetPath string, ar AppRunner) {
+func terminateApp(ctx context.Context, bs *build.Settings, device, deviceSetPath string, ar AppRunner) {
 	if err := ar.Terminate(ctx, device, bs.BundleID, deviceSetPath); err != nil {
 		slog.Debug("terminate app (may not be running)", "err", err)
 	}
@@ -20,7 +21,7 @@ func terminateApp(ctx context.Context, bs *buildSettings, device, deviceSetPath 
 // resolveAppBundle locates the .app bundle in the build products directory.
 // It first checks BuiltProductsDir (configuration-specific), then falls back
 // to a glob across all configuration directories.
-func resolveAppBundle(bs *buildSettings, dirs previewDirs) (string, error) {
+func resolveAppBundle(bs *build.Settings, dirs previewDirs) (string, error) {
 	appName := bs.ModuleName + ".app"
 	srcAppPath := filepath.Join(bs.BuiltProductsDir, appName)
 
@@ -38,7 +39,7 @@ func resolveAppBundle(bs *buildSettings, dirs previewDirs) (string, error) {
 
 // stageAppBundle copies the .app bundle from dirs.Build to dirs.Staging
 // under LOCK_SH to protect against concurrent xcodebuild writes.
-func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs, fc FileCopier) (string, error) {
+func stageAppBundle(ctx context.Context, bs *build.Settings, dirs previewDirs, fc FileCopier) (string, error) {
 	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		return "", fmt.Errorf("acquiring read lock: %w", err)
@@ -65,7 +66,7 @@ func stageAppBundle(ctx context.Context, bs *buildSettings, dirs previewDirs, fc
 	return stagedAppPath, nil
 }
 
-func installApp(ctx context.Context, bs *buildSettings, dirs previewDirs, device, deviceSetPath string, ar AppRunner, fc FileCopier) (string, error) {
+func installApp(ctx context.Context, bs *build.Settings, dirs previewDirs, device, deviceSetPath string, ar AppRunner, fc FileCopier) (string, error) {
 	// Stage the app bundle under shared lock (reads dirs.Build).
 	stagedAppPath, err := stageAppBundle(ctx, bs, dirs, fc)
 	if err != nil {
@@ -121,7 +122,7 @@ func rewriteInfoPlist(plistPath, bundleID, displayName string) {
 
 // launchWithHotReload launches the app with both the loader dylib and the
 // initial thunk dylib injected, plus the socket path for hot-reload communication.
-func launchWithHotReload(ctx context.Context, bs *buildSettings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string, ar AppRunner) error {
+func launchWithHotReload(ctx context.Context, bs *build.Settings, loaderPath, thunkPath, socketPath string, device, deviceSetPath string, ar AppRunner) error {
 	insertLibs := loaderPath + ":" + thunkPath
 
 	env := map[string]string{

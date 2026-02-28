@@ -3,14 +3,12 @@ package preview
 import (
 	"context"
 
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/runner"
 )
 
-// BuildRunner abstracts xcodebuild operations for testability.
-type BuildRunner interface {
-	FetchBuildSettings(ctx context.Context, args []string) ([]byte, error)
-	Build(ctx context.Context, args []string) ([]byte, error)
-}
+// BuildRunner is an alias for build.Runner, kept for backward compatibility.
+type BuildRunner = build.Runner
 
 // ToolchainRunner abstracts swiftc, clang, codesign, and xcrun operations for testability.
 type ToolchainRunner interface {
@@ -40,7 +38,6 @@ type SourceLister interface {
 
 // Compile-time interface compliance checks.
 var (
-	_ BuildRunner     = (*runner.Build)(nil)
 	_ ToolchainRunner = (*runner.Toolchain)(nil)
 	_ AppRunner       = (*runner.App)(nil)
 	_ FileCopier      = (*runner.FileCopy)(nil)

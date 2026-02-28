@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 )
 
@@ -104,7 +105,7 @@ func compilePipeline(
 	sourceFile string,
 	trackedFiles []string,
 	cache *analysis.IndexStoreCache,
-	bs *buildSettings,
+	bs *build.Settings,
 	dirs previewDirs,
 	previewSelector string,
 	counter int,
@@ -120,7 +121,7 @@ func compilePipeline(
 		return "", fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, counter, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, counter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("compile: %w", err)
 	}
@@ -134,7 +135,7 @@ func compilePipeline(
 func compileMainOnlyPipeline(
 	ctx context.Context,
 	sourceFile string,
-	bs *buildSettings,
+	bs *build.Settings,
 	dirs previewDirs,
 	previewSelector string,
 	tc ToolchainRunner,
@@ -149,7 +150,7 @@ func compileMainOnlyPipeline(
 		return "", fmt.Errorf("main-only thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("main-only compile: %w", err)
 	}
@@ -158,7 +159,7 @@ func compileMainOnlyPipeline(
 }
 
 // deploy attempts hot-reload via socket, falling back to full app relaunch.
-func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *buildSettings, wctx watchContext) error {
+func deploy(ctx context.Context, dylibPath string, dirs previewDirs, bs *build.Settings, wctx watchContext) error {
 	if err := codegen.SendReloadCommand(ctx, dirs.Socket, dylibPath); err != nil {
 		slog.Warn("Hot-reload failed, falling back to full relaunch", "err", err)
 		terminateApp(ctx, bs, wctx.device, wctx.deviceSetPath, wctx.app)

@@ -7,10 +7,11 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
-func TestEnsureBuildSettings_LazyInit(t *testing.T) {
+func TestEnsurePrepared_LazyInit(t *testing.T) {
 	t.Parallel()
 
 	output := `    PRODUCT_MODULE_NAME = TestModule
@@ -22,19 +23,19 @@ func TestEnsureBuildSettings_LazyInit(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
-	// First call should fetch build settings.
-	bs, err := sm.ensureBuildSettings(context.Background(), dirs)
+	// First call should run the full pipeline.
+	result, err := sm.ensurePrepared(context.Background(), dirs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if bs.ModuleName != "TestModule" {
-		t.Errorf("ModuleName = %q, want %q", bs.ModuleName, "TestModule")
+	if result.Settings.ModuleName != "TestModule" {
+		t.Errorf("ModuleName = %q, want %q", result.Settings.ModuleName, "TestModule")
 	}
 }
 
-func TestEnsureBuildSettings_CachesResult(t *testing.T) {
+func TestEnsurePrepared_CachesResult(t *testing.T) {
 	t.Parallel()
 
 	output := `    PRODUCT_MODULE_NAME = TestModule
@@ -50,21 +51,21 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
-	// Call twice — FetchBuildSettings should only be invoked once.
-	bs1, err := sm.ensureBuildSettings(context.Background(), dirs)
+	// Call twice — Prepare should only be invoked once.
+	r1, err := sm.ensurePrepared(context.Background(), dirs)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 
-	bs2, err := sm.ensureBuildSettings(context.Background(), dirs)
+	r2, err := sm.ensurePrepared(context.Background(), dirs)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
 
-	if bs1 != bs2 {
-		t.Error("expected same *buildSettings pointer from both calls")
+	if r1.Settings != r2.Settings {
+		t.Error("expected same *build.Settings pointer from both calls")
 	}
 
 	if callCount.Load() != 1 {
@@ -72,7 +73,7 @@ func TestEnsureBuildSettings_CachesResult(t *testing.T) {
 	}
 }
 
-func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
+func TestEnsurePrepared_ConcurrentSafety(t *testing.T) {
 	t.Parallel()
 
 	output := `    PRODUCT_MODULE_NAME = TestModule
@@ -88,20 +89,20 @@ func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
 	// Launch 10 concurrent calls.
 	const goroutines = 10
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 	errs := make([]error, goroutines)
-	results := make([]*buildSettings, goroutines)
+	results := make([]*build.Result, goroutines)
 
 	for i := range goroutines {
 		go func(idx int) {
 			defer wg.Done()
-			bs, err := sm.ensureBuildSettings(context.Background(), dirs)
-			results[idx] = bs
+			r, err := sm.ensurePrepared(context.Background(), dirs)
+			results[idx] = r
 			errs[idx] = err
 		}(i)
 	}
@@ -125,7 +126,7 @@ func TestEnsureBuildSettings_ConcurrentSafety(t *testing.T) {
 	}
 }
 
-func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
+func TestEnsurePrepared_PropagatesError(t *testing.T) {
 	t.Parallel()
 
 	br := &fakeBuildRunner{
@@ -135,68 +136,11 @@ func TestEnsureBuildSettings_PropagatesError(t *testing.T) {
 		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
 
-	dirs := previewDirs{Build: t.TempDir()}
+	dirs := previewDirs{ProjectDirs: build.ProjectDirs{Build: t.TempDir()}}
 
-	_, err := sm.ensureBuildSettings(context.Background(), dirs)
+	_, err := sm.ensurePrepared(context.Background(), dirs)
 	if err == nil {
 		t.Fatal("expected error, got nil")
-	}
-}
-
-// --- ensureCompilerPathsExtracted tests ---
-
-func TestEnsureCompilerPathsExtracted_OnlyOnce(t *testing.T) {
-	t.Parallel()
-
-	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
-		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
-
-	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{Build: t.TempDir()}
-
-	// Call twice.
-	sm.ensureCompilerPathsExtracted(context.Background(), bs, dirs)
-	sm.ensureCompilerPathsExtracted(context.Background(), bs, dirs)
-
-	// Verify the flag was set.
-	sm.bsMu.RLock()
-	extracted := sm.bsExtracted
-	sm.bsMu.RUnlock()
-
-	if !extracted {
-		t.Error("expected bsExtracted to be true")
-	}
-}
-
-func TestEnsureCompilerPathsExtracted_ConcurrentSafety(t *testing.T) {
-	t.Parallel()
-
-	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
-		ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}, "",
-		&fakeBuildRunner{}, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
-
-	bs := &buildSettings{ModuleName: "TestModule", BuiltProductsDir: "/tmp/none"}
-	dirs := previewDirs{Build: t.TempDir()}
-
-	const goroutines = 10
-	var wg sync.WaitGroup
-	wg.Add(goroutines)
-	for range goroutines {
-		go func() {
-			defer wg.Done()
-			sm.ensureCompilerPathsExtracted(context.Background(), bs, dirs)
-		}()
-	}
-	wg.Wait()
-
-	// Should not panic or race.
-	sm.bsMu.RLock()
-	extracted := sm.bsExtracted
-	sm.bsMu.RUnlock()
-
-	if !extracted {
-		t.Error("expected bsExtracted to be true after concurrent calls")
 	}
 }
 

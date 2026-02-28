@@ -1,4 +1,4 @@
-package preview
+package build
 
 import (
 	"bufio"
@@ -12,14 +12,46 @@ import (
 	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
-func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) (*buildSettings, error) {
+// Result holds the output of a Prepare call.
+type Result struct {
+	Settings *Settings
+	Dirs     ProjectDirs
+	Built    bool // true if xcodebuild was invoked (false when reusing a previous build)
+}
+
+// Prepare runs the full build pipeline: fetch settings, optionally build,
+// and extract compiler paths. This is the high-level entry point.
+func Prepare(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, reuse bool, r Runner) (*Result, error) {
+	s, err := FetchSettings(ctx, pc, dirs, r)
+	if err != nil {
+		return nil, err
+	}
+
+	built := false
+	if reuse && HasPreviousBuild(s, dirs) {
+		slog.Info("Reusing previous build", "buildDir", dirs.Build)
+	} else {
+		if err := Run(ctx, pc, dirs, r); err != nil {
+			return nil, err
+		}
+		built = true
+	}
+
+	ExtractCompilerPaths(ctx, s, dirs)
+
+	return &Result{Settings: s, Dirs: dirs, Built: built}, nil
+}
+
+// FetchSettings runs "xcodebuild -showBuildSettings" and parses the output
+// into a Settings struct.
+func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) (*Settings, error) {
 	args := append(
 		[]string{"xcodebuild", "-showBuildSettings"},
-		pc.xcodebuildArgs()...,
+		pc.XcodebuildArgs()...,
 	)
 	args = append(args, "-destination", "generic/platform=iOS Simulator")
 
-	out, err := br.FetchBuildSettings(ctx, args)
+	out, err := r.FetchBuildSettings(ctx, args)
 	if err != nil {
 		return nil, fmt.Errorf("xcodebuild -showBuildSettings failed: %w\n%s", err, out)
 	}
@@ -48,7 +80,7 @@ func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs,
 	}
 	builtProductsDir := filepath.Join(dirs.Build, "Build", "Products", config+"-iphonesimulator")
 
-	bs := &buildSettings{
+	s := &Settings{
 		ModuleName:       keys["PRODUCT_MODULE_NAME"],
 		BundleID:         "axe." + keys["PRODUCT_BUNDLE_IDENTIFIER"],
 		OriginalBundleID: keys["PRODUCT_BUNDLE_IDENTIFIER"],
@@ -57,27 +89,29 @@ func fetchBuildSettings(ctx context.Context, pc ProjectConfig, dirs previewDirs,
 		SwiftVersion:     keys["SWIFT_VERSION"],
 	}
 
-	if bs.ModuleName == "" {
+	if s.ModuleName == "" {
 		return nil, fmt.Errorf("PRODUCT_MODULE_NAME not found in build settings")
 	}
-	if bs.OriginalBundleID == "" {
+	if s.OriginalBundleID == "" {
 		return nil, fmt.Errorf("PRODUCT_BUNDLE_IDENTIFIER not found in build settings")
 	}
-	if bs.DeploymentTarget == "" {
+	if s.DeploymentTarget == "" {
 		return nil, fmt.Errorf("IPHONEOS_DEPLOYMENT_TARGET not found in build settings")
 	}
 
 	slog.Debug("Build settings",
-		"module", bs.ModuleName,
-		"bundle", bs.BundleID,
-		"products", bs.BuiltProductsDir,
-		"target", bs.DeploymentTarget,
-		"swiftVersion", bs.SwiftVersion,
+		"module", s.ModuleName,
+		"bundle", s.BundleID,
+		"products", s.BuiltProductsDir,
+		"target", s.DeploymentTarget,
+		"swiftVersion", s.SwiftVersion,
 	)
-	return bs, nil
+	return s, nil
 }
 
-func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br BuildRunner) error {
+// Run executes "xcodebuild build" with the flags required for axe preview
+// (dynamic replacement and private imports).
+func Run(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) error {
 	lock := buildlock.New(dirs.Build)
 	if err := lock.Lock(ctx); err != nil {
 		return fmt.Errorf("acquiring build lock: %w", err)
@@ -86,7 +120,7 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br Bu
 
 	args := append(
 		[]string{"xcodebuild", "build"},
-		pc.xcodebuildArgs()...,
+		pc.XcodebuildArgs()...,
 	)
 	args = append(args,
 		"-destination", "generic/platform=iOS Simulator",
@@ -94,7 +128,7 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br Bu
 		"OTHER_SWIFT_FLAGS=-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
 	)
 
-	out, err := br.Build(ctx, args)
+	out, err := r.Build(ctx, args)
 	if err != nil {
 		return fmt.Errorf("xcodebuild build failed: %w\n%s", err, out)
 	}
@@ -102,12 +136,18 @@ func buildProject(ctx context.Context, pc ProjectConfig, dirs previewDirs, br Bu
 	return nil
 }
 
-// extractCompilerPaths reads the swiftc response file (.resp) generated
+// ExtractCompilerPaths reads the swiftc response file (.resp) generated
 // during the xcodebuild build and extracts -I, -F, and -fmodule-map-file=
 // flags. These are required so that the thunk compilation can resolve
 // transitive SPM dependencies (C module headers, framework bundles, and
 // generated ObjC module maps) that xcodebuild manages internally.
-func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDirs) {
+func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
+	// Clear previously extracted paths so that re-extraction after a rebuild
+	// produces fresh results (idempotent).
+	s.ExtraIncludePaths = nil
+	s.ExtraFrameworkPaths = nil
+	s.ExtraModuleMapFiles = nil
+
 	lock := buildlock.New(dirs.Build)
 	if err := lock.RLock(ctx); err != nil {
 		slog.Warn("Failed to acquire read lock for compiler paths", "err", err)
@@ -120,7 +160,7 @@ func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDi
 	//     Objects-normal/arm64/arguments-<hash>.resp
 	pattern := filepath.Join(
 		dirs.Build, "Build", "Intermediates.noindex",
-		"*", "*", bs.ModuleName+".build", "Objects-normal", "arm64", "arguments-*.resp",
+		"*", "*", s.ModuleName+".build", "Objects-normal", "arm64", "arguments-*.resp",
 	)
 	matches, _ := filepath.Glob(pattern)
 	if len(matches) == 0 {
@@ -135,8 +175,8 @@ func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDi
 		return
 	}
 
-	seenI := map[string]bool{bs.BuiltProductsDir: true}
-	seenF := map[string]bool{bs.BuiltProductsDir: true}
+	seenI := map[string]bool{s.BuiltProductsDir: true}
+	seenF := map[string]bool{s.BuiltProductsDir: true}
 
 	lines := strings.Split(string(data), "\n")
 	for i := 0; i < len(lines); i++ {
@@ -146,7 +186,7 @@ func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDi
 		if after, ok := strings.CutPrefix(line, "-fmodule-map-file="); ok {
 			p := after
 			if p != "" {
-				bs.ExtraModuleMapFiles = append(bs.ExtraModuleMapFiles, p)
+				s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, p)
 			}
 			continue
 		}
@@ -162,7 +202,7 @@ func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDi
 				continue
 			}
 			seenI[p] = true
-			bs.ExtraIncludePaths = append(bs.ExtraIncludePaths, p)
+			s.ExtraIncludePaths = append(s.ExtraIncludePaths, p)
 			continue
 		}
 
@@ -177,13 +217,26 @@ func extractCompilerPaths(ctx context.Context, bs *buildSettings, dirs previewDi
 				continue
 			}
 			seenF[p] = true
-			bs.ExtraFrameworkPaths = append(bs.ExtraFrameworkPaths, p)
+			s.ExtraFrameworkPaths = append(s.ExtraFrameworkPaths, p)
 			continue
 		}
 	}
 	slog.Debug("Extracted paths from resp file",
-		"includePaths", len(bs.ExtraIncludePaths),
-		"frameworkPaths", len(bs.ExtraFrameworkPaths),
-		"moduleMapFiles", len(bs.ExtraModuleMapFiles),
+		"includePaths", len(s.ExtraIncludePaths),
+		"frameworkPaths", len(s.ExtraFrameworkPaths),
+		"moduleMapFiles", len(s.ExtraModuleMapFiles),
 	)
+}
+
+// HasPreviousBuild checks whether a .app bundle exists in the build products
+// directory, indicating that a previous build can be reused.
+func HasPreviousBuild(s *Settings, dirs ProjectDirs) bool {
+	appName := s.ModuleName + ".app"
+	primaryPath := filepath.Join(s.BuiltProductsDir, appName)
+	if _, err := os.Stat(primaryPath); err == nil {
+		return true
+	}
+	pattern := filepath.Join(dirs.Build, "Build", "Products", "*", appName)
+	matches, _ := filepath.Glob(pattern)
+	return len(matches) > 0
 }

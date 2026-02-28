@@ -14,6 +14,7 @@ import (
 	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -42,7 +43,7 @@ const defaultStreamID = "default"
 
 // defaultRunners creates the production implementations of all runner interfaces.
 func defaultRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister) {
-	return &runner.Build{}, &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
+	return build.NewRunner(), &runner.Toolchain{}, &runner.App{}, &runner.FileCopy{}, &runner.SourceList{}
 }
 
 func Run(opts RunOptions) error {
@@ -86,7 +87,7 @@ func Run(opts RunOptions) error {
 
 	br, tc, ar, fc, sl := defaultRunners()
 
-	step := &stepper{total: 7}
+	step := &stepper{total: 6}
 
 	simctl := &platform.RealSimctlRunner{}
 	done := step.begin("Resolving simulator...")
@@ -97,39 +98,21 @@ func Run(opts RunOptions) error {
 		return err
 	}
 
-	dirs, err := newPreviewDirs(opts.PC.primaryPath(), device)
+	dirs, err := newPreviewDirs(opts.PC.PrimaryPath(), device)
 	if err != nil {
 		sendStopped("resource_error", err.Error(), "")
 		return err
 	}
 
-	done = step.begin("Fetching build settings...")
-	bs, err := fetchBuildSettings(ctx, opts.PC, dirs, br)
+	sendStatus("building")
+	done = step.begin("Building...")
+	result, err := build.Prepare(ctx, opts.PC, dirs.ProjectDirs, opts.ReuseBuild, br)
 	done()
 	if err != nil {
 		sendStopped("build_error", err.Error(), "")
 		return err
 	}
-
-	sendStatus("building")
-	if opts.ReuseBuild && hasPreviousBuild(bs, dirs) {
-		done = step.begin(fmt.Sprintf("Reusing previous build (%s)...", dirs.Build))
-		done()
-	} else {
-		label := "Building project..."
-		if opts.ReuseBuild {
-			label = "No previous build found, building project..."
-		}
-		done = step.begin(label)
-		err = buildProject(ctx, opts.PC, dirs, br)
-		done()
-		if err != nil {
-			sendStopped("build_error", "Build failed", err.Error())
-			return err
-		}
-	}
-
-	extractCompilerPaths(ctx, bs, dirs)
+	bs := result.Settings
 
 	// Use CompileStrategy to decide between full and main-only thunk compilation.
 	var depGraph *analysis.DependencyGraph
@@ -140,7 +123,7 @@ func Run(opts RunOptions) error {
 	compilers := map[CompileMode]CompileFunc{
 		CompileModeFull: func(ctx context.Context) (string, error) {
 			// Load Index Store cache for fast in-memory dependency resolution.
-			projectRoot := filepath.Dir(opts.PC.primaryPath())
+			projectRoot := filepath.Dir(opts.PC.PrimaryPath())
 			rawCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
 			if cacheErr != nil && ctx.Err() == nil {
 				slog.Warn("Index store cache unavailable", "err", cacheErr)
@@ -168,7 +151,7 @@ func Run(opts RunOptions) error {
 				return "", err
 			}
 
-			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromBS(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
+			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
 		},
 		CompileModeMainOnly: func(ctx context.Context) (string, error) {
 			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, tc)
@@ -395,12 +378,6 @@ func Run(opts RunOptions) error {
 	return nil
 }
 
-// hasPreviousBuild checks whether a .app bundle exists in the build products directory.
-func hasPreviousBuild(bs *buildSettings, dirs previewDirs) bool {
-	_, err := resolveAppBundle(bs, dirs)
-	return err == nil
-}
-
 // RunServe is the multi-stream entry point for serve mode.
 // It reads AddStream/RemoveStream commands from stdin and manages
 // multiple preview streams concurrently via StreamManager.
@@ -437,7 +414,7 @@ func RunServe(pc ProjectConfig, strict bool) error {
 	sm := NewStreamManager(pool, ew, pc, deviceSetPath, br, tc, ar, fc, sl, strict)
 
 	// Start shared file watcher for all streams.
-	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.primaryPath()), sl)
+	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}
@@ -451,5 +428,37 @@ func RunServe(pc ProjectConfig, strict bool) error {
 	sm.StopAll()
 	pool.GarbageCollect(ctx)
 
+	return nil
+}
+
+// RunBuild executes only the xcodebuild build phase.
+// This builds the project with the flags required for axe preview
+// (dynamic replacement and private imports) without launching a simulator
+// or compiling thunks. Useful for pre-warming the build cache.
+func RunBuild(pc ProjectConfig) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+
+	dirs, err := build.NewProjectDirs(pc.PrimaryPath())
+	if err != nil {
+		return fmt.Errorf("resolving build directories: %w", err)
+	}
+
+	// Only the build runner is needed; no simulator, app, or toolchain operations.
+	br := build.NewRunner()
+
+	step := &stepper{total: 1}
+	done := step.begin("Building...")
+	// Always build (reuse=false): the purpose of this command is to populate
+	// the build cache, so skipping the build would defeat its intent.
+	result, err := build.Prepare(ctx, pc, dirs, false, br)
+	done()
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr, "\nBuild complete.\n")
+	fmt.Fprintf(os.Stderr, "  Module:    %s\n", result.Settings.ModuleName)
+	fmt.Fprintf(os.Stderr, "  Build dir: %s\n", dirs.Build)
 	return nil
 }

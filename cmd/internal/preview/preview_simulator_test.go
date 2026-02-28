@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"errors"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,7 +78,7 @@ func TestTerminateApp_Success(t *testing.T) {
 	t.Parallel()
 
 	ar := &fakeAppRunner{}
-	bs := &buildSettings{BundleID: "axe.com.example.TestModule"}
+	bs := &build.Settings{BundleID: "axe.com.example.TestModule"}
 
 	terminateApp(context.Background(), bs, "device-uuid", "/device/set", ar)
 
@@ -97,7 +98,7 @@ func TestTerminateApp_ErrorDoesNotPanic(t *testing.T) {
 
 	// terminateApp logs errors but does not return them (app may not be running).
 	ar := &fakeAppRunner{terminateErr: errors.New("app not running")}
-	bs := &buildSettings{BundleID: "axe.com.example.TestModule"}
+	bs := &build.Settings{BundleID: "axe.com.example.TestModule"}
 
 	// Should not panic or fail.
 	terminateApp(context.Background(), bs, "device-uuid", "", ar)
@@ -115,14 +116,14 @@ func TestStageAppBundle_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "TestModule",
 		BuiltProductsDir: productsDir,
 	}
 	stagingDir := filepath.Join(t.TempDir(), "staging")
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: stagingDir,
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     stagingDir,
 	}
 	fc := &fakeFileCopier{}
 
@@ -151,13 +152,13 @@ func TestStageAppBundle_AppNotFound(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "NoSuchModule",
 		BuiltProductsDir: filepath.Join(tmpDir, "Build", "Products", "Debug-iphonesimulator"),
 	}
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: filepath.Join(t.TempDir(), "staging"),
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     filepath.Join(t.TempDir(), "staging"),
 	}
 	fc := &fakeFileCopier{}
 
@@ -180,13 +181,13 @@ func TestStageAppBundle_CopyError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "TestModule",
 		BuiltProductsDir: productsDir,
 	}
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: filepath.Join(t.TempDir(), "staging"),
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     filepath.Join(t.TempDir(), "staging"),
 	}
 	fc := &fakeFileCopier{copyDirErr: errors.New("disk full")}
 
@@ -211,15 +212,15 @@ func TestInstallApp_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "TestModule",
 		BundleID:         "axe.com.example.TestModule",
 		BuiltProductsDir: productsDir,
 	}
 	stagingDir := filepath.Join(t.TempDir(), "staging")
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: stagingDir,
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     stagingDir,
 	}
 	ar := &fakeAppRunner{}
 	fc := &fakeFileCopier{}
@@ -251,14 +252,14 @@ func TestInstallApp_InstallError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "TestModule",
 		BundleID:         "axe.com.example.TestModule",
 		BuiltProductsDir: productsDir,
 	}
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: filepath.Join(t.TempDir(), "staging"),
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     filepath.Join(t.TempDir(), "staging"),
 	}
 	ar := &fakeAppRunner{installErr: errors.New("simctl install failed")}
 	fc := &fakeFileCopier{}
@@ -277,13 +278,13 @@ func TestInstallApp_StageError(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	// No app bundle exists -> stageAppBundle will fail.
-	bs := &buildSettings{
+	bs := &build.Settings{
 		ModuleName:       "MissingModule",
 		BuiltProductsDir: filepath.Join(tmpDir, "Build", "Products", "Debug-iphonesimulator"),
 	}
 	dirs := previewDirs{
-		Build:   tmpDir,
-		Staging: filepath.Join(t.TempDir(), "staging"),
+		ProjectDirs: build.ProjectDirs{Build: tmpDir},
+		Staging:     filepath.Join(t.TempDir(), "staging"),
 	}
 	ar := &fakeAppRunner{}
 	fc := &fakeFileCopier{}
@@ -304,7 +305,7 @@ func TestLaunchWithHotReload_Success(t *testing.T) {
 	t.Parallel()
 
 	ar := &fakeAppRunner{}
-	bs := &buildSettings{BundleID: "axe.com.example.TestModule"}
+	bs := &build.Settings{BundleID: "axe.com.example.TestModule"}
 
 	err := launchWithHotReload(
 		context.Background(), bs,
@@ -353,7 +354,7 @@ func TestLaunchWithHotReload_Error(t *testing.T) {
 	t.Parallel()
 
 	ar := &fakeAppRunner{launchErr: errors.New("simctl launch failed")}
-	bs := &buildSettings{BundleID: "axe.com.example.TestModule"}
+	bs := &build.Settings{BundleID: "axe.com.example.TestModule"}
 
 	err := launchWithHotReload(
 		context.Background(), bs,
@@ -370,7 +371,7 @@ func TestLaunchWithHotReload_InsertLibsFormat(t *testing.T) {
 	t.Parallel()
 
 	ar := &fakeAppRunner{}
-	bs := &buildSettings{BundleID: "axe.com.example.TestModule"}
+	bs := &build.Settings{BundleID: "axe.com.example.TestModule"}
 
 	err := launchWithHotReload(
 		context.Background(), bs,

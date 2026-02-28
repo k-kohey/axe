@@ -6,10 +6,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/idb"
+	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
@@ -1089,5 +1094,126 @@ func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected StreamStopped event on boot crash")
+	}
+}
+
+type cleanupCountingCompanion struct {
+	stopCalls atomic.Int32
+	doneCh    chan struct{}
+}
+
+func (c *cleanupCountingCompanion) Done() <-chan struct{} { return c.doneCh }
+func (c *cleanupCountingCompanion) Err() error            { return nil }
+func (c *cleanupCountingCompanion) Stop() error {
+	c.stopCalls.Add(1)
+	select {
+	case <-c.doneCh:
+	default:
+		close(c.doneCh)
+	}
+	return nil
+}
+
+type cleanupCountingIDBClient struct {
+	closeCalls atomic.Int32
+}
+
+func (c *cleanupCountingIDBClient) ScreenSize(context.Context) (int, int, error) { return 0, 0, nil }
+func (c *cleanupCountingIDBClient) VideoStream(context.Context, int) (<-chan []byte, error) {
+	return nil, nil
+}
+func (c *cleanupCountingIDBClient) Tap(context.Context, float64, float64) error { return nil }
+func (c *cleanupCountingIDBClient) Swipe(context.Context, float64, float64, float64, float64, float64) error {
+	return nil
+}
+func (c *cleanupCountingIDBClient) Text(context.Context, string) error { return nil }
+func (c *cleanupCountingIDBClient) Screenshot(context.Context) ([]byte, error) {
+	return nil, nil
+}
+func (c *cleanupCountingIDBClient) OpenHIDStream(context.Context) (idb.HIDStream, error) {
+	return nil, nil
+}
+func (c *cleanupCountingIDBClient) TouchDown(idb.HIDStream, float64, float64) error { return nil }
+func (c *cleanupCountingIDBClient) TouchMove(idb.HIDStream, float64, float64) error { return nil }
+func (c *cleanupCountingIDBClient) TouchUp(idb.HIDStream, float64, float64) error   { return nil }
+func (c *cleanupCountingIDBClient) Close() error {
+	c.closeCalls.Add(1)
+	return nil
+}
+
+type cleanupCountingAppRunner struct {
+	terminateCalls atomic.Int32
+}
+
+func (a *cleanupCountingAppRunner) Terminate(context.Context, string, string, string) error {
+	a.terminateCalls.Add(1)
+	return nil
+}
+func (a *cleanupCountingAppRunner) Install(context.Context, string, string, string) error {
+	return nil
+}
+func (a *cleanupCountingAppRunner) Launch(context.Context, string, string, string, map[string]string, []string) error {
+	return nil
+}
+
+func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	pool := newFakeDevicePool()
+	var buf syncBuffer
+	ew := protocol.NewEventWriter(&buf)
+	sm := newTestStreamManagerWithRunners(pool, ew)
+
+	app := &cleanupCountingAppRunner{}
+	sm.app = app
+	sm.prepared = &build.Result{Settings: &build.Settings{BundleID: "axe.com.example.TestModule"}}
+
+	socketPath := filepath.Join(t.TempDir(), "loader.sock")
+	if err := os.WriteFile(socketPath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("creating socket placeholder: %v", err)
+	}
+
+	idbClient := &cleanupCountingIDBClient{}
+	bootComp := &cleanupCountingCompanion{doneCh: make(chan struct{})}
+	idbComp := &cleanupCountingCompanion{doneCh: make(chan struct{})}
+	s := &stream{
+		id:            "stream-cleanup",
+		deviceUDID:    "FAKE-1",
+		dirs:          previewDirs{Socket: socketPath},
+		idbClient:     idbClient,
+		bootCompanion: bootComp,
+		idbCompanion:  idbComp,
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			sm.cleanupStreamResources(s)
+		})
+	}
+	wg.Wait()
+
+	if app.terminateCalls.Load() != 1 {
+		t.Fatalf("Terminate called %d times, want 1", app.terminateCalls.Load())
+	}
+	if idbClient.closeCalls.Load() != 1 {
+		t.Fatalf("IDB client Close called %d times, want 1", idbClient.closeCalls.Load())
+	}
+	if idbComp.stopCalls.Load() != 1 {
+		t.Fatalf("idb companion Stop called %d times, want 1", idbComp.stopCalls.Load())
+	}
+	if bootComp.stopCalls.Load() != 1 {
+		t.Fatalf("boot companion Stop called %d times, want 1", bootComp.stopCalls.Load())
+	}
+
+	pool.mu.Lock()
+	releasedCount := len(pool.released)
+	pool.mu.Unlock()
+	if releasedCount != 1 {
+		t.Fatalf("pool.Release called %d times, want 1", releasedCount)
+	}
+
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Fatalf("socket file still exists after cleanup: %v", err)
 	}
 }

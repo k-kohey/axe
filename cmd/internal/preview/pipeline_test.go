@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
 	"testing"
@@ -379,7 +380,7 @@ struct Model {
 		},
 	})
 
-	bs := &buildSettings{ModuleName: "TestModule"}
+	bs := &build.Settings{ModuleName: "TestModule"}
 	dirs := previewDirs{Thunk: dir}
 
 	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}

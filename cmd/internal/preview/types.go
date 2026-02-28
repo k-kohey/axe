@@ -4,79 +4,22 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
-// buildSettings holds values extracted from xcodebuild -showBuildSettings.
-type buildSettings struct {
-	ModuleName       string
-	BundleID         string // axe-prefixed bundle ID (used for terminate/launch)
-	OriginalBundleID string // original bundle ID from xcodebuild
-	BuiltProductsDir string
-	DeploymentTarget string
-	SwiftVersion     string
+// ProjectConfig is an alias for build.ProjectConfig, kept here for backward
+// compatibility with cmd/axe and other callers that import the preview package.
+type ProjectConfig = build.ProjectConfig
 
-	// Fields below are populated from the swiftc response file after build.
-	ExtraIncludePaths   []string // additional -I paths (SPM C module headers)
-	ExtraFrameworkPaths []string // additional -F paths (e.g. PackageFrameworks)
-	ExtraModuleMapFiles []string // -fmodule-map-file= paths (generated ObjC module maps)
-}
-
-// ProjectConfig abstracts --project / --workspace + --scheme.
-// Paths are stored as absolute paths.
-type ProjectConfig struct {
-	Project       string
-	Workspace     string
-	Scheme        string
-	Configuration string // e.g. "Debug", "Release"; empty means xcodebuild default
-}
-
-// NewProjectConfig creates a ProjectConfig with absolute paths resolved.
+// NewProjectConfig is forwarded from build.NewProjectConfig.
 func NewProjectConfig(project, workspace, scheme, configuration string) (ProjectConfig, error) {
-	pc := ProjectConfig{Scheme: scheme, Configuration: configuration}
-	if workspace != "" {
-		abs, err := filepath.Abs(workspace)
-		if err != nil {
-			return pc, fmt.Errorf("resolving workspace path: %w", err)
-		}
-		pc.Workspace = abs
-	}
-	if project != "" {
-		abs, err := filepath.Abs(project)
-		if err != nil {
-			return pc, fmt.Errorf("resolving project path: %w", err)
-		}
-		pc.Project = abs
-	}
-	return pc, nil
-}
-
-// xcodebuildArgs returns the project/workspace arguments for xcodebuild.
-func (pc ProjectConfig) xcodebuildArgs() []string {
-	var args []string
-	if pc.Workspace != "" {
-		args = []string{"-workspace", pc.Workspace, "-scheme", pc.Scheme}
-	} else {
-		args = []string{"-project", pc.Project, "-scheme", pc.Scheme}
-	}
-	if pc.Configuration != "" {
-		args = append(args, "-configuration", pc.Configuration)
-	}
-	return args
-}
-
-// primaryPath returns the workspace or project path (whichever is set).
-func (pc ProjectConfig) primaryPath() string {
-	if pc.Workspace != "" {
-		return pc.Workspace
-	}
-	return pc.Project
+	return build.NewProjectConfig(project, workspace, scheme, configuration)
 }
 
 // RunOptions holds all parameters for a single-stream preview Run invocation.
@@ -99,16 +42,16 @@ type RunOptions struct {
 	OnReady func(ctx context.Context, device, deviceSetPath string) error
 }
 
-// compileConfigFromBS converts buildSettings to codegen.CompileConfig.
-func compileConfigFromBS(bs *buildSettings) codegen.CompileConfig {
+// compileConfigFromSettings converts build.Settings to codegen.CompileConfig.
+func compileConfigFromSettings(s *build.Settings) codegen.CompileConfig {
 	return codegen.CompileConfig{
-		ModuleName:          bs.ModuleName,
-		BuiltProductsDir:    bs.BuiltProductsDir,
-		DeploymentTarget:    bs.DeploymentTarget,
-		SwiftVersion:        bs.SwiftVersion,
-		ExtraIncludePaths:   bs.ExtraIncludePaths,
-		ExtraFrameworkPaths: bs.ExtraFrameworkPaths,
-		ExtraModuleMapFiles: bs.ExtraModuleMapFiles,
+		ModuleName:          s.ModuleName,
+		BuiltProductsDir:    s.BuiltProductsDir,
+		DeploymentTarget:    s.DeploymentTarget,
+		SwiftVersion:        s.SwiftVersion,
+		ExtraIncludePaths:   s.ExtraIncludePaths,
+		ExtraFrameworkPaths: s.ExtraFrameworkPaths,
+		ExtraModuleMapFiles: s.ExtraModuleMapFiles,
 	}
 }
 
@@ -164,7 +107,7 @@ type watchContext struct {
 	ew            *protocol.EventWriter
 
 	// Injected runners for testability.
-	build     BuildRunner
+	build     build.Runner
 	toolchain ToolchainRunner
 	app       AppRunner
 	copier    FileCopier
@@ -172,22 +115,15 @@ type watchContext struct {
 }
 
 // previewDirs manages temp directories scoped per project path.
-// Session-specific resources (Thunk, Loader, Staging, Socket) live under
-// devices/<udid>/ so that multiple preview processes for the same project
-// do not collide. Build artifacts are shared at the project level.
+// Build artifacts (via embedded ProjectDirs) are shared across sessions,
+// while session-specific resources live under devices/<udid>/.
 type previewDirs struct {
-	Root    string // ~/.cache/axe/preview-<project-hash>
-	Build   string // Root/build (shared across sessions)
+	build.ProjectDirs
 	Session string // Root/devices/<device-udid>
 	Thunk   string // Session/thunk
 	Loader  string // Session/loader
 	Staging string // Session/staging
 	Socket  string // Session/loader.sock
-}
-
-// IndexStorePath returns the path to the Xcode index store data directory.
-func (d previewDirs) IndexStorePath() string {
-	return filepath.Join(d.Build, "Index.noindex", "DataStore")
 }
 
 // maxSunPathLen is the maximum length of sockaddr_un.sun_path on macOS.
@@ -196,30 +132,23 @@ const maxSunPathLen = 104
 
 // newPreviewDirs creates a previewDirs based on a hash of the project/workspace
 // path, with session-specific directories scoped by deviceUDID.
-// Uses ~/Library/Caches/axe/ instead of /tmp so that dylibs are accessible
-// from within the iOS Simulator via dlopen (separated runtimes cannot resolve
-// host /tmp paths).
 //
 // The Unix domain socket is placed directly under Root (not under Session)
 // because macOS limits sun_path to 104 bytes. The full Session path with a
 // UUID device identifier easily exceeds that limit.
 func newPreviewDirs(projectPath string, deviceUDID string) (previewDirs, error) {
-	abs, _ := filepath.Abs(projectPath)
-	h := sha256.Sum256([]byte(abs))
-	short := fmt.Sprintf("%x", h[:8])
-
-	cacheDir, err := os.UserCacheDir()
+	pd, err := build.NewProjectDirs(projectPath)
 	if err != nil {
-		cacheDir = filepath.Join(os.Getenv("HOME"), "Library", "Caches")
+		return previewDirs{}, err
 	}
-	root := filepath.Join(cacheDir, "axe", "preview-"+short)
-	session := filepath.Join(root, "devices", deviceUDID)
+
+	session := filepath.Join(pd.Root, "devices", deviceUDID)
 
 	// Hash the UDID to keep the socket path short while guaranteeing
 	// uniqueness per device. 8 bytes (16 hex chars) gives 64-bit space,
 	// more than enough for the handful of concurrent devices we support.
 	uh := sha256.Sum256([]byte(deviceUDID))
-	socketPath := filepath.Join(root, fmt.Sprintf("%x.sock", uh[:8]))
+	socketPath := filepath.Join(pd.Root, fmt.Sprintf("%x.sock", uh[:8]))
 
 	if len(socketPath) >= maxSunPathLen {
 		return previewDirs{}, fmt.Errorf(
@@ -229,13 +158,12 @@ func newPreviewDirs(projectPath string, deviceUDID string) (previewDirs, error) 
 	}
 
 	return previewDirs{
-		Root:    root,
-		Build:   filepath.Join(root, "build"),
-		Session: session,
-		Thunk:   filepath.Join(session, "thunk"),
-		Loader:  filepath.Join(session, "loader"),
-		Staging: filepath.Join(session, "staging"),
-		Socket:  socketPath,
+		ProjectDirs: pd,
+		Session:     session,
+		Thunk:       filepath.Join(session, "thunk"),
+		Loader:      filepath.Join(session, "loader"),
+		Staging:     filepath.Join(session, "staging"),
+		Socket:      socketPath,
 	}, nil
 }
 
