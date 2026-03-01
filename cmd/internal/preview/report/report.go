@@ -12,9 +12,11 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/k-kohey/axe/internal/platform"
@@ -222,37 +224,55 @@ func runReportDocument(
 	return nil
 }
 
-// captureOnce executes a single preview capture and returns the PNG data.
-// deviceUDID and deviceSetPath are optional; when non-empty, Run() skips
-// ResolveAxeSimulator and uses the pre-acquired device directly.
-func captureOnce(opts ReportOptions, file string, previewIndex int,
-	preparer *build.Preparer, deviceUDID, deviceSetPath string) ([]byte, error) {
-	runOpts := preview.RunOptions{
-		SourceFile:      file,
-		PC:              opts.PC,
-		PreviewSelector: strconv.Itoa(previewIndex),
-		PreferredDevice: opts.Device,
-		Preparer:        preparer,
-		DeviceUDID:      deviceUDID,
-		DeviceSetPath:   deviceSetPath,
+// createReportSession creates a PreviewSession for sequential report capture.
+// It resolves the simulator, then delegates to NewPreviewSession which runs
+// Build and Boot in parallel.
+func createReportSession(ctx context.Context, opts ReportOptions, preparer *build.Preparer) (*preview.PreviewSession, error) {
+	simctl := &platform.RealSimctlRunner{}
+	device, setPath, isExternal, err := platform.ResolveAxeSimulator(simctl, opts.Device)
+	if err != nil {
+		return nil, fmt.Errorf("resolving simulator: %w", err)
 	}
+	br, tc, ar, fc := preview.DefaultSessionRunners()
+	return preview.NewPreviewSession(ctx, preview.SessionConfig{
+		PC:               opts.PC,
+		DeviceUDID:       device,
+		DeviceSetPath:    setPath,
+		IsExternalDevice: isExternal,
+		Preparer:         preparer,
+		ReuseBuild:       opts.ReuseBuild,
+		BuildRunner:      br,
+		Toolchain:        tc,
+		AppRunner:        ar,
+		Copier:           fc,
+	})
+}
+
+// captureWithSession captures a single preview within an existing session
+// and returns the PNG data.
+func captureWithSession(ctx context.Context, sess *preview.PreviewSession,
+	file string, previewIndex int, renderDelay time.Duration) ([]byte, error) {
 	var png []byte
-	runOpts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
-		if opts.RenderDelay > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(opts.RenderDelay):
+	err := sess.CapturePreview(ctx, preview.CaptureRequest{
+		SourceFile:      file,
+		PreviewSelector: strconv.Itoa(previewIndex),
+		OnReady: func(ctx context.Context, device, setPath string) error {
+			if renderDelay > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(renderDelay):
+				}
 			}
-		}
-		data, err := platform.Screenshot(ctx, device, deviceSetPath)
-		if err != nil {
-			return err
-		}
-		png = data
-		return nil
-	}
-	if err := preview.Run(runOpts); err != nil {
+			data, err := platform.Screenshot(ctx, device, setPath)
+			if err != nil {
+				return err
+			}
+			png = data
+			return nil
+		},
+	})
+	if err != nil {
 		return nil, err
 	}
 	if len(png) == 0 {
@@ -261,14 +281,23 @@ func captureOnce(opts ReportOptions, file string, previewIndex int,
 	return png, nil
 }
 
-// captureLoop iterates all preview blocks, captures screenshots via the simulator,
-// and calls onCapture with the resulting PNG data for each preview.
+// captureLoop creates a single session and iterates all preview blocks,
+// capturing screenshots and calling onCapture with the resulting PNG data.
 func captureLoop(opts ReportOptions, blocks []fileBlocks, preparer *build.Preparer, onCapture func(file string, index int, pb analysis.PreviewBlock, png []byte) error) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	sess, err := createReportSession(ctx, opts, preparer)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
 	for _, fb := range blocks {
 		for i, pb := range fb.previews {
 			fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 			slog.Info("preview report capture", "file", fb.file, "previewIndex", i)
-			png, err := captureOnce(opts, fb.file, i, preparer, "", "")
+			png, err := captureWithSession(ctx, sess, fb.file, i, opts.RenderDelay)
 			if err != nil {
 				return fmt.Errorf("capturing %s preview %d: %w", filepath.Base(fb.file), i, err)
 			}
@@ -282,19 +311,34 @@ func captureLoop(opts ReportOptions, blocks []fileBlocks, preparer *build.Prepar
 
 const captureMaxRetries = 3
 
-// captureLoopPartial iterates all preview blocks, captures screenshots,
-// retries on failure with backoff, and continues past individual errors.
+// captureLoopPartial creates a single session and iterates all preview blocks,
+// capturing screenshots with retries and continuing past individual errors.
 // Used by runReportDocument (MD/HTML) to produce partial reports.
 func captureLoopPartial(opts ReportOptions, blocks []fileBlocks, preparer *build.Preparer) captureResult {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	sess, err := createReportSession(ctx, opts, preparer)
+	if err != nil {
+		return allFailures(blocks, err)
+	}
+	defer sess.Close()
+
 	var result captureResult
 	for _, fb := range blocks {
+		if ctx.Err() != nil {
+			break
+		}
 		for i, pb := range fb.previews {
+			if ctx.Err() != nil {
+				break
+			}
 			var png []byte
 			var lastErr error
 			for attempt := range captureMaxRetries {
 				fmt.Fprintf(os.Stderr, "Capturing %s (preview %d)\n", filepath.Base(fb.file), i)
 				slog.Info("preview report capture", "file", fb.file, "previewIndex", i, "attempt", attempt+1)
-				png, lastErr = captureOnce(opts, fb.file, i, preparer, "", "")
+				png, lastErr = captureWithSession(ctx, sess, fb.file, i, opts.RenderDelay)
 				if lastErr == nil {
 					break
 				}
@@ -302,7 +346,9 @@ func captureLoopPartial(opts ReportOptions, blocks []fileBlocks, preparer *build
 					"file", filepath.Base(fb.file), "previewIndex", i,
 					"attempt", attempt+1, "maxRetries", captureMaxRetries, "err", lastErr)
 				if attempt < captureMaxRetries-1 {
-					time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+					if sleepErr := sleepWithContext(ctx, time.Duration(attempt+1)*500*time.Millisecond); sleepErr != nil {
+						break
+					}
 				}
 			}
 
