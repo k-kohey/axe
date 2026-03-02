@@ -510,7 +510,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 				return dylibPath, nil
 			},
 			CompileModeMainOnly: func(_ context.Context) (string, error) {
-				return compileMainOnlyPipeline(launcherCtx, s.file, bs, s.dirs, "0", sm.toolchain)
+				return compileMainOnlyPipeline(launcherCtx, s.file, bs, s.dirs, "0", 0, sm.toolchain)
 			},
 		}
 

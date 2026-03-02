@@ -176,7 +176,7 @@ func Run(opts RunOptions) error {
 			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
 		},
 		CompileModeMainOnly: func(ctx context.Context) (string, error) {
-			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, tc)
+			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, 0, tc)
 		},
 	}
 

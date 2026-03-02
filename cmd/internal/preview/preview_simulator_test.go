@@ -29,6 +29,9 @@ type fakeAppRunner struct {
 	launchDeviceSet    string
 	launchEnv          map[string]string
 	launchArgs         []string
+
+	// Optional callback invoked on Launch for test observation.
+	onLaunch func()
 }
 
 func (f *fakeAppRunner) Terminate(_ context.Context, device, bundleID, deviceSetPath string) error {
@@ -51,6 +54,9 @@ func (f *fakeAppRunner) Launch(_ context.Context, device, bundleID, deviceSetPat
 	f.launchDeviceSet = deviceSetPath
 	f.launchEnv = env
 	f.launchArgs = args
+	if f.onLaunch != nil {
+		f.onLaunch()
+	}
 	return f.launchErr
 }
 

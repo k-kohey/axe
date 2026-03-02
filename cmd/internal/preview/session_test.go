@@ -1,6 +1,7 @@
 package preview
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -364,7 +365,7 @@ struct HogeView: View {
 	}
 }
 
-func TestCapturePreview_MultipleCaptures(t *testing.T) {
+func TestCapturePreview_MultipleCaptures_UsesHotReload(t *testing.T) {
 	t.Parallel()
 
 	cfg := setupSessionTest(t)
@@ -402,6 +403,216 @@ func TestCapturePreview_MultipleCaptures(t *testing.T) {
 		return newSessionFakeCompanion(), nil
 	}
 
+	// Track launch calls to verify cold start only happens on 1st capture.
+	var launchCount atomic.Int32
+	cfg.AppRunner = &fakeAppRunner{
+		onLaunch: func() { launchCount.Add(1) },
+	}
+
+	sess, err := NewPreviewSession(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("NewPreviewSession() error: %v", err)
+	}
+	defer sess.Close()
+
+	sourceFile := filepath.Join(tmpDir, "HogeView.swift")
+	swiftSource := `import SwiftUI
+struct HogeView: View {
+    var body: some View { Text("Hello") }
+}
+#Preview { HogeView() }
+`
+	if err := os.WriteFile(sourceFile, []byte(swiftSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Track hot-reload commands received by the fake socket.
+	var reloadCount atomic.Int32
+	startFakeSocket(t, sess.dirs.Socket, func(_ string) {
+		reloadCount.Add(1)
+	})
+
+	// Call CapturePreview 3 times.
+	// 1st: cold start (launch), 2nd+3rd: hot-reload (SendReloadCommand).
+	const n = 3
+	for i := range n {
+		err := sess.CapturePreview(t.Context(), CaptureRequest{
+			SourceFile:      sourceFile,
+			PreviewSelector: "0",
+			OnReady: func(_ context.Context, _, _ string) error {
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("CapturePreview(%d) error: %v", i, err)
+		}
+	}
+
+	// Boot should have been called exactly once (during NewPreviewSession).
+	if got := bootCount.Load(); got != 1 {
+		t.Errorf("boot was called %d times, want 1", got)
+	}
+
+	// Launch should have been called once (cold start on 1st capture).
+	if got := launchCount.Load(); got != 1 {
+		t.Errorf("launch was called %d times, want 1", got)
+	}
+
+	// Hot-reload should have been called twice (2nd and 3rd captures).
+	if got := reloadCount.Load(); got != 2 {
+		t.Errorf("reload was called %d times, want 2", got)
+	}
+
+	// reloadCounter should have advanced to n.
+	if sess.reloadCounter != n {
+		t.Errorf("reloadCounter = %d, want %d", sess.reloadCounter, n)
+	}
+}
+
+func TestCapturePreview_HotReloadFailure_FallsBackToColdStart(t *testing.T) {
+	t.Parallel()
+
+	cfg := setupSessionTest(t)
+
+	tmpDir := t.TempDir()
+	buildDir := filepath.Join(tmpDir, "build")
+	builtProducts := filepath.Join(buildDir, "Build", "Products", "Debug-iphonesimulator")
+	appDir := filepath.Join(builtProducts, "TestModule.app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.TestModule</string>
+</dict></plist>`
+	if err := os.WriteFile(filepath.Join(appDir, "Info.plist"), []byte(plistContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bs := &build.Settings{
+		ModuleName:       "TestModule",
+		BundleID:         "axe.com.example.TestModule",
+		BuiltProductsDir: builtProducts,
+		DeploymentTarget: "17.0",
+		SwiftVersion:     "5.9",
+	}
+	cfg.Copier = &sessionFileCopier{bs: bs, src: appDir}
+	cfg.Preparer = sessionPreparer(t, cfg.PC, buildDir, bs)
+
+	var launchCount atomic.Int32
+	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
+		return newSessionFakeCompanion(), nil
+	}
+
+	sess, err := NewPreviewSession(t.Context(), cfg)
+	if err != nil {
+		t.Fatalf("NewPreviewSession() error: %v", err)
+	}
+	defer sess.Close()
+
+	sourceFile := filepath.Join(tmpDir, "HogeView.swift")
+	swiftSource := `import SwiftUI
+struct HogeView: View {
+    var body: some View { Text("Hello") }
+}
+#Preview { HogeView() }
+`
+	if err := os.WriteFile(sourceFile, []byte(swiftSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Socket that responds with ERR: on reload to simulate hot-reload failure.
+	// connCount tracks connections: 1st = WaitForReady (cold start),
+	// 2nd = SendReloadCommand (returns ERR), 3rd = WaitForReady (fallback cold start).
+	var connCount atomic.Int32
+	startFakeSocketCustom(t, sess.dirs.Socket, func(conn net.Conn) {
+		n := connCount.Add(1)
+		scanner := bufio.NewScanner(conn)
+		if scanner.Scan() {
+			// SendReloadCommand: client sent a dylib path.
+			if n == 2 {
+				// 2nd connection: respond with ERR to trigger fallback.
+				_, _ = fmt.Fprintf(conn, "ERR:dlopen failed (test)\n")
+			} else {
+				_, _ = fmt.Fprintf(conn, "OK\n")
+			}
+		}
+		// WaitForReady: client connected without sending data; just close.
+	})
+
+	// Use AppRunner that tracks launches via onLaunch.
+	cfg.AppRunner = &fakeAppRunner{
+		onLaunch: func() { launchCount.Add(1) },
+	}
+	sess.cfg.AppRunner = cfg.AppRunner
+
+	// 1st capture: cold start (WaitForReady).
+	err = sess.CapturePreview(t.Context(), CaptureRequest{
+		SourceFile:      sourceFile,
+		PreviewSelector: "0",
+	})
+	if err != nil {
+		t.Fatalf("CapturePreview(0) error: %v", err)
+	}
+	if got := launchCount.Load(); got != 1 {
+		t.Fatalf("launch count after 1st capture = %d, want 1", got)
+	}
+
+	// 2nd capture: hot-reload fails (ERR:) → falls back to cold start.
+	err = sess.CapturePreview(t.Context(), CaptureRequest{
+		SourceFile:      sourceFile,
+		PreviewSelector: "0",
+	})
+	if err != nil {
+		t.Fatalf("CapturePreview(1) error: %v", err)
+	}
+
+	// Launch should have been called twice (1st cold start + fallback cold start).
+	if got := launchCount.Load(); got != 2 {
+		t.Errorf("launch count = %d, want 2", got)
+	}
+}
+
+func TestCapturePreview_ContextCanceled_NoFallback(t *testing.T) {
+	t.Parallel()
+
+	cfg := setupSessionTest(t)
+
+	tmpDir := t.TempDir()
+	buildDir := filepath.Join(tmpDir, "build")
+	builtProducts := filepath.Join(buildDir, "Build", "Products", "Debug-iphonesimulator")
+	appDir := filepath.Join(builtProducts, "TestModule.app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plistContent := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.TestModule</string>
+</dict></plist>`
+	if err := os.WriteFile(filepath.Join(appDir, "Info.plist"), []byte(plistContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bs := &build.Settings{
+		ModuleName:       "TestModule",
+		BundleID:         "axe.com.example.TestModule",
+		BuiltProductsDir: builtProducts,
+		DeploymentTarget: "17.0",
+		SwiftVersion:     "5.9",
+	}
+	cfg.Copier = &sessionFileCopier{bs: bs, src: appDir}
+	cfg.Preparer = sessionPreparer(t, cfg.PC, buildDir, bs)
+
+	var launchCount atomic.Int32
+	cfg.AppRunner = &fakeAppRunner{
+		onLaunch: func() { launchCount.Add(1) },
+	}
+	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
+		return newSessionFakeCompanion(), nil
+	}
+
 	sess, err := NewPreviewSession(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("NewPreviewSession() error: %v", err)
@@ -421,26 +632,35 @@ struct HogeView: View {
 
 	startFakeSocket(t, sess.dirs.Socket)
 
-	// Call CapturePreview multiple times with the same file (same preview index 0).
-	// This simulates the report use case where the same session captures
-	// the same file's preview multiple times (e.g. different render settings).
-	const n = 3
-	for i := range n {
-		err := sess.CapturePreview(t.Context(), CaptureRequest{
-			SourceFile:      sourceFile,
-			PreviewSelector: "0",
-			OnReady: func(_ context.Context, _, _ string) error {
-				return nil
-			},
-		})
-		if err != nil {
-			t.Fatalf("CapturePreview(%d) error: %v", i, err)
-		}
+	// 1st capture: cold start succeeds.
+	err = sess.CapturePreview(t.Context(), CaptureRequest{
+		SourceFile:      sourceFile,
+		PreviewSelector: "0",
+	})
+	if err != nil {
+		t.Fatalf("CapturePreview(0) error: %v", err)
 	}
 
-	// Boot should have been called exactly once (during NewPreviewSession).
-	if got := bootCount.Load(); got != 1 {
-		t.Errorf("boot was called %d times, want 1", got)
+	// Remove socket so SendReloadCommand's dialWithRetry fails on first dial,
+	// then checks ctx.Done() between retries.
+	_ = os.Remove(sess.dirs.Socket)
+
+	cancelCtx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel immediately
+
+	// 2nd capture with canceled context + no socket: should return error,
+	// NOT fall back to cold start.
+	err = sess.CapturePreview(cancelCtx, CaptureRequest{
+		SourceFile:      sourceFile,
+		PreviewSelector: "0",
+	})
+	if err == nil {
+		t.Fatal("expected error from canceled context")
+	}
+
+	// Launch should have been called only once (initial cold start), not twice.
+	if got := launchCount.Load(); got != 1 {
+		t.Errorf("launch count = %d, want 1 (fallback should NOT have run)", got)
 	}
 }
 
@@ -504,9 +724,41 @@ func TestClose_StopsCompanion(t *testing.T) {
 	}
 }
 
-// startFakeSocket creates a Unix domain socket listener that accepts connections
-// and immediately closes them, simulating the loader socket for WaitForReady.
-func startFakeSocket(t *testing.T, socketPath string) {
+// startFakeSocketCustom creates a Unix domain socket listener with a custom
+// per-connection handler. The handler receives each accepted connection and
+// is responsible for reading/writing and closing it.
+func startFakeSocketCustom(t *testing.T, socketPath string, handler func(net.Conn)) {
+	t.Helper()
+
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = os.Remove(socketPath)
+
+	ln, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			handler(conn)
+			_ = conn.Close()
+		}
+	}()
+}
+
+// startFakeSocket creates a Unix domain socket listener that simulates the
+// loader socket. It handles both WaitForReady (empty request → close) and
+// SendReloadCommand (reads dylib path → responds "OK\n").
+// The optional onReload callback is invoked with each received dylib path.
+func startFakeSocket(t *testing.T, socketPath string, onReload ...func(string)) {
 	t.Helper()
 
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
@@ -527,6 +779,17 @@ func startFakeSocket(t *testing.T, socketPath string) {
 			conn, err := ln.Accept()
 			if err != nil {
 				return // listener closed
+			}
+			// Try to read a dylib path. If the client sends data, respond
+			// with "OK\n" (hot-reload protocol). If the client disconnects
+			// without sending, this is a WaitForReady probe.
+			scanner := bufio.NewScanner(conn)
+			if scanner.Scan() {
+				path := scanner.Text()
+				if len(onReload) > 0 && onReload[0] != nil {
+					onReload[0](path)
+				}
+				_, _ = fmt.Fprintf(conn, "OK\n")
 			}
 			_ = conn.Close()
 		}

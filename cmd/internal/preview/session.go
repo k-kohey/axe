@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -44,12 +45,20 @@ type CaptureRequest struct {
 
 // PreviewSession manages the Boot/Install lifecycle for a simulator,
 // allowing multiple previews to be captured without repeating the full cycle.
+//
+// PreviewSession is NOT goroutine-safe. Callers must not call CapturePreview
+// concurrently on the same session. Each parallel worker should create its
+// own session.
 type PreviewSession struct {
 	cfg           SessionConfig
 	dirs          previewDirs
 	bs            *build.Settings
 	bootCompanion companionProcess // nil for external devices
 	loaderPath    string
+
+	// Hot-reload state (mutable, not goroutine-safe).
+	reloadCounter int  // incremented after each successful reload/launch
+	appLaunched   bool // true after first successful cold start
 }
 
 // NewPreviewSession creates a PreviewSession by running Build and Boot in parallel,
@@ -156,15 +165,50 @@ func NewPreviewSession(ctx context.Context, cfg SessionConfig) (*PreviewSession,
 	}, nil
 }
 
-// CapturePreview compiles a main-only thunk for the given source file,
-// relaunches the app with the new thunk, waits for readiness, then calls
-// req.OnReady for the actual capture (e.g. screenshot).
+// CapturePreview compiles a main-only thunk for the given source file and
+// delivers it to the running app. On the first call, a cold start (terminate →
+// launch → WaitForReady) is performed. Subsequent calls use hot-reload via
+// SendReloadCommand, falling back to cold start on failure.
 func (s *PreviewSession) CapturePreview(ctx context.Context, req CaptureRequest) error {
-	dylibPath, err := compileMainOnlyPipeline(ctx, req.SourceFile, s.bs, s.dirs, req.PreviewSelector, s.cfg.Toolchain)
+	counter := s.reloadCounter
+	dylibPath, err := compileMainOnlyPipeline(ctx, req.SourceFile, s.bs, s.dirs, req.PreviewSelector, counter, s.cfg.Toolchain)
 	if err != nil {
 		return fmt.Errorf("compile thunk: %w", err)
 	}
 
+	if s.appLaunched {
+		if err := codegen.SendReloadCommand(ctx, s.dirs.Socket, dylibPath); err != nil {
+			if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("hot-reload canceled: %w", err)
+			}
+			slog.Warn("Hot-reload failed, falling back to cold start", "err", err)
+			s.appLaunched = false
+		}
+	}
+
+	if !s.appLaunched {
+		if err := s.coldStart(ctx, dylibPath); err != nil {
+			return err
+		}
+	}
+
+	// Increment counter AFTER successful reload/launch, before OnReady.
+	// This ensures dlopen sees a unique path on retry (avoids cache hit).
+	s.reloadCounter++
+	cleanOldDylibs(s.dirs.Thunk, counter-1)
+
+	if req.OnReady != nil {
+		if err := req.OnReady(ctx, s.cfg.DeviceUDID, s.cfg.DeviceSetPath); err != nil {
+			return fmt.Errorf("on-ready: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// coldStart terminates any running app, launches fresh with the given dylib,
+// and waits for the loader socket to become ready.
+func (s *PreviewSession) coldStart(ctx context.Context, dylibPath string) error {
 	terminateApp(ctx, s.bs, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner)
 
 	if err := launchWithHotReload(ctx, s.bs, s.loaderPath, dylibPath, s.dirs.Socket, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner); err != nil {
@@ -175,12 +219,7 @@ func (s *PreviewSession) CapturePreview(ctx context.Context, req CaptureRequest)
 		return fmt.Errorf("wait for ready: %w", err)
 	}
 
-	if req.OnReady != nil {
-		if err := req.OnReady(ctx, s.cfg.DeviceUDID, s.cfg.DeviceSetPath); err != nil {
-			return fmt.Errorf("on-ready: %w", err)
-		}
-	}
-
+	s.appLaunched = true
 	return nil
 }
 

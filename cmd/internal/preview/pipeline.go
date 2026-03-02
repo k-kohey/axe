@@ -138,6 +138,7 @@ func compileMainOnlyPipeline(
 	bs *build.Settings,
 	dirs previewDirs,
 	previewSelector string,
+	reloadCounter int,
 	tc ToolchainRunner,
 ) (string, error) {
 	imports, err := analysis.SourceImports(sourceFile)
@@ -145,12 +146,12 @@ func compileMainOnlyPipeline(
 		return "", fmt.Errorf("source imports: %w", err)
 	}
 
-	thunkPaths, err := codegen.GenerateMainOnlyThunk(bs.ModuleName, dirs.Thunk, sourceFile, previewSelector, imports)
+	thunkPaths, err := codegen.GenerateMainOnlyThunk(bs.ModuleName, dirs.Thunk, sourceFile, previewSelector, imports, reloadCounter)
 	if err != nil {
 		return "", fmt.Errorf("main-only thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, sourceFile, tc)
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, reloadCounter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("main-only compile: %w", err)
 	}
