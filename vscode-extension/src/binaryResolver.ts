@@ -42,9 +42,7 @@ function defaultWhich(command: string): Promise<string | null> {
 	});
 }
 
-function defaultWaitForTerminalClose(
-	terminal: vscode.Terminal,
-): Promise<void> {
+function defaultWaitForTerminalClose(terminal: vscode.Terminal): Promise<void> {
 	return new Promise((resolve) => {
 		const disposable = vscode.window.onDidCloseTerminal((t) => {
 			if (t === terminal) {
@@ -141,9 +139,7 @@ export class BinaryResolver {
 			for (let i = 0; i < MAX_INSTALL_RETRIES; i++) {
 				await Promise.race([
 					terminalClosed,
-					new Promise<void>((r) =>
-						setTimeout(r, INSTALL_RETRY_INTERVAL_MS),
-					),
+					new Promise<void>((r) => setTimeout(r, INSTALL_RETRY_INTERVAL_MS)),
 				]);
 
 				const retryPath = await this.deps.which("axe");

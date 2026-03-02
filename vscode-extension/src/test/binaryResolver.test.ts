@@ -78,9 +78,7 @@ suite("BinaryResolver", () => {
 				which: async () => {
 					whichCallCount++;
 					// First call: not found. Second call (retry after install): found.
-					return whichCallCount >= 2
-						? "/home/user/.local/bin/axe"
-						: null;
+					return whichCallCount >= 2 ? "/home/user/.local/bin/axe" : null;
 				},
 				showPrompt: async () => "Run Install Script",
 				createTerminal: (name: string) => {
