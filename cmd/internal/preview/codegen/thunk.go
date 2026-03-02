@@ -234,12 +234,12 @@ func GenerateMainOnlyThunk(
 	targetSourceFile string,
 	previewSelector string,
 	imports []string,
+	reloadCounter int,
 ) ([]string, error) {
 	if err := os.MkdirAll(thunkDir, 0o755); err != nil {
 		return nil, fmt.Errorf("creating thunk dir: %w", err)
 	}
 
-	const reloadCounter = 0
 	cleanOldThunkFiles(thunkDir, reloadCounter)
 
 	mtd := MainThunkData{
