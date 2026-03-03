@@ -216,6 +216,110 @@ suite("BinaryResolver", () => {
 		});
 	});
 
+	suite("concurrent resolve()", () => {
+		test("parallel calls show only one prompt and share the same rejection", async () => {
+			let promptCount = 0;
+			const deps = createDeps({
+				showPrompt: async () => {
+					promptCount++;
+					return undefined;
+				},
+			});
+			const resolver = new BinaryResolver(deps);
+
+			const results = await Promise.allSettled([
+				resolver.resolve(),
+				resolver.resolve(),
+				resolver.resolve(),
+			]);
+
+			assert.strictEqual(promptCount, 1);
+			for (const r of results) {
+				assert.strictEqual(r.status, "rejected");
+			}
+			// All callers receive the exact same Error instance
+			const reasons = results.map((r) => (r as PromiseRejectedResult).reason);
+			assert.strictEqual(reasons[0], reasons[1]);
+			assert.strictEqual(reasons[1], reasons[2]);
+		});
+
+		test("parallel calls share install retry result", async () => {
+			let whichCallCount = 0;
+			let promptCount = 0;
+			const deps = createDeps({
+				which: async () => {
+					whichCallCount++;
+					// First call: not found. Second call (retry after install): found.
+					return whichCallCount >= 2 ? "/home/user/.local/bin/axe" : null;
+				},
+				showPrompt: async () => {
+					promptCount++;
+					return "Run Install Script";
+				},
+				waitForTerminalClose: async () => {},
+			});
+			const resolver = new BinaryResolver(deps);
+
+			const [r1, r2] = await Promise.all([
+				resolver.resolve(),
+				resolver.resolve(),
+			]);
+
+			assert.strictEqual(promptCount, 1);
+			assert.strictEqual(r1, "/home/user/.local/bin/axe");
+			assert.strictEqual(r2, "/home/user/.local/bin/axe");
+		});
+
+		test("failure clears inflight so next call retries", async () => {
+			let callCount = 0;
+			const deps = createDeps({
+				which: async () => {
+					callCount++;
+					return callCount >= 2 ? "/usr/local/bin/axe" : null;
+				},
+				showPrompt: async () => undefined, // dismiss prompt → throws
+			});
+			const resolver = new BinaryResolver(deps);
+
+			await assert.rejects(() => resolver.resolve());
+			// After failure, inflight should be cleared; next call starts fresh
+			const result = await resolver.resolve();
+			assert.strictEqual(result, "/usr/local/bin/axe");
+		});
+
+		test("clearCache() during inflight prevents stale cache", async () => {
+			let whichCallCount = 0;
+			const pending: {
+				resolve: (v: string | null) => void;
+			} = { resolve: () => {} };
+			const deps = createDeps({
+				which: () => {
+					whichCallCount++;
+					return new Promise<string | null>((r) => {
+						pending.resolve = r;
+					});
+				},
+			});
+			const resolver = new BinaryResolver(deps);
+
+			const resolvePromise = resolver.resolve();
+			assert.strictEqual(whichCallCount, 1);
+
+			// clearCache() while resolve is in-flight
+			resolver.clearCache();
+
+			// Let the first which() resolve with a path
+			pending.resolve("/usr/local/bin/axe");
+			const result = await resolvePromise;
+
+			assert.strictEqual(result, "/usr/local/bin/axe");
+			// cachedPath should NOT be set because epoch changed.
+			// A second resolve() must trigger a fresh which() call.
+			resolver.resolve(); // starts a new doResolve → new which()
+			assert.strictEqual(whichCallCount, 2);
+		});
+	});
+
 	suite("version check integration", () => {
 		test("skips version check in dev mode (MIN_CLI_VERSION=0.0.0)", async () => {
 			let queriedPath = "";
