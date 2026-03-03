@@ -89,3 +89,26 @@ func (g *DependencyGraph) DirectDeps() []string {
 	}
 	return deps
 }
+
+// DepsUpTo returns file paths at depth 1 through maxDepth (inclusive).
+// Depth 0 (the target itself) is never included.
+//
+//   - maxDepth == 0 → empty slice (target only, no deps)
+//   - maxDepth == 1 → equivalent to DirectDeps()
+//   - maxDepth < 0  → all transitive dependencies (no depth limit)
+func (g *DependencyGraph) DepsUpTo(maxDepth int) []string {
+	if maxDepth == 0 {
+		return nil
+	}
+	var deps []string
+	for path, d := range g.depth {
+		if d == 0 {
+			continue // skip target
+		}
+		if maxDepth > 0 && d > maxDepth {
+			continue
+		}
+		deps = append(deps, path)
+	}
+	return deps
+}

@@ -5,10 +5,12 @@ import (
 )
 
 var (
-	watchSelector   string
-	watchReuseBuild bool
-	watchStrict     bool
-	watchHeadless   bool
+	watchSelector      string
+	watchReuseBuild    bool
+	watchStrict        bool
+	watchHeadless      bool
+	watchMaxThunkFiles int
+	watchPreThunkDepth int
 )
 
 var previewWatchCmd = &cobra.Command{
@@ -23,7 +25,7 @@ var previewWatchCmd = &cobra.Command{
 	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runWatchLogic(args[0], watchSelector, watchReuseBuild, watchStrict, !watchHeadless)
+		return runWatchLogic(args[0], watchSelector, watchReuseBuild, watchStrict, !watchHeadless, watchMaxThunkFiles, watchPreThunkDepth)
 	},
 }
 
@@ -32,5 +34,7 @@ func init() {
 	previewWatchCmd.Flags().BoolVar(&watchReuseBuild, "reuse-build", false, "skip xcodebuild and reuse artifacts from a previous build")
 	previewWatchCmd.Flags().BoolVar(&watchStrict, "strict", false, "require full thunk compilation (no degraded fallback)")
 	previewWatchCmd.Flags().BoolVar(&watchHeadless, "headless", false, "run simulator headlessly without a display window")
+	previewWatchCmd.Flags().IntVar(&watchMaxThunkFiles, "max-thunk-files", 32, "maximum number of tracked files for incremental thunk generation")
+	previewWatchCmd.Flags().IntVar(&watchPreThunkDepth, "pre-thunk-depth", 0, "dependency depth for initial thunk generation (0=target only, 1=direct deps)")
 	previewCmd.AddCommand(previewWatchCmd)
 }

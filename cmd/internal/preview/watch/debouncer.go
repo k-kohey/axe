@@ -1,6 +1,10 @@
 package watch
 
-import "time"
+import (
+	"slices"
+	"sync"
+	"time"
+)
 
 const (
 	// TrackedDebounceDelay is the debounce delay for tracked file changes
@@ -21,20 +25,23 @@ const (
 type Debouncer struct {
 	// TrackedCh receives the changed file path after the tracked debounce delay.
 	TrackedCh <-chan string
-	// DepCh fires after the dependency debounce delay.
-	DepCh <-chan struct{}
+	// DepCh sends the accumulated untracked file paths after the dependency debounce delay.
+	DepCh <-chan []string
 
 	trackedCh chan string
-	depCh     chan struct{}
+	depCh     chan []string
 
+	mu           sync.Mutex // protects depFiles, trackedTimer, depTimer, depSeq
+	depFiles     []string   // accumulated untracked file paths within debounce window
 	trackedTimer *time.Timer
 	depTimer     *time.Timer
+	depSeq       uint64 // generation counter; incremented on each dep timer reset
 }
 
 // NewDebouncer creates a Debouncer with buffered output channels.
 func NewDebouncer() *Debouncer {
 	tracked := make(chan string, 1)
-	dep := make(chan struct{}, 1)
+	dep := make(chan []string, 1)
 	return &Debouncer{
 		TrackedCh: tracked,
 		DepCh:     dep,
@@ -47,6 +54,9 @@ func NewDebouncer() *Debouncer {
 // appropriate debounce timer. trackedSet contains the set of tracked
 // file paths (cleaned) for efficient lookup.
 func (d *Debouncer) HandleFileChange(cleanPath string, trackedSet map[string]bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	if trackedSet[cleanPath] {
 		// Tracked file changed (target or 1-level dependency).
 		// If a dependency rebuild is already pending, it will include
@@ -65,7 +75,7 @@ func (d *Debouncer) HandleFileChange(cleanPath string, trackedSet map[string]boo
 			}
 		})
 	} else {
-		// Untracked .swift file changed → full rebuild path.
+		// Untracked .swift file changed → dependency rebuild path.
 		if d.trackedTimer != nil {
 			d.trackedTimer.Stop()
 			d.trackedTimer = nil
@@ -73,26 +83,48 @@ func (d *Debouncer) HandleFileChange(cleanPath string, trackedSet map[string]boo
 		if d.depTimer != nil {
 			d.depTimer.Stop()
 		}
+
+		// Accumulate untracked files with deduplication.
+		if !slices.Contains(d.depFiles, cleanPath) {
+			d.depFiles = append(d.depFiles, cleanPath)
+		}
+
+		// Capture snapshot and generation for the timer callback.
+		snapshot := make([]string, len(d.depFiles))
+		copy(snapshot, d.depFiles)
+		d.depSeq++
+		seq := d.depSeq
+
 		d.depTimer = time.AfterFunc(DepDebounceDelay, func() {
+			d.mu.Lock()
+			if d.depSeq != seq {
+				d.mu.Unlock()
+				return // stale timer, a newer one supersedes this
+			}
+			d.mu.Unlock()
 			select {
-			case d.depCh <- struct{}{}:
+			case d.depCh <- snapshot:
 			default:
 			}
 		})
 	}
 }
 
-// ClearDepTimer resets the dependency timer reference after the dep signal
-// has been consumed. This allows subsequent tracked changes to use the
-// fast path again.
+// ClearDepTimer resets the dependency timer reference and accumulated files
+// after the dep signal has been consumed. This allows subsequent tracked
+// changes to use the fast path again.
 func (d *Debouncer) ClearDepTimer() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.depTimer = nil
+	d.depFiles = nil
 }
 
 // Reset cancels all pending timers and drains the output channels,
 // restoring the debouncer to a clean state. Use this on file switch
 // to prevent stale timers from firing against the new file.
 func (d *Debouncer) Reset() {
+	d.mu.Lock()
 	if d.trackedTimer != nil {
 		d.trackedTimer.Stop()
 		d.trackedTimer = nil
@@ -101,6 +133,9 @@ func (d *Debouncer) Reset() {
 		d.depTimer.Stop()
 		d.depTimer = nil
 	}
+	d.depFiles = nil
+	d.mu.Unlock()
+
 	// Drain any buffered signals that may have fired between Stop and now.
 	select {
 	case <-d.trackedCh:
@@ -114,6 +149,8 @@ func (d *Debouncer) Reset() {
 
 // Stop cancels all pending timers. Call this when the event loop exits.
 func (d *Debouncer) Stop() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.trackedTimer != nil {
 		d.trackedTimer.Stop()
 	}

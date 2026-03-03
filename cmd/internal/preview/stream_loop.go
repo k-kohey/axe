@@ -111,11 +111,17 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				cfg.ws.mu.Unlock()
 			}
 
-		case <-db.DepCh:
+		case depFiles := <-db.DepCh:
 			db.ClearDepTimer()
-			if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
-				slog.Warn("Dependency rebuild error", "err", err)
+			if !tryIncrementalReload(ctx, depFiles, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws) {
+				if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
+					slog.Warn("Dependency rebuild error", "err", err)
+				}
 			}
+			// Rebuild trackedSet after potential changes.
+			cfg.ws.mu.Lock()
+			trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
+			cfg.ws.mu.Unlock()
 
 		case newFile := <-cfg.switchFileCh:
 			db.Reset()

@@ -273,6 +273,24 @@ func GenerateMainOnlyThunk(
 	return []string{mainThunkPath}, nil
 }
 
+// HasBaseNameCollision reports whether newFile's basename (without extension,
+// case-insensitive) collides with any file in existingFiles.
+// If newFile is the same path as an existing file, it is not considered a collision.
+func HasBaseNameCollision(newFile string, existingFiles []string) bool {
+	newBase := strings.ToLower(strings.TrimSuffix(filepath.Base(newFile), filepath.Ext(newFile)))
+	newClean := filepath.Clean(newFile)
+	for _, f := range existingFiles {
+		if filepath.Clean(f) == newClean {
+			continue // same file, not a collision
+		}
+		base := strings.ToLower(strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)))
+		if base == newBase {
+			return true
+		}
+	}
+	return false
+}
+
 // writeTemplate renders a template to a file.
 func writeTemplate(path string, tmpl *template.Template, data any) (retErr error) {
 	f, err := os.Create(path)

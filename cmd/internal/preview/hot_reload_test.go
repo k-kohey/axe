@@ -491,6 +491,179 @@ struct V: View {
 	}
 }
 
+func TestEvictOldest(t *testing.T) {
+	t.Run("no eviction needed", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift"}
+		result := evictOldest(tracked, "/src/Target.swift", 0)
+		if len(result) != 3 {
+			t.Errorf("expected 3 files, got %d: %v", len(result), result)
+		}
+	})
+
+	t.Run("evict one", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
+		result := evictOldest(tracked, "/src/Target.swift", 1)
+		if len(result) != 3 {
+			t.Fatalf("expected 3 files after evicting 1, got %d: %v", len(result), result)
+		}
+		// Target should always be kept.
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should be at index 0, got %q", result[0])
+		}
+		// A.swift (oldest dep) should be evicted.
+		for _, f := range result {
+			if f == "/src/A.swift" {
+				t.Error("A.swift should have been evicted")
+			}
+		}
+	})
+
+	t.Run("evict multiple", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
+		result := evictOldest(tracked, "/src/Target.swift", 2)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 files after evicting 2, got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should remain, got %q", result[0])
+		}
+		if result[1] != "/src/C.swift" {
+			t.Errorf("only C.swift should remain as dep, got %q", result[1])
+		}
+	})
+
+	t.Run("source file protected", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift"}
+		result := evictOldest(tracked, "/src/Target.swift", 5) // try to evict more than available
+		if len(result) != 1 {
+			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should always be kept, got %q", result[0])
+		}
+	})
+
+	t.Run("source file matched with unclean path", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift"}
+		// sourceFile has extra path components that filepath.Clean normalizes.
+		result := evictOldest(tracked, "/src/./Target.swift", 5)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should always be kept, got %q", result[0])
+		}
+	})
+}
+
+func TestTryIncrementalReload_BuildingInProgress(t *testing.T) {
+	ws := &watchState{
+		building:     true,
+		trackedFiles: []string{"/src/Target.swift"},
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when building is in progress")
+	}
+}
+
+func TestTryIncrementalReload_StaleThreshold(t *testing.T) {
+	ws := &watchState{
+		incrementalCount: defaultStaleThreshold,
+		trackedFiles:     []string{"/src/Target.swift"},
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when stale threshold reached")
+	}
+}
+
+func TestTryIncrementalReload_NilDepGraph(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1"},
+		depGraph:     nil,
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when depGraph is nil")
+	}
+}
+
+func TestTryIncrementalReload_AllFilesAlreadyTracked(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift", "/src/A.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1", "/src/A.swift": "h2"},
+		depGraph: &analysis.DependencyGraph{
+			All: map[string]bool{"/src/Target.swift": true, "/src/A.swift": true},
+		},
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/A.swift"}, // already tracked
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if !result {
+		t.Error("expected true when all files already tracked (no-op)")
+	}
+}
+
+func TestTryIncrementalReload_OutsideDepGraph(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1"},
+		depGraph: &analysis.DependencyGraph{
+			All: map[string]bool{"/src/Target.swift": true, "/src/A.swift": true},
+		},
+	}
+	// /src/Unrelated.swift is not in the dep graph.
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/Unrelated.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if !result {
+		t.Error("expected true when all dep files are outside graph (filtered to no-op)")
+	}
+}
+
 func TestStdinCommand_JSONRoundtrip(t *testing.T) {
 	tests := []stdinCommand{
 		{Type: "switchFile", Path: "/path/to/file.swift"},

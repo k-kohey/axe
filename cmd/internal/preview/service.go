@@ -152,14 +152,16 @@ func Run(opts RunOptions) error {
 			}
 			indexCache = newSharedIndexCache(rawCache)
 
-			dg, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, opts.SourceFile, indexCache.Get())
+			dg, _, err := analysis.ResolveTransitiveDependencies(ctx, opts.SourceFile, indexCache.Get())
 			if err != nil && ctx.Err() == nil {
 				slog.Warn("Failed to resolve dependencies, proceeding with target only", "err", err)
 			}
 			depGraph = dg
 
 			tf := []string{opts.SourceFile}
-			tf = append(tf, depFiles...)
+			if dg != nil {
+				tf = append(tf, dg.DepsUpTo(opts.PreThunkDepth)...)
+			}
 			slog.Debug("Tracked files", "count", len(tf), "files", tf)
 
 			files, tf, err := parseAndFilterTrackedFiles(opts.SourceFile, tf, indexCache.Get())
@@ -397,6 +399,8 @@ func Run(opts RunOptions) error {
 		trackedFiles:    trackedFiles,
 		depGraph:        depGraph,
 		indexCache:      indexCache,
+		maxThunkFiles:   opts.MaxThunkFiles,
+		preThunkDepth:   opts.PreThunkDepth,
 	}
 
 	var hid *protocol.HIDHandler
@@ -469,7 +473,7 @@ func runOneshot(ctx context.Context, opts RunOptions, br BuildRunner, tc Toolcha
 // RunServe is the multi-stream entry point for serve mode.
 // It reads AddStream/RemoveStream commands from stdin and manages
 // multiple preview streams concurrently via StreamManager.
-func RunServe(pc ProjectConfig, strict bool) error {
+func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
@@ -506,7 +510,7 @@ func RunServe(pc ProjectConfig, strict bool) error {
 	}
 	preparer := build.NewPreparer(pc, projDirs, true, br)
 
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict)
+	sm := NewStreamManager(pool, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
 
 	// Start shared file watcher for all streams.
 	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
