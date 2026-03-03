@@ -5,6 +5,7 @@ import {
 	type BinaryResolverDeps,
 	UserActionPendingError,
 } from "../binaryResolver";
+import { runInstallScript } from "../installScript";
 import type { VersionCheckDeps } from "../versionCheck";
 
 // --- Helpers ---
@@ -22,6 +23,7 @@ function createDeps(
 				sendText() {},
 				dispose() {},
 			}) as unknown as vscode.Terminal,
+		waitForTerminalClose: async () => {},
 		...overrides,
 	};
 }
@@ -60,30 +62,75 @@ suite("BinaryResolver", () => {
 			assert.strictEqual(result, "/usr/local/bin/axe");
 		});
 
-		test("runs install script when user chooses Run Install Script", async () => {
+		test("waits for terminal close and retries which after install", async () => {
+			let whichCallCount = 0;
 			let terminalName = "";
 			let sentText = "";
+			const mockTerminal = {
+				show() {},
+				sendText(text: string) {
+					sentText = text;
+				},
+				dispose() {},
+			} as unknown as vscode.Terminal;
+
 			const deps = createDeps({
+				which: async () => {
+					whichCallCount++;
+					// First call: not found. Second call (retry after install): found.
+					return whichCallCount >= 2 ? "/home/user/.local/bin/axe" : null;
+				},
 				showPrompt: async () => "Run Install Script",
 				createTerminal: (name: string) => {
 					terminalName = name;
-					return {
-						show() {},
-						sendText(text: string) {
-							sentText = text;
-						},
-						dispose() {},
-					} as unknown as vscode.Terminal;
+					return mockTerminal;
 				},
+				waitForTerminalClose: async (terminal) => {
+					assert.strictEqual(terminal, mockTerminal);
+				},
+			});
+			const resolver = new BinaryResolver(deps);
+
+			const result = await resolver.resolve();
+			assert.strictEqual(result, "/home/user/.local/bin/axe");
+			assert.strictEqual(terminalName, "axe install");
+			assert.ok(sentText.includes("install.sh"));
+			assert.strictEqual(whichCallCount, 2);
+		});
+
+		test("throws error when binary not found after installation", async () => {
+			const deps = createDeps({
+				showPrompt: async () => "Run Install Script",
+				waitForTerminalClose: async () => {},
 			});
 			const resolver = new BinaryResolver(deps);
 
 			await assert.rejects(
 				() => resolver.resolve(),
-				(err: unknown) => err instanceof UserActionPendingError,
+				(err: unknown) =>
+					err instanceof Error &&
+					!(err instanceof UserActionPendingError) &&
+					(err as Error).message.includes("not found after installation"),
 			);
-			assert.strictEqual(terminalName, "axe install");
-			assert.ok(sentText.includes("install.sh"));
+		});
+
+		test("install script sends ; exit so terminal closes after install", () => {
+			let sentText = "";
+			const terminal = runInstallScript((name) => {
+				assert.strictEqual(name, "axe install");
+				return {
+					show() {},
+					sendText(text: string) {
+						sentText = text;
+					},
+					dispose() {},
+				} as unknown as vscode.Terminal;
+			});
+			assert.ok(terminal);
+			assert.ok(
+				sentText.endsWith("; exit"),
+				`Expected sendText to end with '; exit', got: ${sentText}`,
+			);
 		});
 
 		test("throws when user dismisses prompt", async () => {
