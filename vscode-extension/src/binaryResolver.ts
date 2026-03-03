@@ -79,6 +79,8 @@ export class UserActionPendingError extends Error {
 
 export class BinaryResolver {
 	private cachedPath: string | null = null;
+	private inflightResolve: Promise<string> | null = null;
+	private cacheEpoch = 0;
 	private readonly deps: Required<BinaryResolverDeps>;
 
 	constructor(deps?: BinaryResolverDeps) {
@@ -98,15 +100,40 @@ export class BinaryResolver {
 	}
 
 	async resolve(): Promise<string> {
-		if (this.cachedPath) {
-			return this.cachedPath;
-		}
+		if (this.cachedPath) return this.cachedPath;
+		// Concurrent callers share the same inflight promise instead of
+		// triggering a second install prompt or PATH lookup.
+		if (this.inflightResolve) return this.inflightResolve;
 
+		const epochAtStart = this.cacheEpoch;
+		const run = this.doResolve();
+		this.inflightResolve = run;
+		try {
+			const resolved = await run;
+			// Only update cache if clearCache() was not called during resolution
+			if (this.cacheEpoch === epochAtStart) {
+				this.cachedPath = resolved;
+			}
+			return resolved;
+		} finally {
+			// Only clear inflight if it's still our promise (clearCache may have reset it)
+			if (this.inflightResolve === run) {
+				this.inflightResolve = null;
+			}
+		}
+	}
+
+	clearCache(): void {
+		this.cacheEpoch++;
+		this.cachedPath = null;
+		this.inflightResolve = null;
+	}
+
+	private async doResolve(): Promise<string> {
 		// 1. Check explicit setting
 		const cfg = vscode.workspace.getConfiguration("axe");
 		const configured = cfg.get<string>("executablePath", "axe");
 		if (configured !== "axe") {
-			this.cachedPath = configured;
 			// Fire-and-forget: version check runs in the background so it never
 			// blocks binary resolution. Warnings are shown asynchronously.
 			checkCliVersion(configured, this.deps.versionCheck);
@@ -116,7 +143,6 @@ export class BinaryResolver {
 		// 2. Check PATH via `which`
 		const whichPath = await this.deps.which("axe");
 		if (whichPath) {
-			this.cachedPath = whichPath;
 			// Fire-and-forget: same rationale as above.
 			checkCliVersion(whichPath, this.deps.versionCheck);
 			return whichPath;
@@ -144,7 +170,6 @@ export class BinaryResolver {
 
 				const retryPath = await this.deps.which("axe");
 				if (retryPath) {
-					this.cachedPath = retryPath;
 					checkCliVersion(retryPath, this.deps.versionCheck);
 					return retryPath;
 				}
@@ -162,9 +187,5 @@ export class BinaryResolver {
 		}
 
 		throw new Error("axe binary not available");
-	}
-
-	clearCache(): void {
-		this.cachedPath = null;
 	}
 }
