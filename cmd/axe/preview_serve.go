@@ -4,7 +4,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var serveStrict bool
+var (
+	serveStrict        bool
+	serveMaxThunkFiles int
+	servePreThunkDepth int
+)
 
 var previewServeCmd = &cobra.Command{
 	Use:   "serve",
@@ -18,11 +22,13 @@ var previewServeCmd = &cobra.Command{
 	Requires idb_companion (install via: brew install facebook/fb/idb-companion).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runServeLogic(serveStrict)
+		return runServeLogic(serveStrict, serveMaxThunkFiles, servePreThunkDepth)
 	},
 }
 
 func init() {
 	previewServeCmd.Flags().BoolVar(&serveStrict, "strict", false, "require full thunk compilation (no degraded fallback)")
+	previewServeCmd.Flags().IntVar(&serveMaxThunkFiles, "max-thunk-files", 32, "maximum number of tracked files for incremental thunk generation")
+	previewServeCmd.Flags().IntVar(&servePreThunkDepth, "pre-thunk-depth", 0, "dependency depth for initial thunk generation (0=target only, 1=direct deps)")
 	previewCmd.AddCommand(previewServeCmd)
 }

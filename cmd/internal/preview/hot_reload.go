@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
@@ -136,6 +138,10 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *build.Settings,
 
 	ws.mu.Lock()
 	ws.reloadCounter++
+	// Touch all tracked files on successful reload to update LRU state.
+	for _, f := range ws.trackedFiles {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
@@ -163,7 +169,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	if ws.indexCache != nil {
 		cache = ws.indexCache.Get()
 	}
-	newGraph, depFiles, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, cache)
+	newGraph, _, err := analysis.ResolveTransitiveDependencies(ctx, newSourceFile, cache)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -172,7 +178,9 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	}
 
 	trackedFiles := []string{newSourceFile}
-	trackedFiles = append(trackedFiles, depFiles...)
+	if newGraph != nil {
+		trackedFiles = append(trackedFiles, newGraph.DepsUpTo(ws.preThunkDepth)...)
+	}
 
 	// 2. Parse source and dependency files.
 	files, trackedFiles, err := parseAndFilterTrackedFiles(newSourceFile, trackedFiles, cache)
@@ -222,14 +230,24 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	}
 
 	// 6. Update watch state.
+	// Build skeleton map outside the lock to avoid holding ws.mu during file I/O.
+	newSkeletonMap := buildSkeletonMap(trackedFiles)
+
 	ws.mu.Lock()
 	ws.reloadCounter++
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.trackedFiles = trackedFiles
-	ws.skeletonMap = buildSkeletonMap(trackedFiles)
+	ws.skeletonMap = newSkeletonMap
 	ws.depGraph = newGraph
 	ws.previewIndex = 0
 	ws.previewCount = previewCount
+	ws.incrementalCount = 0
+	// Reset LRU state for the new file set.
+	ws.lastUsed = make(map[string]int64, len(trackedFiles))
+	ws.usageTick = 0
+	for _, f := range trackedFiles {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	ws.mu.Unlock()
 
 	// Update the trackedSet used by the watcher loop.
@@ -345,7 +363,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	if ws.indexCache != nil {
 		resolveCache = ws.indexCache.Get()
 	}
-	newGraph, newDeps, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, resolveCache)
+	newGraph, _, err := analysis.ResolveTransitiveDependencies(ctx, sourceFile, resolveCache)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -354,17 +372,245 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	}
 
 	newTracked := []string{sourceFile}
-	newTracked = append(newTracked, newDeps...)
+	if newGraph != nil {
+		newTracked = append(newTracked, newGraph.DepsUpTo(ws.preThunkDepth)...)
+	}
 
 	ws.mu.Lock()
 	ws.reloadCounter++
 	ws.depGraph = newGraph
 	ws.trackedFiles = newTracked
+	ws.incrementalCount = 0
+	// Reset LRU state for the rebuilt file set.
+	ws.lastUsed = make(map[string]int64, len(newTracked))
+	ws.usageTick = 0
+	for _, f := range newTracked {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
 	fmt.Fprintln(os.Stderr, "Preview rebuilt and relaunched.")
 	return nil
+}
+
+// tryIncrementalReload attempts to add the given dependency files to the
+// tracked set and hot-reload without a full rebuild.
+//
+// Returns true if the incremental reload succeeded (or was a no-op because
+// all files were already tracked). Returns false if a full rebuild is needed.
+//
+// Concurrency: this function uses multiple lock/unlock cycles on ws.mu with
+// state mutations between them. This is safe because the only production call
+// site is runEventLoop's single-goroutine select loop, which serializes all
+// ws state transitions. The mutex is still used because individual critical
+// sections must be protected and the function is also called directly by tests.
+func tryIncrementalReload(
+	ctx context.Context,
+	depFiles []string,
+	sourceFile string,
+	pc ProjectConfig,
+	bs *build.Settings,
+	dirs previewDirs,
+	wctx watchContext,
+	ws *watchState,
+) bool {
+	ws.mu.Lock()
+	if ws.building {
+		ws.mu.Unlock()
+		slog.Info("Build in progress, falling back to rebuild")
+		return false
+	}
+	if ws.incrementalCount >= defaultStaleThreshold {
+		ws.mu.Unlock()
+		slog.Info("Stale threshold reached, forcing rebuild",
+			"incrementalCount", ws.incrementalCount,
+			"threshold", defaultStaleThreshold)
+		return false
+	}
+
+	// Filter: keep only files that are in the depGraph but not yet tracked.
+	trackedSet := buildTrackedSet(ws.trackedFiles)
+	graph := ws.depGraph
+	ws.mu.Unlock()
+
+	// Without a dependency graph we cannot determine whether the changed files
+	// are relevant. Fall back to a full rebuild so the graph is recomputed.
+	if graph == nil {
+		slog.Info("No dependency graph available, falling back to rebuild")
+		return false
+	}
+
+	var newFiles []string
+	for _, f := range depFiles {
+		clean := filepath.Clean(f)
+		if trackedSet[clean] {
+			continue // already tracked
+		}
+		if !graph.Contains(clean) {
+			continue // outside dependency graph, can't affect preview
+		}
+		newFiles = append(newFiles, clean)
+	}
+	if len(newFiles) == 0 {
+		slog.Debug("All dep files already tracked or outside graph, no-op")
+		return true
+	}
+
+	// Check basename collisions.
+	ws.mu.Lock()
+	tracked := append([]string{}, ws.trackedFiles...)
+	ws.mu.Unlock()
+
+	for _, nf := range newFiles {
+		if codegen.HasBaseNameCollision(nf, tracked) {
+			slog.Info("Basename collision detected, falling back to rebuild",
+				"file", nf)
+			return false
+		}
+	}
+
+	// Precompute skeletons outside the lock to avoid holding the mutex during file I/O.
+	newSkeletons := make(map[string]string, len(newFiles))
+	for _, nf := range newFiles {
+		if sk, err := analysis.Skeleton(nf); err == nil {
+			newSkeletons[filepath.Clean(nf)] = sk
+		}
+	}
+
+	// Evict least-recently-used files if adding newFiles would exceed maxThunkFiles.
+	ws.mu.Lock()
+	maxFiles := ws.maxThunkFiles
+	lastUsedSnap := make(map[string]int64, len(ws.lastUsed))
+	maps.Copy(lastUsedSnap, ws.lastUsed)
+	ws.mu.Unlock()
+
+	if maxFiles > 0 {
+		totalAfter := len(tracked) + len(newFiles)
+		if totalAfter > maxFiles {
+			evictCount := totalAfter - maxFiles
+			tracked = evictLRU(tracked, sourceFile, evictCount, lastUsedSnap)
+		}
+	}
+
+	// Snapshot for rollback.
+	ws.mu.Lock()
+	snapTracked := append([]string{}, ws.trackedFiles...)
+	snapSkeleton := make(map[string]string, len(ws.skeletonMap))
+	maps.Copy(snapSkeleton, ws.skeletonMap)
+	snapCounter := ws.reloadCounter
+	snapLastUsed := make(map[string]int64, len(ws.lastUsed))
+	maps.Copy(snapLastUsed, ws.lastUsed)
+	counter := ws.reloadCounter
+
+	// Apply new files.
+	ws.trackedFiles = append(tracked, newFiles...)
+	maps.Copy(ws.skeletonMap, newSkeletons)
+	selector := ws.previewSelector
+	allTracked := append([]string{}, ws.trackedFiles...)
+	ws.mu.Unlock()
+
+	slog.Info("Attempting incremental reload",
+		"newFiles", len(newFiles),
+		"totalTracked", len(allTracked))
+	fmt.Fprintln(os.Stderr, "\nDependency changed, attempting incremental reload...")
+
+	// rollback restores trackedFiles, skeletonMap, reloadCounter, and lastUsed
+	// to their pre-increment state. Called on compile or deploy failure regardless
+	// of the reason (including context cancellation).
+	rollback := func() {
+		ws.mu.Lock()
+		ws.trackedFiles = snapTracked
+		ws.skeletonMap = snapSkeleton
+		ws.reloadCounter = snapCounter
+		ws.lastUsed = snapLastUsed
+		ws.mu.Unlock()
+	}
+
+	var cache *analysis.IndexStoreCache
+	if ws.indexCache != nil {
+		cache = ws.indexCache.Get()
+	}
+
+	sendWatchStatus(wctx, "compiling_thunk")
+	dylibPath, err := compilePipeline(ctx, sourceFile, allTracked, cache, bs, dirs, selector, counter, wctx.toolchain)
+	if err != nil {
+		rollback()
+		if ctx.Err() != nil {
+			return false
+		}
+		slog.Info("Incremental compile failed, rolling back", "err", err)
+		return false
+	}
+
+	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
+		slog.Warn("Incremental deploy failed, rolling back", "err", err)
+		rollback()
+		return false
+	}
+	sendWatchStatus(wctx, "running")
+
+	ws.mu.Lock()
+	ws.reloadCounter++
+	ws.incrementalCount++
+	// Touch newFiles to record their usage for LRU eviction.
+	for _, nf := range newFiles {
+		touchTrackedFile(ws, filepath.Clean(nf))
+	}
+	cleanOldDylibs(dirs.Thunk, counter-1)
+	ws.mu.Unlock()
+
+	fmt.Fprintln(os.Stderr, "Preview incrementally reloaded.")
+	return true
+}
+
+// touchTrackedFile bumps the LRU usage tick for a file.
+// Must be called with ws.mu held.
+func touchTrackedFile(ws *watchState, cleanPath string) {
+	ws.usageTick++
+	ws.lastUsed[cleanPath] = ws.usageTick
+}
+
+// evictLRU removes the least-recently-used entries from tracked to make room
+// for new files. The source file is never evicted.
+func evictLRU(tracked []string, sourceFile string, evictCount int, lastUsed map[string]int64) []string {
+	if evictCount <= 0 || len(tracked) <= 1 {
+		return tracked
+	}
+
+	cleanSource := filepath.Clean(sourceFile)
+
+	// Collect eviction candidates (everything except source file).
+	type entry struct {
+		idx  int
+		tick int64
+	}
+	var candidates []entry
+	for i, f := range tracked {
+		if filepath.Clean(f) == cleanSource {
+			continue
+		}
+		candidates = append(candidates, entry{i, lastUsed[filepath.Clean(f)]})
+	}
+
+	// Sort by usage tick ascending (least recently used first).
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].tick < candidates[j].tick
+	})
+
+	evictSet := make(map[int]bool, evictCount)
+	for i := 0; i < evictCount && i < len(candidates); i++ {
+		slog.Debug("Evicting tracked file for capacity (LRU)", "file", tracked[candidates[i].idx])
+		evictSet[candidates[i].idx] = true
+	}
+
+	var result []string
+	for i, f := range tracked {
+		if !evictSet[i] {
+			result = append(result, f)
+		}
+	}
+	return result
 }
 
 // reloadStrategy describes whether a source file change can be handled via

@@ -34,6 +34,8 @@ type RunOptions struct {
 	FullThunk       bool
 	Strict          bool
 	NoHeadless      bool
+	MaxThunkFiles   int // max tracked files for incremental thunk (0 = unlimited)
+	PreThunkDepth   int // initial thunk generation depth (0 = target only, 1 = direct deps)
 
 	// Preparer caches FetchSettings results across multiple Run invocations.
 	// When set, Run() delegates to Preparer.Prepare() instead of calling
@@ -93,6 +95,11 @@ func (s *sharedIndexCache) Set(c *analysis.IndexStoreCache) {
 	s.cache = c
 }
 
+// defaultStaleThreshold is the maximum number of consecutive incremental reloads
+// before forcing a full rebuild. This prevents the depGraph from becoming too stale:
+// body-only changes can introduce new type references that the stale graph misses.
+const defaultStaleThreshold = 5
+
 // watchState holds mutable state for the watch loop, protected by a mutex.
 // Immutable configuration (device, loaderPath, etc.) lives in watchContext.
 type watchState struct {
@@ -103,9 +110,18 @@ type watchState struct {
 	previewCount    int                       // total number of #Preview blocks (0 = unknown)
 	building        bool                      // true while rebuildAndRelaunch is running
 	skeletonMap     map[string]string         // file path → skeleton hash
-	trackedFiles    []string                  // target + 1-level dependency file paths
+	trackedFiles    []string                  // target + dependency file paths
 	depGraph        *analysis.DependencyGraph // transitive dependency graph (nil = fallback to rebuild)
 	indexCache      *sharedIndexCache         // shared Index Store cache (nil = fallback to parser)
+
+	maxThunkFiles    int // max tracked files for incremental thunk (0 = unlimited)
+	preThunkDepth    int // initial thunk generation depth
+	incrementalCount int // consecutive incremental reloads since last rebuild
+
+	// LRU eviction state: usageTick is a monotonic counter incremented on each
+	// file touch; lastUsed maps cleaned file paths to their last usage tick.
+	usageTick int64
+	lastUsed  map[string]int64
 }
 
 // watchContext holds immutable configuration for the watch loop.

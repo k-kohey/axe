@@ -116,6 +116,10 @@ type StreamManager struct {
 	// Shared file watcher (set by RunServe before starting command loop).
 	watcher *watch.SharedWatcher
 
+	// Incremental thunk configuration.
+	maxThunkFiles int // max tracked files for incremental thunk
+	preThunkDepth int // initial thunk generation depth
+
 	// Injected runners for testability.
 	build     BuildRunner
 	toolchain ToolchainRunner
@@ -132,7 +136,8 @@ type StreamManager struct {
 
 // NewStreamManager creates a StreamManager with the default stream launcher.
 func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
-	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister, strict bool) *StreamManager {
+	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
+	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
 		pool:          pool,
@@ -142,6 +147,8 @@ func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc Pro
 		deviceSetPath: deviceSetPath,
 		preparer:      preparer,
 		indexCache:    newSharedIndexCache(nil),
+		maxThunkFiles: maxThunkFiles,
+		preThunkDepth: preThunkDepth,
 		build:         br,
 		toolchain:     tc,
 		app:           ar,
@@ -463,12 +470,15 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 			}
 			sm.indexCache.Set(cache)
 
-			depGraph, depFiles, err := analysis.ResolveTransitiveDependencies(launcherCtx, s.file, sm.indexCache.Get())
+			depGraph, _, err := analysis.ResolveTransitiveDependencies(launcherCtx, s.file, sm.indexCache.Get())
 			if err != nil && launcherCtx.Err() == nil {
 				slog.Warn("Failed to resolve dependencies, proceeding with target only",
 					"streamId", s.id, "err", err)
 			}
-			trackedFiles := append([]string{s.file}, depFiles...)
+			trackedFiles := []string{s.file}
+			if depGraph != nil {
+				trackedFiles = append(trackedFiles, depGraph.DepsUpTo(sm.preThunkDepth)...)
+			}
 
 			files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
 			if err != nil {
@@ -656,6 +666,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	// 16. Initialize watch state (full mode only).
+	smInitialLastUsed := make(map[string]int64, len(trackedFiles))
+	for i, f := range trackedFiles {
+		smInitialLastUsed[filepath.Clean(f)] = int64(i + 1)
+	}
 	s.ws = &watchState{
 		reloadCounter:   1, // 0 was used for the initial launch
 		previewSelector: "0",
@@ -665,6 +679,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		trackedFiles:    trackedFiles,
 		depGraph:        depGraph,
 		indexCache:      sm.indexCache, // shared across all streams
+		maxThunkFiles:   sm.maxThunkFiles,
+		preThunkDepth:   sm.preThunkDepth,
+		usageTick:       int64(len(trackedFiles)),
+		lastUsed:        smInitialLastUsed,
 	}
 
 	// 17. Register with shared watcher for file change notifications.

@@ -38,6 +38,8 @@ All settings are optional. When left empty, `axe` falls back to the correspondin
 | `axe.workspace` | Path to `.xcworkspace` (`--workspace` flag) | `""` |
 | `axe.scheme` | Xcode scheme (`--scheme` flag) | `""` |
 | `axe.configuration` | Build configuration (`--configuration` flag) | `""` |
+| `axe.maxThunkFiles` | Max tracked files for incremental thunk (`--max-thunk-files`) | `32` |
+| `axe.preThunkDepth` | Dependency depth for initial thunk (`--pre-thunk-depth`) | `0` |
 | `axe.additionalArgs` | Extra CLI arguments | `[]` |
 
 ## Commands

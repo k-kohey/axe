@@ -113,8 +113,23 @@ func runOneshotLogic(sourceArg string) error {
 	return preview.Run(opts)
 }
 
+// validateThunkFlags checks that incremental thunk flags have valid values.
+func validateThunkFlags(maxThunkFiles, preThunkDepth int) error {
+	if maxThunkFiles < 0 {
+		return fmt.Errorf("--max-thunk-files must be >= 0 (0 = unlimited), got %d", maxThunkFiles)
+	}
+	if preThunkDepth < 0 {
+		return fmt.Errorf("--pre-thunk-depth must be >= 0, got %d", preThunkDepth)
+	}
+	return nil
+}
+
 // runWatchLogic starts preview in watch mode with hot-reload.
-func runWatchLogic(sourceArg, selector string, reuseBuild, strict, noHeadless bool) error {
+func runWatchLogic(sourceArg, selector string, reuseBuild, strict, noHeadless bool, maxThunkFiles, preThunkDepth int) error {
+	if err := validateThunkFlags(maxThunkFiles, preThunkDepth); err != nil {
+		return err
+	}
+
 	pc, err := previewPreamble()
 	if err != nil {
 		return err
@@ -133,16 +148,21 @@ func runWatchLogic(sourceArg, selector string, reuseBuild, strict, noHeadless bo
 		ReuseBuild:      reuseBuild,
 		Strict:          strict,
 		NoHeadless:      noHeadless,
+		MaxThunkFiles:   maxThunkFiles,
+		PreThunkDepth:   preThunkDepth,
 	})
 }
 
 // runServeLogic starts preview in multi-stream serve mode.
-func runServeLogic(strict bool) error {
+func runServeLogic(strict bool, maxThunkFiles, preThunkDepth int) error {
+	if err := validateThunkFlags(maxThunkFiles, preThunkDepth); err != nil {
+		return err
+	}
 	pc, err := previewPreamble()
 	if err != nil {
 		return err
 	}
-	return preview.RunServe(pc, strict)
+	return preview.RunServe(pc, strict, maxThunkFiles, preThunkDepth)
 }
 
 // resolveProjectConfig resolves project settings using the following priority:

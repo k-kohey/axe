@@ -801,6 +801,54 @@ func TestGenerateThunks_CrossModuleDependency(t *testing.T) {
 	}
 }
 
+func TestHasBaseNameCollision(t *testing.T) {
+	tests := []struct {
+		name     string
+		newFile  string
+		existing []string
+		want     bool
+	}{
+		{
+			name:     "no collision",
+			newFile:  "/src/A.swift",
+			existing: []string{"/src/B.swift", "/src/C.swift"},
+			want:     false,
+		},
+		{
+			name:     "exact basename collision different dir",
+			newFile:  "/features/Model.swift",
+			existing: []string{"/core/Model.swift"},
+			want:     true,
+		},
+		{
+			name:     "case-insensitive collision",
+			newFile:  "/src/MyView.swift",
+			existing: []string{"/src/myview.swift"},
+			want:     true,
+		},
+		{
+			name:     "same file is not collision",
+			newFile:  "/src/Model.swift",
+			existing: []string{"/src/Model.swift", "/src/Other.swift"},
+			want:     false,
+		},
+		{
+			name:     "empty existing list",
+			newFile:  "/src/View.swift",
+			existing: nil,
+			want:     false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := HasBaseNameCollision(tt.newFile, tt.existing)
+			if got != tt.want {
+				t.Errorf("HasBaseNameCollision(%q, %v) = %v, want %v", tt.newFile, tt.existing, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTypeInfo_IsView(t *testing.T) {
 	tests := []struct {
 		name string

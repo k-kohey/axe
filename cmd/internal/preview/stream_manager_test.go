@@ -138,7 +138,7 @@ func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *protocol.Even
 	br, tc, ar, fc, sl := nopRunners()
 	pc := ProjectConfig{}
 	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
-	return NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false)
+	return NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
 }
 
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
@@ -147,7 +147,7 @@ func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *S
 	br, tc, ar, fc, sl := nopRunners()
 	pc := ProjectConfig{}
 	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
-	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false)
+	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -1181,7 +1181,7 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	}
 
 	_, tc, _, fc, sl := nopRunners()
-	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, &cleanupCountingAppRunner{}, fc, sl, false)
+	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, &cleanupCountingAppRunner{}, fc, sl, false, 32, 0)
 
 	app := sm.app.(*cleanupCountingAppRunner)
 

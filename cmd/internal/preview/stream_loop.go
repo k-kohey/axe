@@ -74,7 +74,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			cfg.ws.mu.Lock()
 			graph := cfg.ws.depGraph
 			cfg.ws.mu.Unlock()
-			if graph != nil && !graph.All[filepath.Clean(path)] {
+			if graph != nil && !graph.Contains(filepath.Clean(path)) {
 				slog.Debug("Ignoring file change outside dependency graph", "path", path)
 				continue
 			}
@@ -105,17 +105,18 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				}
 				// Recompute skeletons and trackedSet after rebuild
 				// (rebuildAndRelaunch may update trackedFiles and depGraph).
-				cfg.ws.mu.Lock()
-				cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
-				trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
-				cfg.ws.mu.Unlock()
+				trackedSet = refreshTrackedState(cfg.ws)
 			}
 
-		case <-db.DepCh:
+		case depFiles := <-db.DepCh:
 			db.ClearDepTimer()
-			if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
-				slog.Warn("Dependency rebuild error", "err", err)
+			if !tryIncrementalReload(ctx, depFiles, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws) {
+				if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
+					slog.Warn("Dependency rebuild error", "err", err)
+				}
 			}
+			// Rebuild skeletonMap and trackedSet after potential changes.
+			trackedSet = refreshTrackedState(cfg.ws)
 
 		case newFile := <-cfg.switchFileCh:
 			db.Reset()
@@ -130,6 +131,8 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
 				slog.Warn("Force rebuild error", "err", err)
 			}
+			// rebuildAndRelaunch updates ws.trackedFiles; sync local state.
+			trackedSet = refreshTrackedState(cfg.ws)
 
 		case input := <-cfg.inputCh:
 			if cfg.hid != nil {
@@ -272,6 +275,28 @@ func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, id
 			}
 		}
 	}
+}
+
+// refreshTrackedState rebuilds the skeleton map and tracked set without holding
+// ws.mu during file I/O (buildSkeletonMap reads and hashes each file).
+// Returns the new trackedSet for the caller's local variable.
+//
+// This function snapshots trackedFiles and swaps skeletonMap across two separate
+// lock regions. This is safe because the only caller is runEventLoop's
+// single-goroutine select loop, which serializes all ws state transitions.
+func refreshTrackedState(ws *watchState) map[string]bool {
+	ws.mu.Lock()
+	files := append([]string{}, ws.trackedFiles...)
+	ws.mu.Unlock()
+
+	newSkeletonMap := buildSkeletonMap(files) // file I/O — must be outside lock
+	newTrackedSet := buildTrackedSet(files)
+
+	ws.mu.Lock()
+	ws.skeletonMap = newSkeletonMap
+	ws.mu.Unlock()
+
+	return newTrackedSet
 }
 
 // buildTrackedSet creates a set of cleaned file paths for efficient lookup.

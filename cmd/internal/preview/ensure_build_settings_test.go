@@ -22,7 +22,7 @@ func TestStreamManager_UsesSharedPreparer(t *testing.T) {
 
 	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
 		pc, "", preparer,
-		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false)
+		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false, 32, 0)
 
 	if sm.preparer != preparer {
 		t.Error("StreamManager.preparer should be the Preparer passed at construction")

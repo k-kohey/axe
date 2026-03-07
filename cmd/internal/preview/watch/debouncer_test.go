@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"sort"
+	"sync"
 	"testing"
 	"time"
 )
@@ -30,8 +32,10 @@ func TestDebouncer_UntrackedFileTriggersDepCh(t *testing.T) {
 	db.HandleFileChange("/src/Other.swift", trackedSet)
 
 	select {
-	case <-db.DepCh:
-		// OK
+	case files := <-db.DepCh:
+		if len(files) != 1 || files[0] != "/src/Other.swift" {
+			t.Errorf("expected [/src/Other.swift], got %v", files)
+		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("DepCh did not fire within timeout")
 	}
@@ -181,4 +185,83 @@ func TestDebouncer_StopCancelsPendingTimers(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		// OK — timer was cancelled
 	}
+}
+
+func TestDebouncer_DepFilesAccumulation(t *testing.T) {
+	db := NewDebouncer()
+	defer db.Stop()
+
+	trackedSet := map[string]bool{"/src/HogeView.swift": true}
+
+	// Multiple untracked changes within the debounce window should accumulate.
+	db.HandleFileChange("/src/A.swift", trackedSet)
+	db.HandleFileChange("/src/B.swift", trackedSet)
+	db.HandleFileChange("/src/C.swift", trackedSet)
+
+	select {
+	case files := <-db.DepCh:
+		sort.Strings(files)
+		expected := []string{"/src/A.swift", "/src/B.swift", "/src/C.swift"}
+		if len(files) != len(expected) {
+			t.Fatalf("expected %d files, got %d: %v", len(expected), len(files), files)
+		}
+		for i, f := range files {
+			if f != expected[i] {
+				t.Errorf("files[%d] = %q, want %q", i, f, expected[i])
+			}
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("DepCh did not fire within timeout")
+	}
+}
+
+func TestDebouncer_DepFilesDeduplicated(t *testing.T) {
+	db := NewDebouncer()
+	defer db.Stop()
+
+	trackedSet := map[string]bool{"/src/HogeView.swift": true}
+
+	// Same file changed multiple times should not duplicate.
+	db.HandleFileChange("/src/A.swift", trackedSet)
+	db.HandleFileChange("/src/A.swift", trackedSet)
+	db.HandleFileChange("/src/B.swift", trackedSet)
+	db.HandleFileChange("/src/A.swift", trackedSet)
+
+	select {
+	case files := <-db.DepCh:
+		sort.Strings(files)
+		expected := []string{"/src/A.swift", "/src/B.swift"}
+		if len(files) != len(expected) {
+			t.Fatalf("expected %d files (deduplicated), got %d: %v", len(expected), len(files), files)
+		}
+		for i, f := range files {
+			if f != expected[i] {
+				t.Errorf("files[%d] = %q, want %q", i, f, expected[i])
+			}
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("DepCh did not fire within timeout")
+	}
+}
+
+func TestDebouncer_ConcurrentAccess(t *testing.T) {
+	db := NewDebouncer()
+	defer db.Stop()
+
+	trackedSet := map[string]bool{"/src/HogeView.swift": true}
+
+	var wg sync.WaitGroup
+	for i := range 10 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			if idx%2 == 0 {
+				db.HandleFileChange("/src/HogeView.swift", trackedSet)
+			} else {
+				db.HandleFileChange("/src/Other.swift", trackedSet)
+			}
+		}(i)
+	}
+	wg.Wait()
+	// No race detector errors means success.
 }

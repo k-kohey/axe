@@ -52,14 +52,14 @@ func TestBuildTransitiveDeps_SingleLevel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[filepath.Clean(target)] {
+	if !graph.Contains(target) {
 		t.Error("graph should include target file")
 	}
-	if !graph.All[filepath.Clean(dep)] {
+	if !graph.Contains(dep) {
 		t.Error("graph should include dependency file")
 	}
-	if len(graph.All) != 2 {
-		t.Errorf("graph size = %d, want 2", len(graph.All))
+	if graph.Len() != 2 {
+		t.Errorf("graph size = %d, want 2", graph.Len())
 	}
 
 	direct := graph.DirectDeps()
@@ -90,17 +90,17 @@ func TestBuildTransitiveDeps_Transitive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[filepath.Clean(a)] {
+	if !graph.Contains(a) {
 		t.Error("graph should include A")
 	}
-	if !graph.All[filepath.Clean(b)] {
+	if !graph.Contains(b) {
 		t.Error("graph should include B (direct dep)")
 	}
-	if !graph.All[filepath.Clean(c)] {
+	if !graph.Contains(c) {
 		t.Error("graph should include C (transitive dep)")
 	}
-	if len(graph.All) != 3 {
-		t.Errorf("graph size = %d, want 3", len(graph.All))
+	if graph.Len() != 3 {
+		t.Errorf("graph size = %d, want 3", graph.Len())
 	}
 
 	direct := graph.DirectDeps()
@@ -130,8 +130,8 @@ func TestBuildTransitiveDeps_Cycle(t *testing.T) {
 	}
 
 	// Should not infinite loop; both files should be in the graph.
-	if len(graph.All) != 2 {
-		t.Errorf("graph size = %d, want 2", len(graph.All))
+	if graph.Len() != 2 {
+		t.Errorf("graph size = %d, want 2", graph.Len())
 	}
 }
 
@@ -150,8 +150,8 @@ func TestBuildTransitiveDeps_NoRefs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(graph.All) != 1 {
-		t.Errorf("graph size = %d, want 1 (target only)", len(graph.All))
+	if graph.Len() != 1 {
+		t.Errorf("graph size = %d, want 1 (target only)", graph.Len())
 	}
 
 	if len(graph.DirectDeps()) != 0 {
@@ -175,8 +175,8 @@ func TestBuildTransitiveDeps_UnknownTypeSkipped(t *testing.T) {
 	}
 
 	// UnknownFrameworkType not in typeMap, so only target is in graph.
-	if len(graph.All) != 1 {
-		t.Errorf("graph size = %d, want 1", len(graph.All))
+	if graph.Len() != 1 {
+		t.Errorf("graph size = %d, want 1", graph.Len())
 	}
 }
 
@@ -215,11 +215,11 @@ func TestBuildTransitiveDeps_EmptyTypeMap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[filepath.Clean(target)] {
+	if !graph.Contains(target) {
 		t.Error("graph should include target file")
 	}
-	if len(graph.All) != 1 {
-		t.Errorf("graph size = %d, want 1 (target only with empty typeMap)", len(graph.All))
+	if graph.Len() != 1 {
+		t.Errorf("graph size = %d, want 1 (target only with empty typeMap)", graph.Len())
 	}
 }
 
@@ -247,12 +247,12 @@ func TestBuildTransitiveDeps_NonCleanPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[depClean] {
+	if !graph.Contains(depClean) {
 		t.Errorf("graph should contain cleaned path %q", depClean)
 	}
 	// Ensure no duplicate entry from the non-clean path.
-	if len(graph.All) != 2 {
-		t.Errorf("graph size = %d, want 2 (target + deduplicated dep)", len(graph.All))
+	if graph.Len() != 2 {
+		t.Errorf("graph size = %d, want 2 (target + deduplicated dep)", graph.Len())
 	}
 }
 
@@ -275,14 +275,14 @@ func TestBuildTransitiveDeps_DuplicateTypeName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[filepath.Clean(depA)] {
+	if !graph.Contains(depA) {
 		t.Error("graph should include features/Product.swift")
 	}
-	if !graph.All[filepath.Clean(depB)] {
+	if !graph.Contains(depB) {
 		t.Error("graph should include legacy/Product.swift")
 	}
-	if len(graph.All) != 3 {
-		t.Errorf("graph size = %d, want 3 (target + 2 Product files)", len(graph.All))
+	if graph.Len() != 3 {
+		t.Errorf("graph size = %d, want 3 (target + 2 Product files)", graph.Len())
 	}
 
 	direct := graph.DirectDeps()
@@ -321,8 +321,8 @@ func TestBuildTransitiveDeps_DirectDepsMultiDepth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(graph.All) != 4 {
-		t.Errorf("graph size = %d, want 4", len(graph.All))
+	if graph.Len() != 4 {
+		t.Errorf("graph size = %d, want 4", graph.Len())
 	}
 
 	direct := graph.DirectDeps()
@@ -346,9 +346,83 @@ func TestBuildTransitiveDeps_NilCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(graph.All) != 1 {
-		t.Errorf("graph size = %d, want 1 (nil cache returns no refs)", len(graph.All))
+	if graph.Len() != 1 {
+		t.Errorf("graph size = %d, want 1 (nil cache returns no refs)", graph.Len())
 	}
+}
+
+func TestDepsUpTo_Chain(t *testing.T) {
+	// A → B → C → D chain: depth A=0, B=1, C=2, D=3.
+	a := filepath.Join("/project", "A.swift")
+	b := filepath.Join("/project", "B.swift")
+	c := filepath.Join("/project", "C.swift")
+	d := filepath.Join("/project", "D.swift")
+
+	cache := newTestCache(map[string]struct {
+		referenced []string
+		defined    []string
+	}{
+		a: {referenced: []string{"BType"}, defined: []string{"AType"}},
+		b: {referenced: []string{"CType"}, defined: []string{"BType"}},
+		c: {referenced: []string{"DType"}, defined: []string{"CType"}},
+		d: {referenced: nil, defined: []string{"DType"}},
+	})
+
+	graph, err := BuildTransitiveDeps(context.Background(), a, cache.TypeFileMultiMap(), cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("maxDepth=0", func(t *testing.T) {
+		deps := graph.DepsUpTo(0)
+		if len(deps) != 0 {
+			t.Errorf("DepsUpTo(0) = %v, want empty", deps)
+		}
+	})
+
+	t.Run("maxDepth=1", func(t *testing.T) {
+		deps := graph.DepsUpTo(1)
+		if len(deps) != 1 {
+			t.Fatalf("DepsUpTo(1) count = %d, want 1", len(deps))
+		}
+		if deps[0] != filepath.Clean(b) {
+			t.Errorf("DepsUpTo(1)[0] = %q, want %q", deps[0], filepath.Clean(b))
+		}
+	})
+
+	t.Run("maxDepth=2", func(t *testing.T) {
+		deps := graph.DepsUpTo(2)
+		if len(deps) != 2 {
+			t.Fatalf("DepsUpTo(2) count = %d, want 2", len(deps))
+		}
+		depSet := make(map[string]bool)
+		for _, d := range deps {
+			depSet[d] = true
+		}
+		if !depSet[filepath.Clean(b)] {
+			t.Error("DepsUpTo(2) should include B")
+		}
+		if !depSet[filepath.Clean(c)] {
+			t.Error("DepsUpTo(2) should include C")
+		}
+	})
+
+	t.Run("maxDepth_negative_all", func(t *testing.T) {
+		deps := graph.DepsUpTo(-1)
+		if len(deps) != 3 {
+			t.Fatalf("DepsUpTo(-1) count = %d, want 3 (B,C,D)", len(deps))
+		}
+		depSet := make(map[string]bool)
+		for _, d := range deps {
+			depSet[d] = true
+		}
+		if !depSet[filepath.Clean(b)] || !depSet[filepath.Clean(c)] || !depSet[filepath.Clean(d)] {
+			t.Errorf("DepsUpTo(-1) should include B, C, D; got %v", deps)
+		}
+		if depSet[filepath.Clean(a)] {
+			t.Error("DepsUpTo(-1) should NOT include target A")
+		}
+	})
 }
 
 func TestBuildTransitiveDeps_MidTraversalContextCancel(t *testing.T) {

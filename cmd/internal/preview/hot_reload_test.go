@@ -491,6 +491,199 @@ struct V: View {
 	}
 }
 
+func TestEvictLRU(t *testing.T) {
+	t.Run("no eviction needed", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift"}
+		lastUsed := map[string]int64{"/src/Target.swift": 3, "/src/A.swift": 1, "/src/B.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 0, lastUsed)
+		if len(result) != 3 {
+			t.Errorf("expected 3 files, got %d: %v", len(result), result)
+		}
+	})
+
+	t.Run("evict least recently used", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
+		// A has lowest tick → should be evicted first.
+		lastUsed := map[string]int64{"/src/Target.swift": 4, "/src/A.swift": 1, "/src/B.swift": 3, "/src/C.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 1, lastUsed)
+		if len(result) != 3 {
+			t.Fatalf("expected 3 files after evicting 1, got %d: %v", len(result), result)
+		}
+		// Target should always be kept.
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should be at index 0, got %q", result[0])
+		}
+		// A.swift (least recently used) should be evicted.
+		for _, f := range result {
+			if f == "/src/A.swift" {
+				t.Error("A.swift should have been evicted (LRU)")
+			}
+		}
+	})
+
+	t.Run("evict multiple by LRU order", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
+		// C has highest tick (most recently used), A and B have lowest.
+		lastUsed := map[string]int64{"/src/Target.swift": 4, "/src/A.swift": 1, "/src/B.swift": 2, "/src/C.swift": 3}
+		result := evictLRU(tracked, "/src/Target.swift", 2, lastUsed)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 files after evicting 2, got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should remain, got %q", result[0])
+		}
+		if result[1] != "/src/C.swift" {
+			t.Errorf("only C.swift should remain as dep (most recently used), got %q", result[1])
+		}
+	})
+
+	t.Run("source file protected", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift"}
+		lastUsed := map[string]int64{"/src/Target.swift": 1, "/src/A.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 5, lastUsed) // try to evict more than available
+		if len(result) != 1 {
+			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should always be kept, got %q", result[0])
+		}
+	})
+
+	t.Run("source file matched with unclean path", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift"}
+		lastUsed := map[string]int64{"/src/Target.swift": 1, "/src/A.swift": 2}
+		// sourceFile has extra path components that filepath.Clean normalizes.
+		result := evictLRU(tracked, "/src/./Target.swift", 5, lastUsed)
+		if len(result) != 1 {
+			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
+		}
+		if result[0] != "/src/Target.swift" {
+			t.Errorf("source file should always be kept, got %q", result[0])
+		}
+	})
+
+	t.Run("missing lastUsed entries treated as zero tick", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift"}
+		// A has no lastUsed entry (tick=0), B has tick=1 → A evicted first.
+		lastUsed := map[string]int64{"/src/Target.swift": 2, "/src/B.swift": 1}
+		result := evictLRU(tracked, "/src/Target.swift", 1, lastUsed)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 files after evicting 1, got %d: %v", len(result), result)
+		}
+		for _, f := range result {
+			if f == "/src/A.swift" {
+				t.Error("A.swift should have been evicted (zero tick = oldest)")
+			}
+		}
+	})
+}
+
+func TestTryIncrementalReload_BuildingInProgress(t *testing.T) {
+	ws := &watchState{
+		building:     true,
+		trackedFiles: []string{"/src/Target.swift"},
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when building is in progress")
+	}
+}
+
+func TestTryIncrementalReload_StaleThreshold(t *testing.T) {
+	ws := &watchState{
+		incrementalCount: defaultStaleThreshold,
+		trackedFiles:     []string{"/src/Target.swift"},
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when stale threshold reached")
+	}
+}
+
+func TestTryIncrementalReload_NilDepGraph(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1"},
+		depGraph:     nil,
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/New.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if result {
+		t.Error("expected false when depGraph is nil")
+	}
+}
+
+func TestTryIncrementalReload_AllFilesAlreadyTracked(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift", "/src/A.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1", "/src/A.swift": "h2"},
+		depGraph:     analysis.NewDependencyGraph([]string{"/src/Target.swift", "/src/A.swift"}),
+		lastUsed:     make(map[string]int64),
+	}
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/A.swift"}, // already tracked
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if !result {
+		t.Error("expected true when all files already tracked (no-op)")
+	}
+}
+
+func TestTryIncrementalReload_OutsideDepGraph(t *testing.T) {
+	ws := &watchState{
+		trackedFiles: []string{"/src/Target.swift"},
+		skeletonMap:  map[string]string{"/src/Target.swift": "h1"},
+		depGraph:     analysis.NewDependencyGraph([]string{"/src/Target.swift", "/src/A.swift"}),
+		lastUsed:     make(map[string]int64),
+	}
+	// /src/Unrelated.swift is not in the dep graph.
+	result := tryIncrementalReload(
+		context.Background(),
+		[]string{"/src/Unrelated.swift"},
+		"/src/Target.swift",
+		ProjectConfig{},
+		&build.Settings{},
+		previewDirs{},
+		watchContext{},
+		ws,
+	)
+	if !result {
+		t.Error("expected true when all dep files are outside graph (filtered to no-op)")
+	}
+}
+
 func TestStdinCommand_JSONRoundtrip(t *testing.T) {
 	tests := []stdinCommand{
 		{Type: "switchFile", Path: "/path/to/file.swift"},
