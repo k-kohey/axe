@@ -230,11 +230,14 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	}
 
 	// 6. Update watch state.
+	// Build skeleton map outside the lock to avoid holding ws.mu during file I/O.
+	newSkeletonMap := buildSkeletonMap(trackedFiles)
+
 	ws.mu.Lock()
 	ws.reloadCounter++
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.trackedFiles = trackedFiles
-	ws.skeletonMap = buildSkeletonMap(trackedFiles)
+	ws.skeletonMap = newSkeletonMap
 	ws.depGraph = newGraph
 	ws.previewIndex = 0
 	ws.previewCount = previewCount
@@ -396,6 +399,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 //
 // Returns true if the incremental reload succeeded (or was a no-op because
 // all files were already tracked). Returns false if a full rebuild is needed.
+//
+// Concurrency: this function uses multiple lock/unlock cycles on ws.mu with
+// state mutations between them. This is safe because the only production call
+// site is runEventLoop's single-goroutine select loop, which serializes all
+// ws state transitions. The mutex is still used because individual critical
+// sections must be protected and the function is also called directly by tests.
 func tryIncrementalReload(
 	ctx context.Context,
 	depFiles []string,

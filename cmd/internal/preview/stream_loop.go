@@ -105,10 +105,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				}
 				// Recompute skeletons and trackedSet after rebuild
 				// (rebuildAndRelaunch may update trackedFiles and depGraph).
-				cfg.ws.mu.Lock()
-				cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
-				trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
-				cfg.ws.mu.Unlock()
+				trackedSet = refreshTrackedState(cfg.ws)
 			}
 
 		case depFiles := <-db.DepCh:
@@ -119,10 +116,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				}
 			}
 			// Rebuild skeletonMap and trackedSet after potential changes.
-			cfg.ws.mu.Lock()
-			cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
-			trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
-			cfg.ws.mu.Unlock()
+			trackedSet = refreshTrackedState(cfg.ws)
 
 		case newFile := <-cfg.switchFileCh:
 			db.Reset()
@@ -138,10 +132,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 				slog.Warn("Force rebuild error", "err", err)
 			}
 			// rebuildAndRelaunch updates ws.trackedFiles; sync local state.
-			cfg.ws.mu.Lock()
-			cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
-			trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
-			cfg.ws.mu.Unlock()
+			trackedSet = refreshTrackedState(cfg.ws)
 
 		case input := <-cfg.inputCh:
 			if cfg.hid != nil {
@@ -284,6 +275,28 @@ func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, id
 			}
 		}
 	}
+}
+
+// refreshTrackedState rebuilds the skeleton map and tracked set without holding
+// ws.mu during file I/O (buildSkeletonMap reads and hashes each file).
+// Returns the new trackedSet for the caller's local variable.
+//
+// This function snapshots trackedFiles and swaps skeletonMap across two separate
+// lock regions. This is safe because the only caller is runEventLoop's
+// single-goroutine select loop, which serializes all ws state transitions.
+func refreshTrackedState(ws *watchState) map[string]bool {
+	ws.mu.Lock()
+	files := append([]string{}, ws.trackedFiles...)
+	ws.mu.Unlock()
+
+	newSkeletonMap := buildSkeletonMap(files) // file I/O — must be outside lock
+	newTrackedSet := buildTrackedSet(files)
+
+	ws.mu.Lock()
+	ws.skeletonMap = newSkeletonMap
+	ws.mu.Unlock()
+
+	return newTrackedSet
 }
 
 // buildTrackedSet creates a set of cleaned file paths for efficient lookup.
