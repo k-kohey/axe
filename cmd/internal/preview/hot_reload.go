@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
@@ -137,6 +138,10 @@ func reloadMultiFile(ctx context.Context, sourceFile string, bs *build.Settings,
 
 	ws.mu.Lock()
 	ws.reloadCounter++
+	// Touch all tracked files on successful reload to update LRU state.
+	for _, f := range ws.trackedFiles {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
@@ -234,6 +239,12 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.previewIndex = 0
 	ws.previewCount = previewCount
 	ws.incrementalCount = 0
+	// Reset LRU state for the new file set.
+	ws.lastUsed = make(map[string]int64, len(trackedFiles))
+	ws.usageTick = 0
+	for _, f := range trackedFiles {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	ws.mu.Unlock()
 
 	// Update the trackedSet used by the watcher loop.
@@ -367,6 +378,12 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	ws.depGraph = newGraph
 	ws.trackedFiles = newTracked
 	ws.incrementalCount = 0
+	// Reset LRU state for the rebuilt file set.
+	ws.lastUsed = make(map[string]int64, len(newTracked))
+	ws.usageTick = 0
+	for _, f := range newTracked {
+		touchTrackedFile(ws, filepath.Clean(f))
+	}
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
@@ -421,7 +438,7 @@ func tryIncrementalReload(
 		if trackedSet[clean] {
 			continue // already tracked
 		}
-		if !graph.All[clean] {
+		if !graph.Contains(clean) {
 			continue // outside dependency graph, can't affect preview
 		}
 		newFiles = append(newFiles, clean)
@@ -444,16 +461,26 @@ func tryIncrementalReload(
 		}
 	}
 
-	// Evict oldest files if adding newFiles would exceed maxThunkFiles.
+	// Precompute skeletons outside the lock to avoid holding the mutex during file I/O.
+	newSkeletons := make(map[string]string, len(newFiles))
+	for _, nf := range newFiles {
+		if sk, err := analysis.Skeleton(nf); err == nil {
+			newSkeletons[filepath.Clean(nf)] = sk
+		}
+	}
+
+	// Evict least-recently-used files if adding newFiles would exceed maxThunkFiles.
 	ws.mu.Lock()
 	maxFiles := ws.maxThunkFiles
+	lastUsedSnap := make(map[string]int64, len(ws.lastUsed))
+	maps.Copy(lastUsedSnap, ws.lastUsed)
 	ws.mu.Unlock()
 
 	if maxFiles > 0 {
 		totalAfter := len(tracked) + len(newFiles)
 		if totalAfter > maxFiles {
 			evictCount := totalAfter - maxFiles
-			tracked = evictOldest(tracked, sourceFile, evictCount)
+			tracked = evictLRU(tracked, sourceFile, evictCount, lastUsedSnap)
 		}
 	}
 
@@ -463,15 +490,13 @@ func tryIncrementalReload(
 	snapSkeleton := make(map[string]string, len(ws.skeletonMap))
 	maps.Copy(snapSkeleton, ws.skeletonMap)
 	snapCounter := ws.reloadCounter
+	snapLastUsed := make(map[string]int64, len(ws.lastUsed))
+	maps.Copy(snapLastUsed, ws.lastUsed)
 	counter := ws.reloadCounter
 
 	// Apply new files.
 	ws.trackedFiles = append(tracked, newFiles...)
-	for _, nf := range newFiles {
-		if sk, err := analysis.Skeleton(nf); err == nil {
-			ws.skeletonMap[filepath.Clean(nf)] = sk
-		}
-	}
+	maps.Copy(ws.skeletonMap, newSkeletons)
 	selector := ws.previewSelector
 	allTracked := append([]string{}, ws.trackedFiles...)
 	ws.mu.Unlock()
@@ -481,6 +506,18 @@ func tryIncrementalReload(
 		"totalTracked", len(allTracked))
 	fmt.Fprintln(os.Stderr, "\nDependency changed, attempting incremental reload...")
 
+	// rollback restores trackedFiles, skeletonMap, reloadCounter, and lastUsed
+	// to their pre-increment state. Called on compile or deploy failure regardless
+	// of the reason (including context cancellation).
+	rollback := func() {
+		ws.mu.Lock()
+		ws.trackedFiles = snapTracked
+		ws.skeletonMap = snapSkeleton
+		ws.reloadCounter = snapCounter
+		ws.lastUsed = snapLastUsed
+		ws.mu.Unlock()
+	}
+
 	var cache *analysis.IndexStoreCache
 	if ws.indexCache != nil {
 		cache = ws.indexCache.Get()
@@ -489,26 +526,17 @@ func tryIncrementalReload(
 	sendWatchStatus(wctx, "compiling_thunk")
 	dylibPath, err := compilePipeline(ctx, sourceFile, allTracked, cache, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
+		rollback()
 		if ctx.Err() != nil {
 			return false
 		}
 		slog.Info("Incremental compile failed, rolling back", "err", err)
-		// Rollback.
-		ws.mu.Lock()
-		ws.trackedFiles = snapTracked
-		ws.skeletonMap = snapSkeleton
-		ws.reloadCounter = snapCounter
-		ws.mu.Unlock()
 		return false
 	}
 
 	if err := deploy(ctx, dylibPath, dirs, bs, wctx); err != nil {
 		slog.Warn("Incremental deploy failed, rolling back", "err", err)
-		ws.mu.Lock()
-		ws.trackedFiles = snapTracked
-		ws.skeletonMap = snapSkeleton
-		ws.reloadCounter = snapCounter
-		ws.mu.Unlock()
+		rollback()
 		return false
 	}
 	sendWatchStatus(wctx, "running")
@@ -516,6 +544,10 @@ func tryIncrementalReload(
 	ws.mu.Lock()
 	ws.reloadCounter++
 	ws.incrementalCount++
+	// Touch newFiles to record their usage for LRU eviction.
+	for _, nf := range newFiles {
+		touchTrackedFile(ws, filepath.Clean(nf))
+	}
 	cleanOldDylibs(dirs.Thunk, counter-1)
 	ws.mu.Unlock()
 
@@ -523,36 +555,51 @@ func tryIncrementalReload(
 	return true
 }
 
-// evictOldest removes the oldest entries from tracked to make room for new files.
-// tracked[0] is the source file and is never evicted. Eviction starts from index 1.
-func evictOldest(tracked []string, sourceFile string, evictCount int) []string {
+// touchTrackedFile bumps the LRU usage tick for a file.
+// Must be called with ws.mu held.
+func touchTrackedFile(ws *watchState, cleanPath string) {
+	ws.usageTick++
+	ws.lastUsed[cleanPath] = ws.usageTick
+}
+
+// evictLRU removes the least-recently-used entries from tracked to make room
+// for new files. The source file is never evicted.
+func evictLRU(tracked []string, sourceFile string, evictCount int, lastUsed map[string]int64) []string {
 	if evictCount <= 0 || len(tracked) <= 1 {
 		return tracked
 	}
 
-	// Find the source file index (usually 0, but be safe).
 	cleanSource := filepath.Clean(sourceFile)
-	sourceIdx := -1
+
+	// Collect eviction candidates (everything except source file).
+	type entry struct {
+		idx  int
+		tick int64
+	}
+	var candidates []entry
 	for i, f := range tracked {
 		if filepath.Clean(f) == cleanSource {
-			sourceIdx = i
-			break
+			continue
 		}
+		candidates = append(candidates, entry{i, lastUsed[filepath.Clean(f)]})
+	}
+
+	// Sort by usage tick ascending (least recently used first).
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].tick < candidates[j].tick
+	})
+
+	evictSet := make(map[int]bool, evictCount)
+	for i := 0; i < evictCount && i < len(candidates); i++ {
+		slog.Debug("Evicting tracked file for capacity (LRU)", "file", tracked[candidates[i].idx])
+		evictSet[candidates[i].idx] = true
 	}
 
 	var result []string
-	evicted := 0
 	for i, f := range tracked {
-		if i == sourceIdx {
-			result = append(result, f) // always keep source
-			continue
+		if !evictSet[i] {
+			result = append(result, f)
 		}
-		if evicted < evictCount {
-			slog.Debug("Evicting tracked file for capacity", "file", f)
-			evicted++
-			continue
-		}
-		result = append(result, f)
 	}
 	return result
 }

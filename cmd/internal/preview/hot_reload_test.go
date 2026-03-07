@@ -491,18 +491,21 @@ struct V: View {
 	}
 }
 
-func TestEvictOldest(t *testing.T) {
+func TestEvictLRU(t *testing.T) {
 	t.Run("no eviction needed", func(t *testing.T) {
 		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift"}
-		result := evictOldest(tracked, "/src/Target.swift", 0)
+		lastUsed := map[string]int64{"/src/Target.swift": 3, "/src/A.swift": 1, "/src/B.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 0, lastUsed)
 		if len(result) != 3 {
 			t.Errorf("expected 3 files, got %d: %v", len(result), result)
 		}
 	})
 
-	t.Run("evict one", func(t *testing.T) {
+	t.Run("evict least recently used", func(t *testing.T) {
 		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
-		result := evictOldest(tracked, "/src/Target.swift", 1)
+		// A has lowest tick → should be evicted first.
+		lastUsed := map[string]int64{"/src/Target.swift": 4, "/src/A.swift": 1, "/src/B.swift": 3, "/src/C.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 1, lastUsed)
 		if len(result) != 3 {
 			t.Fatalf("expected 3 files after evicting 1, got %d: %v", len(result), result)
 		}
@@ -510,17 +513,19 @@ func TestEvictOldest(t *testing.T) {
 		if result[0] != "/src/Target.swift" {
 			t.Errorf("source file should be at index 0, got %q", result[0])
 		}
-		// A.swift (oldest dep) should be evicted.
+		// A.swift (least recently used) should be evicted.
 		for _, f := range result {
 			if f == "/src/A.swift" {
-				t.Error("A.swift should have been evicted")
+				t.Error("A.swift should have been evicted (LRU)")
 			}
 		}
 	})
 
-	t.Run("evict multiple", func(t *testing.T) {
+	t.Run("evict multiple by LRU order", func(t *testing.T) {
 		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift", "/src/C.swift"}
-		result := evictOldest(tracked, "/src/Target.swift", 2)
+		// C has highest tick (most recently used), A and B have lowest.
+		lastUsed := map[string]int64{"/src/Target.swift": 4, "/src/A.swift": 1, "/src/B.swift": 2, "/src/C.swift": 3}
+		result := evictLRU(tracked, "/src/Target.swift", 2, lastUsed)
 		if len(result) != 2 {
 			t.Fatalf("expected 2 files after evicting 2, got %d: %v", len(result), result)
 		}
@@ -528,13 +533,14 @@ func TestEvictOldest(t *testing.T) {
 			t.Errorf("source file should remain, got %q", result[0])
 		}
 		if result[1] != "/src/C.swift" {
-			t.Errorf("only C.swift should remain as dep, got %q", result[1])
+			t.Errorf("only C.swift should remain as dep (most recently used), got %q", result[1])
 		}
 	})
 
 	t.Run("source file protected", func(t *testing.T) {
 		tracked := []string{"/src/Target.swift", "/src/A.swift"}
-		result := evictOldest(tracked, "/src/Target.swift", 5) // try to evict more than available
+		lastUsed := map[string]int64{"/src/Target.swift": 1, "/src/A.swift": 2}
+		result := evictLRU(tracked, "/src/Target.swift", 5, lastUsed) // try to evict more than available
 		if len(result) != 1 {
 			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
 		}
@@ -545,13 +551,29 @@ func TestEvictOldest(t *testing.T) {
 
 	t.Run("source file matched with unclean path", func(t *testing.T) {
 		tracked := []string{"/src/Target.swift", "/src/A.swift"}
+		lastUsed := map[string]int64{"/src/Target.swift": 1, "/src/A.swift": 2}
 		// sourceFile has extra path components that filepath.Clean normalizes.
-		result := evictOldest(tracked, "/src/./Target.swift", 5)
+		result := evictLRU(tracked, "/src/./Target.swift", 5, lastUsed)
 		if len(result) != 1 {
 			t.Fatalf("expected 1 file (source only), got %d: %v", len(result), result)
 		}
 		if result[0] != "/src/Target.swift" {
 			t.Errorf("source file should always be kept, got %q", result[0])
+		}
+	})
+
+	t.Run("missing lastUsed entries treated as zero tick", func(t *testing.T) {
+		tracked := []string{"/src/Target.swift", "/src/A.swift", "/src/B.swift"}
+		// A has no lastUsed entry (tick=0), B has tick=1 → A evicted first.
+		lastUsed := map[string]int64{"/src/Target.swift": 2, "/src/B.swift": 1}
+		result := evictLRU(tracked, "/src/Target.swift", 1, lastUsed)
+		if len(result) != 2 {
+			t.Fatalf("expected 2 files after evicting 1, got %d: %v", len(result), result)
+		}
+		for _, f := range result {
+			if f == "/src/A.swift" {
+				t.Error("A.swift should have been evicted (zero tick = oldest)")
+			}
 		}
 	})
 }
@@ -621,9 +643,8 @@ func TestTryIncrementalReload_AllFilesAlreadyTracked(t *testing.T) {
 	ws := &watchState{
 		trackedFiles: []string{"/src/Target.swift", "/src/A.swift"},
 		skeletonMap:  map[string]string{"/src/Target.swift": "h1", "/src/A.swift": "h2"},
-		depGraph: &analysis.DependencyGraph{
-			All: map[string]bool{"/src/Target.swift": true, "/src/A.swift": true},
-		},
+		depGraph:     analysis.NewDependencyGraph([]string{"/src/Target.swift", "/src/A.swift"}),
+		lastUsed:     make(map[string]int64),
 	}
 	result := tryIncrementalReload(
 		context.Background(),
@@ -644,9 +665,8 @@ func TestTryIncrementalReload_OutsideDepGraph(t *testing.T) {
 	ws := &watchState{
 		trackedFiles: []string{"/src/Target.swift"},
 		skeletonMap:  map[string]string{"/src/Target.swift": "h1"},
-		depGraph: &analysis.DependencyGraph{
-			All: map[string]bool{"/src/Target.swift": true, "/src/A.swift": true},
-		},
+		depGraph:     analysis.NewDependencyGraph([]string{"/src/Target.swift", "/src/A.swift"}),
+		lastUsed:     make(map[string]int64),
 	}
 	// /src/Unrelated.swift is not in the dep graph.
 	result := tryIncrementalReload(

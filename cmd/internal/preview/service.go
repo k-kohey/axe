@@ -390,6 +390,12 @@ func Run(opts RunOptions) error {
 		initialIndex = idx
 	}
 
+	// Initialize LRU state for all tracked files.
+	initialLastUsed := make(map[string]int64, len(trackedFiles))
+	for i, f := range trackedFiles {
+		initialLastUsed[filepath.Clean(f)] = int64(i + 1)
+	}
+
 	ws := &watchState{
 		reloadCounter:   1, // 0 was used for the initial launch
 		previewSelector: opts.PreviewSelector,
@@ -401,6 +407,8 @@ func Run(opts RunOptions) error {
 		indexCache:      indexCache,
 		maxThunkFiles:   opts.MaxThunkFiles,
 		preThunkDepth:   opts.PreThunkDepth,
+		usageTick:       int64(len(trackedFiles)),
+		lastUsed:        initialLastUsed,
 	}
 
 	var hid *protocol.HIDHandler

@@ -666,6 +666,10 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	}
 
 	// 16. Initialize watch state (full mode only).
+	smInitialLastUsed := make(map[string]int64, len(trackedFiles))
+	for i, f := range trackedFiles {
+		smInitialLastUsed[filepath.Clean(f)] = int64(i + 1)
+	}
 	s.ws = &watchState{
 		reloadCounter:   1, // 0 was used for the initial launch
 		previewSelector: "0",
@@ -677,6 +681,8 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 		indexCache:      sm.indexCache, // shared across all streams
 		maxThunkFiles:   sm.maxThunkFiles,
 		preThunkDepth:   sm.preThunkDepth,
+		usageTick:       int64(len(trackedFiles)),
+		lastUsed:        smInitialLastUsed,
 	}
 
 	// 17. Register with shared watcher for file change notifications.

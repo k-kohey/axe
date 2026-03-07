@@ -117,6 +117,11 @@ type watchState struct {
 	maxThunkFiles    int // max tracked files for incremental thunk (0 = unlimited)
 	preThunkDepth    int // initial thunk generation depth
 	incrementalCount int // consecutive incremental reloads since last rebuild
+
+	// LRU eviction state: usageTick is a monotonic counter incremented on each
+	// file touch; lastUsed maps cleaned file paths to their last usage tick.
+	usageTick int64
+	lastUsed  map[string]int64
 }
 
 // watchContext holds immutable configuration for the watch loop.

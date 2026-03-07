@@ -6,6 +6,8 @@ export interface AxeConfig {
 	workspace: string;
 	scheme: string;
 	configuration: string;
+	maxThunkFiles: number;
+	preThunkDepth: number;
 	additionalArgs: string[];
 }
 
@@ -17,6 +19,8 @@ export function getConfig(): AxeConfig {
 		workspace: cfg.get<string>("workspace", ""),
 		scheme: cfg.get<string>("scheme", ""),
 		configuration: cfg.get<string>("configuration", ""),
+		maxThunkFiles: cfg.get<number>("maxThunkFiles", 32),
+		preThunkDepth: cfg.get<number>("preThunkDepth", 0),
 		additionalArgs: cfg.get<string[]>("additionalArgs", []),
 	};
 }
@@ -40,6 +44,12 @@ export function buildArgs(config: AxeConfig): string[] {
 	}
 	if (config.configuration) {
 		args.push("--configuration", config.configuration);
+	}
+	if (config.maxThunkFiles !== 32) {
+		args.push("--max-thunk-files", String(config.maxThunkFiles));
+	}
+	if (config.preThunkDepth !== 0) {
+		args.push("--pre-thunk-depth", String(config.preThunkDepth));
 	}
 	args.push(...config.additionalArgs);
 

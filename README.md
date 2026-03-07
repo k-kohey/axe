@@ -140,7 +140,7 @@ axe preview watch MyView.swift
 axe preview watch <source-file.swift> [flags]
 ```
 
-Watch the source file for changes and hot-reload the preview. Body-only changes are hot-reloaded without rebuilding; structural changes trigger a full rebuild automatically.
+Watch the source file for changes and hot-reload the preview. Body-only changes are hot-reloaded without rebuilding; structural changes trigger a full rebuild automatically. When an untracked dependency file changes, axe attempts an incremental reload (adding the file to the tracked set) before falling back to a full rebuild.
 
 | Flag | Description |
 |---|---|
@@ -148,6 +148,8 @@ Watch the source file for changes and hot-reload the preview. Body-only changes 
 | `--reuse-build` | Skip xcodebuild and reuse previous build artifacts |
 | `--strict` | Require full thunk compilation (no degraded fallback) |
 | `--headless` | Run simulator headlessly without a display window |
+| `--max-thunk-files` | Maximum number of tracked files for incremental thunk generation (default `32`, `0` = unlimited) |
+| `--pre-thunk-depth` | Dependency depth for initial thunk generation (`0` = target only, `1` = direct deps; default `0`) |
 
 #### `axe preview serve`
 
@@ -160,6 +162,8 @@ Run as a multi-stream IDE backend. Streams are managed via JSON Lines commands o
 | Flag | Description |
 |---|---|
 | `--strict` | Require full thunk compilation (no degraded fallback) |
+| `--max-thunk-files` | Maximum number of tracked files for incremental thunk generation (default `32`, `0` = unlimited) |
+| `--pre-thunk-depth` | Dependency depth for initial thunk generation (`0` = target only, `1` = direct deps; default `0`) |
 
 #### Common Flags
 

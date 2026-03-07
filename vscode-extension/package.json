@@ -64,6 +64,18 @@
           "default": "",
           "description": "Build configuration (--configuration flag). Falls back to .axerc CONFIGURATION."
         },
+        "axe.maxThunkFiles": {
+          "type": "integer",
+          "default": 32,
+          "minimum": 0,
+          "description": "Maximum number of tracked files for incremental thunk generation (--max-thunk-files flag). 0 = unlimited."
+        },
+        "axe.preThunkDepth": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "description": "Dependency depth for initial thunk generation (--pre-thunk-depth flag). 0 = target only, 1 = direct deps."
+        },
         "axe.additionalArgs": {
           "type": "array",
           "items": {

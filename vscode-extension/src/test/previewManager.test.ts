@@ -76,6 +76,8 @@ const DEFAULT_CONFIG: AxeConfig = {
 	workspace: "",
 	scheme: "",
 	configuration: "",
+	maxThunkFiles: 32,
+	preThunkDepth: 0,
 	additionalArgs: [],
 };
 

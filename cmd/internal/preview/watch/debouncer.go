@@ -31,10 +31,11 @@ type Debouncer struct {
 	trackedCh chan string
 	depCh     chan []string
 
-	mu           sync.Mutex // protects depFiles, trackedTimer, depTimer, depSeq
+	mu           sync.Mutex // protects depFiles, trackedTimer, depTimer, trackedSeq, depSeq
 	depFiles     []string   // accumulated untracked file paths within debounce window
 	trackedTimer *time.Timer
 	depTimer     *time.Timer
+	trackedSeq   uint64 // generation counter; incremented on each tracked timer reset
 	depSeq       uint64 // generation counter; incremented on each dep timer reset
 }
 
@@ -68,7 +69,15 @@ func (d *Debouncer) HandleFileChange(cleanPath string, trackedSet map[string]boo
 			d.trackedTimer.Stop()
 		}
 		changedFile := cleanPath
+		d.trackedSeq++
+		seq := d.trackedSeq
 		d.trackedTimer = time.AfterFunc(TrackedDebounceDelay, func() {
+			d.mu.Lock()
+			if d.trackedSeq != seq {
+				d.mu.Unlock()
+				return // stale timer, a newer one supersedes this
+			}
+			d.mu.Unlock()
 			select {
 			case d.trackedCh <- changedFile:
 			default:
@@ -134,6 +143,10 @@ func (d *Debouncer) Reset() {
 		d.depTimer = nil
 	}
 	d.depFiles = nil
+	// Invalidate any already-fired callbacks sitting in the goroutine queue.
+	// Timer.Stop() cannot prevent callbacks that have already been scheduled.
+	d.trackedSeq++
+	d.depSeq++
 	d.mu.Unlock()
 
 	// Drain any buffered signals that may have fired between Stop and now.

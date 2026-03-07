@@ -9,8 +9,34 @@ import (
 // DependencyGraph holds the set of all files transitively depended upon by a target.
 // Used by the watcher to decide whether a file change is relevant.
 type DependencyGraph struct {
-	All   map[string]bool // cleaned file paths → true for all transitive dependencies
+	all   map[string]bool // cleaned file paths → true for all transitive dependencies
 	depth map[string]int  // cleaned file path → BFS depth (0=target, 1=direct, 2+=transitive)
+}
+
+// Contains reports whether path (after filepath.Clean) is in the dependency graph.
+func (g *DependencyGraph) Contains(path string) bool {
+	return g.all[filepath.Clean(path)]
+}
+
+// Len returns the number of files in the dependency graph.
+func (g *DependencyGraph) Len() int {
+	return len(g.all)
+}
+
+// NewDependencyGraph creates a DependencyGraph from a set of file paths.
+// All files are assigned depth 0. This is intended for testing and simple
+// construction where BFS depth information is not needed.
+func NewDependencyGraph(paths []string) *DependencyGraph {
+	g := &DependencyGraph{
+		all:   make(map[string]bool, len(paths)),
+		depth: make(map[string]int, len(paths)),
+	}
+	for _, p := range paths {
+		clean := filepath.Clean(p)
+		g.all[clean] = true
+		g.depth[clean] = 0
+	}
+	return g
 }
 
 // bfsEntry is a BFS queue element that pairs a file path with its depth.
@@ -26,11 +52,11 @@ type bfsEntry struct {
 // Referenced types are looked up from the in-memory Index Store cache.
 func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[string][]string, cache *IndexStoreCache) (*DependencyGraph, error) {
 	graph := &DependencyGraph{
-		All:   make(map[string]bool),
+		all:   make(map[string]bool),
 		depth: make(map[string]int),
 	}
 	cleanTarget := filepath.Clean(targetFile)
-	graph.All[cleanTarget] = true
+	graph.all[cleanTarget] = true
 	graph.depth[cleanTarget] = 0
 
 	// BFS queue of files to process.
@@ -54,10 +80,10 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 			}
 			for _, filePath := range filePaths {
 				cleanPath := filepath.Clean(filePath)
-				if graph.All[cleanPath] {
+				if graph.all[cleanPath] {
 					continue
 				}
-				graph.All[cleanPath] = true
+				graph.all[cleanPath] = true
 				graph.depth[cleanPath] = nextDepth
 				queue = append(queue, bfsEntry{path: cleanPath, depth: nextDepth})
 			}
@@ -66,7 +92,7 @@ func BuildTransitiveDeps(ctx context.Context, targetFile string, typeMap map[str
 
 	slog.Debug("Built transitive dependency graph",
 		"target", targetFile,
-		"files", len(graph.All),
+		"files", len(graph.all),
 	)
 	return graph, nil
 }
@@ -81,13 +107,7 @@ func refsFromCache(path string, cache *IndexStoreCache) []string {
 
 // DirectDeps returns the file paths at depth 1 (direct dependencies of the target).
 func (g *DependencyGraph) DirectDeps() []string {
-	var deps []string
-	for path, d := range g.depth {
-		if d == 1 {
-			deps = append(deps, path)
-		}
-	}
-	return deps
+	return g.DepsUpTo(1)
 }
 
 // DepsUpTo returns file paths at depth 1 through maxDepth (inclusive).

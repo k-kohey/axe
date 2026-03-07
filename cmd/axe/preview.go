@@ -147,15 +147,15 @@ func runWatchLogic(sourceArg, selector string, reuseBuild, strict, noHeadless bo
 
 // runServeLogic starts preview in multi-stream serve mode.
 func runServeLogic(strict bool, maxThunkFiles, preThunkDepth int) error {
-	pc, err := previewPreamble()
-	if err != nil {
-		return err
-	}
 	if maxThunkFiles < 0 {
 		return fmt.Errorf("--max-thunk-files must be >= 0 (0 = unlimited), got %d", maxThunkFiles)
 	}
 	if preThunkDepth < 0 {
 		return fmt.Errorf("--pre-thunk-depth must be >= 0, got %d", preThunkDepth)
+	}
+	pc, err := previewPreamble()
+	if err != nil {
+		return err
 	}
 	return preview.RunServe(pc, strict, maxThunkFiles, preThunkDepth)
 }

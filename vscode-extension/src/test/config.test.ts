@@ -8,6 +8,8 @@ suite("buildArgs", () => {
 		workspace: "",
 		scheme: "",
 		configuration: "",
+		maxThunkFiles: 32,
+		preThunkDepth: 0,
 		additionalArgs: [],
 	};
 
@@ -64,6 +66,8 @@ suite("buildArgs", () => {
 			workspace: "",
 			scheme: "App",
 			configuration: "Debug",
+			maxThunkFiles: 32,
+			preThunkDepth: 0,
 			additionalArgs: ["--extra"],
 		};
 		const args = buildArgs(config);
@@ -93,5 +97,32 @@ suite("buildArgs", () => {
 		assert.ok(!args.includes("--workspace"));
 		assert.ok(!args.includes("--scheme"));
 		assert.ok(!args.includes("--configuration"));
+	});
+
+	test("default thunk values are not passed as flags", () => {
+		const args = buildArgs(defaultConfig);
+		assert.ok(!args.includes("--max-thunk-files"));
+		assert.ok(!args.includes("--pre-thunk-depth"));
+	});
+
+	test("includes --max-thunk-files when non-default", () => {
+		const config = { ...defaultConfig, maxThunkFiles: 64 };
+		const args = buildArgs(config);
+		assert.ok(args.includes("--max-thunk-files"));
+		assert.strictEqual(args[args.indexOf("--max-thunk-files") + 1], "64");
+	});
+
+	test("includes --pre-thunk-depth when non-default", () => {
+		const config = { ...defaultConfig, preThunkDepth: 1 };
+		const args = buildArgs(config);
+		assert.ok(args.includes("--pre-thunk-depth"));
+		assert.strictEqual(args[args.indexOf("--pre-thunk-depth") + 1], "1");
+	});
+
+	test("includes --max-thunk-files 0 for unlimited", () => {
+		const config = { ...defaultConfig, maxThunkFiles: 0 };
+		const args = buildArgs(config);
+		assert.ok(args.includes("--max-thunk-files"));
+		assert.strictEqual(args[args.indexOf("--max-thunk-files") + 1], "0");
 	});
 });

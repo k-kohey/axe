@@ -133,14 +133,14 @@ func TestBuildTransitiveDeps_WithCache(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !graph.All[filepath.Clean(target)] {
+	if !graph.Contains(target) {
 		t.Error("graph should include target file")
 	}
-	if !graph.All[filepath.Clean(dep)] {
+	if !graph.Contains(dep) {
 		t.Error("graph should include dependency file")
 	}
-	if len(graph.All) != 2 {
-		t.Errorf("graph size = %d, want 2", len(graph.All))
+	if graph.Len() != 2 {
+		t.Errorf("graph size = %d, want 2", graph.Len())
 	}
 }
 
@@ -181,8 +181,8 @@ func TestBuildTransitiveDeps_CacheTransitive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(graph.All) != 3 {
-		t.Errorf("graph size = %d, want 3", len(graph.All))
+	if graph.Len() != 3 {
+		t.Errorf("graph size = %d, want 3", graph.Len())
 	}
 
 	direct := graph.DirectDeps()

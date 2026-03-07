@@ -74,7 +74,7 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			cfg.ws.mu.Lock()
 			graph := cfg.ws.depGraph
 			cfg.ws.mu.Unlock()
-			if graph != nil && !graph.All[filepath.Clean(path)] {
+			if graph != nil && !graph.Contains(filepath.Clean(path)) {
 				slog.Debug("Ignoring file change outside dependency graph", "path", path)
 				continue
 			}
@@ -118,8 +118,9 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 					slog.Warn("Dependency rebuild error", "err", err)
 				}
 			}
-			// Rebuild trackedSet after potential changes.
+			// Rebuild skeletonMap and trackedSet after potential changes.
 			cfg.ws.mu.Lock()
+			cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
 			trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
 			cfg.ws.mu.Unlock()
 
@@ -136,6 +137,11 @@ func runEventLoop(ctx context.Context, cfg *eventLoopConfig) error {
 			if err := rebuildAndRelaunch(ctx, sourceFile, cfg.pc, cfg.bs, cfg.dirs, cfg.wctx, cfg.ws); err != nil {
 				slog.Warn("Force rebuild error", "err", err)
 			}
+			// rebuildAndRelaunch updates ws.trackedFiles; sync local state.
+			cfg.ws.mu.Lock()
+			cfg.ws.skeletonMap = buildSkeletonMap(cfg.ws.trackedFiles)
+			trackedSet = buildTrackedSet(cfg.ws.trackedFiles)
+			cfg.ws.mu.Unlock()
 
 		case input := <-cfg.inputCh:
 			if cfg.hid != nil {
