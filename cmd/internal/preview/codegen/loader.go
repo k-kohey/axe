@@ -100,7 +100,16 @@ func CompileLoader(ctx context.Context, loaderDir, deploymentTarget string, tc T
 // dialWithRetry connects to a Unix domain socket with exponential backoff.
 // It respects context cancellation between retries.
 func dialWithRetry(ctx context.Context, socketPath string) (net.Conn, error) {
-	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+	backoffs := []time.Duration{
+		50 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1 * time.Second,
+		1 * time.Second,
+		1 * time.Second,
+	}
 	var lastErr error
 	for _, d := range backoffs {
 		conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
