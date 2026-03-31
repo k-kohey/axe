@@ -2,9 +2,11 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -497,6 +499,85 @@ arm64-apple-ios17.0-simulator
 	}
 }
 
+func TestExtractCompilerPaths_DependencyManifestFallback(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	frameworkRoot := filepath.Join(t.TempDir(), "FirebaseCore.framework")
+	headersDir := filepath.Join(frameworkRoot, "Headers")
+	modulesDir := filepath.Join(frameworkRoot, "Modules")
+	if err := os.MkdirAll(headersDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(headersDir, "FirebaseCore.h"), []byte("// header"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moduleMapPath := filepath.Join(modulesDir, "module.modulemap")
+	if err := os.WriteFile(moduleMapPath, []byte(`framework module FirebaseCore {
+  umbrella header "`+filepath.Join(headersDir, "FirebaseCore.h")+`"
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	generatedModuleMapsDir := filepath.Join(dirs.Build, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
+	if err := os.MkdirAll(generatedModuleMapsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: moduleMapPath},
+	})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if len(bs.ExtraModuleMapFiles) != 1 || bs.ExtraModuleMapFiles[0] != moduleMapPath {
+		t.Fatalf("ExtraModuleMapFiles = %v, want [%q]", bs.ExtraModuleMapFiles, moduleMapPath)
+	}
+	if !containsString(bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot)) {
+		t.Fatalf("ExtraFrameworkPaths = %v, want to contain %q", bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot))
+	}
+	if !containsString(bs.ExtraIncludePaths, headersDir) {
+		t.Fatalf("ExtraIncludePaths = %v, want to contain %q", bs.ExtraIncludePaths, headersDir)
+	}
+	if !containsString(bs.ExtraIncludePaths, generatedModuleMapsDir) {
+		t.Fatalf("ExtraIncludePaths = %v, want to contain generated module maps dir %q", bs.ExtraIncludePaths, generatedModuleMapsDir)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestRelativeUmbrellaPath(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	moduleMapDir := filepath.Join(t.TempDir(), "RelativeModule")
+	if err := os.MkdirAll(moduleMapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moduleMapPath := filepath.Join(moduleMapDir, "module.modulemap")
+	headerPath := filepath.Join(moduleMapDir, "shim.h")
+	if err := os.WriteFile(headerPath, []byte("// shim"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moduleMapPath, []byte(`module RelativeModule {
+  umbrella header "shim.h"
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: moduleMapPath},
+	})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if !containsString(bs.ExtraModuleMapFiles, moduleMapPath) {
+		t.Fatalf("ExtraModuleMapFiles = %v, want to contain %q", bs.ExtraModuleMapFiles, moduleMapPath)
+	}
+	if !containsString(bs.ExtraIncludePaths, moduleMapDir) {
+		t.Fatalf("ExtraIncludePaths = %v, want to contain module map dir %q", bs.ExtraIncludePaths, moduleMapDir)
+	}
+}
+
 // --- HasPreviousBuild tests ---
 
 func TestHasPreviousBuild_True(t *testing.T) {
@@ -545,4 +626,35 @@ func setupRespFile(t *testing.T, content string) (*Settings, ProjectDirs) {
 		t.Fatal(err)
 	}
 	return bs, dirs
+}
+
+func setupDependencyManifest(t *testing.T) (*Settings, ProjectDirs) {
+	t.Helper()
+	root := t.TempDir()
+	dirs := ProjectDirs{Build: root}
+	bs := &Settings{ModuleName: "TestModule", BuiltProductsDir: "/products/dir"}
+	return bs, dirs
+}
+
+func writeDependencyManifest(t *testing.T, dirs ProjectDirs, moduleName string, entries []dependencyManifestEntry) string {
+	t.Helper()
+	depDir := filepath.Join(dirs.Build, "Build", "Intermediates.noindex",
+		"TestProject.build", "Debug-iphonesimulator",
+		moduleName+".build", "Objects-normal", "arm64")
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(depDir, "TestModule-dependencies-1.json")
+	if err := os.WriteFile(manifestPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return manifestPath
+}
+
+func containsString(values []string, target string) bool {
+	return slices.Contains(values, target)
 }

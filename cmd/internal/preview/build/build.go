@@ -3,10 +3,12 @@ package build
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/k-kohey/axe/internal/preview/buildlock"
@@ -158,34 +160,57 @@ func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
 	//   <dirs.Build>/Build/Intermediates.noindex/
 	//     <project>.build/<config>-iphonesimulator/<module>.build/
 	//     Objects-normal/arm64/arguments-<hash>.resp
-	pattern := filepath.Join(
+	respPattern := filepath.Join(
 		dirs.Build, "Build", "Intermediates.noindex",
 		"*", "*", s.ModuleName+".build", "Objects-normal", "arm64", "arguments-*.resp",
 	)
-	matches, _ := filepath.Glob(pattern)
-	if len(matches) == 0 {
-		slog.Debug("No swiftc response file found", "pattern", pattern)
+	matches, _ := filepath.Glob(respPattern)
+	if len(matches) > 0 {
+		// Read the first matching resp file.
+		data, err := os.ReadFile(matches[0])
+		if err != nil {
+			slog.Warn("Failed to read swiftc response file", "path", matches[0], "err", err)
+			return
+		}
+		extractCompilerPathsFromResp(s, string(data))
 		return
 	}
 
-	// Read the first matching resp file.
-	data, err := os.ReadFile(matches[0])
-	if err != nil {
-		slog.Warn("Failed to read swiftc response file", "path", matches[0], "err", err)
+	slog.Debug("No swiftc response file found", "pattern", respPattern)
+
+	// Xcode 26 no longer emits arguments-*.resp for Swift compilation in some
+	// configurations. Fall back to the explicit dependency manifest that now
+	// contains clang module map paths for SPM packages and SDK overlays.
+	depsPattern := filepath.Join(
+		dirs.Build, "Build", "Intermediates.noindex",
+		"*", "*", s.ModuleName+".build", "Objects-normal", "arm64", "*-dependencies-*.json",
+	)
+	depMatches, _ := filepath.Glob(depsPattern)
+	if len(depMatches) == 0 {
+		slog.Debug("No dependency manifest found for compiler paths", "pattern", depsPattern)
 		return
 	}
 
+	if err := extractCompilerPathsFromDependencies(s, dirs.Build, depMatches[0]); err != nil {
+		slog.Warn("Failed to extract compiler paths from dependency manifest", "path", depMatches[0], "err", err)
+		return
+	}
+}
+
+func extractCompilerPathsFromResp(s *Settings, data string) {
 	seenI := map[string]bool{s.BuiltProductsDir: true}
 	seenF := map[string]bool{s.BuiltProductsDir: true}
+	seenM := map[string]bool{}
 
-	lines := strings.Split(string(data), "\n")
+	lines := strings.Split(data, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
 		// -fmodule-map-file=<path> (single line)
 		if after, ok := strings.CutPrefix(line, "-fmodule-map-file="); ok {
 			p := after
-			if p != "" {
+			if p != "" && !seenM[p] {
+				seenM[p] = true
 				s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, p)
 			}
 			continue
@@ -226,6 +251,133 @@ func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
 		"frameworkPaths", len(s.ExtraFrameworkPaths),
 		"moduleMapFiles", len(s.ExtraModuleMapFiles),
 	)
+}
+
+type dependencyManifestEntry struct {
+	ClangModuleMapPath string `json:"clangModuleMapPath"`
+}
+
+var umbrellaDirectiveRE = regexp.MustCompile(`^(umbrella header|umbrella)\s+"([^"]+)"`)
+
+func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath string) error {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+
+	var entries []dependencyManifestEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return fmt.Errorf("parsing dependency manifest: %w", err)
+	}
+
+	seenI := map[string]bool{s.BuiltProductsDir: true}
+	seenF := map[string]bool{s.BuiltProductsDir: true}
+	seenM := map[string]bool{}
+
+	addIncludePath := func(path string) {
+		path = filepath.Clean(path)
+		if path == "" || path == "." || path == "/" || seenI[path] {
+			return
+		}
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		seenI[path] = true
+		s.ExtraIncludePaths = append(s.ExtraIncludePaths, path)
+	}
+	addFrameworkPath := func(path string) {
+		path = filepath.Clean(path)
+		if path == "" || path == "." || path == "/" || seenF[path] {
+			return
+		}
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		seenF[path] = true
+		s.ExtraFrameworkPaths = append(s.ExtraFrameworkPaths, path)
+	}
+	addModuleMapPath := func(path string) {
+		path = filepath.Clean(path)
+		if path == "" || path == "." || seenM[path] {
+			return
+		}
+		if _, err := os.Stat(path); err != nil {
+			return
+		}
+		seenM[path] = true
+		s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, path)
+	}
+	addAncestors := func(path string, depth int) {
+		current := filepath.Clean(path)
+		for range depth {
+			addIncludePath(current)
+			next := filepath.Dir(current)
+			if next == current {
+				break
+			}
+			current = next
+		}
+	}
+
+	generatedModuleMapsDir := filepath.Join(buildDir, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
+	if generatedModuleMapsDir != "" {
+		addIncludePath(generatedModuleMapsDir)
+	}
+
+	for _, entry := range entries {
+		if entry.ClangModuleMapPath == "" {
+			continue
+		}
+		addModuleMapPath(entry.ClangModuleMapPath)
+
+		moduleMapPath := filepath.Clean(entry.ClangModuleMapPath)
+		if strings.HasSuffix(moduleMapPath, "/Modules/module.modulemap") {
+			for current := filepath.Dir(moduleMapPath); current != "/" && current != "."; current = filepath.Dir(current) {
+				if strings.HasSuffix(current, ".framework") {
+					addFrameworkPath(filepath.Dir(current))
+					addIncludePath(filepath.Join(current, "Headers"))
+					break
+				}
+				if parent := filepath.Dir(current); parent == current {
+					break
+				}
+			}
+		}
+
+		moduleMapData, err := os.ReadFile(moduleMapPath)
+		if err != nil {
+			continue
+		}
+		for line := range strings.SplitSeq(string(moduleMapData), "\n") {
+			m := umbrellaDirectiveRE.FindStringSubmatch(strings.TrimSpace(line))
+			if len(m) != 3 {
+				continue
+			}
+
+			targetPath := m[2]
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(filepath.Dir(moduleMapPath), targetPath)
+			}
+			targetPath = filepath.Clean(targetPath)
+			info, err := os.Stat(targetPath)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				addAncestors(targetPath, 3)
+				continue
+			}
+			addAncestors(filepath.Dir(targetPath), 3)
+		}
+	}
+
+	slog.Debug("Extracted paths from dependency manifest",
+		"path", manifestPath,
+		"includePaths", len(s.ExtraIncludePaths),
+		"frameworkPaths", len(s.ExtraFrameworkPaths),
+		"moduleMapFiles", len(s.ExtraModuleMapFiles),
+	)
+	return nil
 }
 
 // HasPreviousBuild checks whether a .app bundle exists in the build products

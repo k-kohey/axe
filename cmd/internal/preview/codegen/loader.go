@@ -97,10 +97,27 @@ func CompileLoader(ctx context.Context, loaderDir, deploymentTarget string, tc T
 	return dylibPath, nil
 }
 
+var (
+	waitForReadyBackoffs = []time.Duration{
+		50 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1 * time.Second,
+		1 * time.Second,
+		1 * time.Second,
+	}
+	sendReloadBackoffs = []time.Duration{
+		50 * time.Millisecond,
+		100 * time.Millisecond,
+		200 * time.Millisecond,
+	}
+)
+
 // dialWithRetry connects to a Unix domain socket with exponential backoff.
 // It respects context cancellation between retries.
-func dialWithRetry(ctx context.Context, socketPath string) (net.Conn, error) {
-	backoffs := []time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
+func dialWithRetry(ctx context.Context, socketPath string, backoffs []time.Duration) (net.Conn, error) {
 	var lastErr error
 	for _, d := range backoffs {
 		conn, err := net.DialTimeout("unix", socketPath, 1*time.Second)
@@ -122,7 +139,7 @@ func dialWithRetry(ctx context.Context, socketPath string) (net.Conn, error) {
 // ready, then immediately disconnects. This is safe because the loader's
 // read() returns 0 bytes on disconnect and simply continues accepting.
 func WaitForReady(ctx context.Context, socketPath string) error {
-	conn, err := dialWithRetry(ctx, socketPath)
+	conn, err := dialWithRetry(ctx, socketPath, waitForReadyBackoffs)
 	if err != nil {
 		return fmt.Errorf("waiting for loader ready: %w", err)
 	}
@@ -134,7 +151,7 @@ func WaitForReady(ctx context.Context, socketPath string) error {
 // a dylib path for hot-reload. It retries with exponential backoff if the
 // socket is not yet ready.
 func SendReloadCommand(ctx context.Context, socketPath, dylibPath string) error {
-	conn, err := dialWithRetry(ctx, socketPath)
+	conn, err := dialWithRetry(ctx, socketPath, sendReloadBackoffs)
 	if err != nil {
 		return err
 	}
