@@ -11,6 +11,19 @@ import (
 	"time"
 )
 
+func withLoaderBackoffs(t *testing.T, waitBackoffs, reloadBackoffs []time.Duration) {
+	t.Helper()
+
+	prevWait := waitForReadyBackoffs
+	prevReload := sendReloadBackoffs
+	waitForReadyBackoffs = waitBackoffs
+	sendReloadBackoffs = reloadBackoffs
+	t.Cleanup(func() {
+		waitForReadyBackoffs = prevWait
+		sendReloadBackoffs = prevReload
+	})
+}
+
 func TestLoaderCacheKey_IncludesAllInputs(t *testing.T) {
 	base := LoaderCacheKey("source", "/sdk/path", "17.0")
 
@@ -209,6 +222,51 @@ func TestWaitForReady_Retry(t *testing.T) {
 
 	if err := WaitForReady(ctx, sockPath); err != nil {
 		t.Fatalf("WaitForReady returned error: %v", err)
+	}
+}
+
+func TestLoaderSocketBackoffPolicies_SplitBehavior(t *testing.T) {
+	sockPath := filepath.Join("/tmp", "axe-loader-split.sock")
+	_ = os.Remove(sockPath)
+	t.Cleanup(func() { _ = os.Remove(sockPath) })
+	withLoaderBackoffs(t,
+		[]time.Duration{20 * time.Millisecond, 40 * time.Millisecond, 80 * time.Millisecond},
+		[]time.Duration{10 * time.Millisecond, 10 * time.Millisecond},
+	)
+
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		ln, err := net.Listen("unix", sockPath)
+		if err != nil {
+			return
+		}
+		defer func() { _ = ln.Close() }()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer func() { _ = c.Close() }()
+				buf := make([]byte, 4096)
+				n, _ := c.Read(buf)
+				if n == 0 {
+					return
+				}
+				_, _ = c.Write([]byte("OK\n"))
+			}(conn)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	if err := SendReloadCommand(ctx, sockPath, "/tmp/thunk_0.dylib"); err == nil {
+		t.Fatal("expected SendReloadCommand to fail with shorter reload backoff")
+	}
+
+	if err := WaitForReady(ctx, sockPath); err != nil {
+		t.Fatalf("WaitForReady should succeed with longer ready backoff: %v", err)
 	}
 }
 

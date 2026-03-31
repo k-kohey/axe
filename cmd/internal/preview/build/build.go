@@ -191,7 +191,7 @@ func ExtractCompilerPaths(ctx context.Context, s *Settings, dirs ProjectDirs) {
 		return
 	}
 
-	if err := extractCompilerPathsFromDependencies(s, depMatches[0]); err != nil {
+	if err := extractCompilerPathsFromDependencies(s, dirs.Build, depMatches[0]); err != nil {
 		slog.Warn("Failed to extract compiler paths from dependency manifest", "path", depMatches[0], "err", err)
 		return
 	}
@@ -259,7 +259,7 @@ type dependencyManifestEntry struct {
 
 var umbrellaDirectiveRE = regexp.MustCompile(`^(umbrella header|umbrella)\s+"([^"]+)"`)
 
-func extractCompilerPathsFromDependencies(s *Settings, manifestPath string) error {
+func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath string) error {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return err
@@ -319,19 +319,7 @@ func extractCompilerPathsFromDependencies(s *Settings, manifestPath string) erro
 		}
 	}
 
-	generatedModuleMapsDir := filepath.Dir(manifestPath)
-	for {
-		if filepath.Base(generatedModuleMapsDir) == "Build" {
-			generatedModuleMapsDir = filepath.Join(filepath.Dir(generatedModuleMapsDir), "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
-			break
-		}
-		next := filepath.Dir(generatedModuleMapsDir)
-		if next == generatedModuleMapsDir {
-			generatedModuleMapsDir = ""
-			break
-		}
-		generatedModuleMapsDir = next
-	}
+	generatedModuleMapsDir := filepath.Join(buildDir, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
 	if generatedModuleMapsDir != "" {
 		addIncludePath(generatedModuleMapsDir)
 	}
@@ -360,13 +348,17 @@ func extractCompilerPathsFromDependencies(s *Settings, manifestPath string) erro
 		if err != nil {
 			continue
 		}
-		for _, line := range strings.Split(string(moduleMapData), "\n") {
+		for line := range strings.SplitSeq(string(moduleMapData), "\n") {
 			m := umbrellaDirectiveRE.FindStringSubmatch(strings.TrimSpace(line))
 			if len(m) != 3 {
 				continue
 			}
 
-			targetPath := filepath.Clean(m[2])
+			targetPath := m[2]
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(filepath.Dir(moduleMapPath), targetPath)
+			}
+			targetPath = filepath.Clean(targetPath)
 			info, err := os.Stat(targetPath)
 			if err != nil {
 				continue
