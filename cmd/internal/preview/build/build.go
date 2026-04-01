@@ -307,20 +307,17 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		seenM[path] = true
 		s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, path)
 	}
-	// addAncestors adds the given path and its parent directories up to `depth`
-	// levels as include paths. Depth of 3 covers typical layouts where umbrella
-	// headers sit 1-2 levels below the directory that swiftc needs on -I
-	// (e.g. .build/checkouts/Pkg/Sources/CModule/include/shim.h → include/).
-	addAncestors := func(path string, depth int) {
-		current := filepath.Clean(path)
-		for range depth {
-			addIncludePath(current)
-			next := filepath.Dir(current)
-			if next == current {
-				break
-			}
-			current = next
+
+	// Only process module maps that belong to this build (under buildDir).
+	// SDK module maps (e.g. UIKit, Foundation) are resolved by swiftc via -sdk
+	// and must not be added explicitly — doing so bloats the compiler flags and
+	// can cause swiftc to hang.
+	isOwnedByBuild := func(path string) bool {
+		rel, err := filepath.Rel(filepath.Clean(buildDir), filepath.Clean(path))
+		if err != nil {
+			return false
 		}
+		return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 
 	generatedModuleMapsDir := filepath.Join(buildDir, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
@@ -330,20 +327,27 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		if entry.ClangModuleMapPath == "" {
 			continue
 		}
-		addModuleMapPath(entry.ClangModuleMapPath)
 
 		moduleMapPath := filepath.Clean(entry.ClangModuleMapPath)
+		if !isOwnedByBuild(moduleMapPath) {
+			continue
+		}
+
+		addModuleMapPath(moduleMapPath)
+
+		// For framework-style module maps, add -F for the framework's parent.
 		// Versioned frameworks or non-standard module map names are not covered here.
 		if strings.HasSuffix(moduleMapPath, "/Modules/module.modulemap") {
 			for current := filepath.Dir(moduleMapPath); current != "/" && current != "."; current = filepath.Dir(current) {
 				if strings.HasSuffix(current, ".framework") {
 					addFrameworkPath(filepath.Dir(current))
-					addIncludePath(filepath.Join(current, "Headers"))
 					break
 				}
 			}
+			continue
 		}
 
+		// For non-framework module maps, add the umbrella header/directory as -I.
 		moduleMapData, err := os.ReadFile(moduleMapPath)
 		if err != nil {
 			slog.Debug("Failed to read module map file", "path", moduleMapPath, "err", err)
@@ -365,10 +369,10 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 				continue
 			}
 			if info.IsDir() {
-				addAncestors(targetPath, 3)
-				continue
+				addIncludePath(targetPath)
+			} else {
+				addIncludePath(filepath.Dir(targetPath))
 			}
-			addAncestors(filepath.Dir(targetPath), 3)
 		}
 	}
 

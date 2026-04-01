@@ -502,7 +502,8 @@ arm64-apple-ios17.0-simulator
 func TestExtractCompilerPaths_DependencyManifestFallback(t *testing.T) {
 	bs, dirs := setupDependencyManifest(t)
 
-	frameworkRoot := filepath.Join(t.TempDir(), "FirebaseCore.framework")
+	// Place framework inside buildDir so it passes the ownership check.
+	frameworkRoot := filepath.Join(dirs.Build, "SourcePackages", "artifacts", "FirebaseCore.framework")
 	headersDir := filepath.Join(frameworkRoot, "Headers")
 	modulesDir := filepath.Join(frameworkRoot, "Modules")
 	if err := os.MkdirAll(headersDir, 0o755); err != nil {
@@ -538,9 +539,7 @@ func TestExtractCompilerPaths_DependencyManifestFallback(t *testing.T) {
 	if !slices.Contains(bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot)) {
 		t.Fatalf("ExtraFrameworkPaths = %v, want to contain %q", bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot))
 	}
-	if !slices.Contains(bs.ExtraIncludePaths, headersDir) {
-		t.Fatalf("ExtraIncludePaths = %v, want to contain %q", bs.ExtraIncludePaths, headersDir)
-	}
+	// Framework Headers are resolved via -F, not -I, so headersDir should NOT be in ExtraIncludePaths.
 	if !slices.Contains(bs.ExtraIncludePaths, generatedModuleMapsDir) {
 		t.Fatalf("ExtraIncludePaths = %v, want to contain generated module maps dir %q", bs.ExtraIncludePaths, generatedModuleMapsDir)
 	}
@@ -549,7 +548,8 @@ func TestExtractCompilerPaths_DependencyManifestFallback(t *testing.T) {
 func TestExtractCompilerPaths_DependencyManifestRelativeUmbrellaPath(t *testing.T) {
 	bs, dirs := setupDependencyManifest(t)
 
-	moduleMapDir := filepath.Join(t.TempDir(), "RelativeModule")
+	// Place module inside buildDir so it passes the ownership check.
+	moduleMapDir := filepath.Join(dirs.Build, "SourcePackages", "checkouts", "RelativeModule")
 	if err := os.MkdirAll(moduleMapDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -575,6 +575,76 @@ func TestExtractCompilerPaths_DependencyManifestRelativeUmbrellaPath(t *testing.
 	}
 	if !slices.Contains(bs.ExtraIncludePaths, moduleMapDir) {
 		t.Fatalf("ExtraIncludePaths = %v, want to contain module map dir %q", bs.ExtraIncludePaths, moduleMapDir)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestSkipsSDKPaths(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	// Create a module map inside buildDir (should be included).
+	spmModuleDir := filepath.Join(dirs.Build, "SourcePackages", "checkouts", "some-pkg", "Sources", "CModule")
+	if err := os.MkdirAll(spmModuleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spmModuleMapPath := filepath.Join(spmModuleDir, "module.modulemap")
+	spmHeaderPath := filepath.Join(spmModuleDir, "shim.h")
+	if err := os.WriteFile(spmHeaderPath, []byte("// shim"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spmModuleMapPath, []byte(`module CModule {
+  umbrella header "shim.h"
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a module map outside buildDir simulating an SDK framework (should be excluded).
+	sdkRoot := filepath.Join(t.TempDir(), "Xcode.app", "Contents", "Developer", "Platforms",
+		"iPhoneSimulator.platform", "Developer", "SDKs", "iPhoneSimulator.sdk",
+		"System", "Library", "Frameworks", "UIKit.framework")
+	sdkModulesDir := filepath.Join(sdkRoot, "Modules")
+	sdkHeadersDir := filepath.Join(sdkRoot, "Headers")
+	if err := os.MkdirAll(sdkModulesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sdkHeadersDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sdkModuleMapPath := filepath.Join(sdkModulesDir, "module.modulemap")
+	if err := os.WriteFile(sdkModuleMapPath, []byte(`framework module UIKit {
+  umbrella header "UIKit.h"
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sdkHeadersDir, "UIKit.h"), []byte("// UIKit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: spmModuleMapPath},
+		{ClangModuleMapPath: sdkModuleMapPath},
+	})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	// SPM module map (inside buildDir) should be included.
+	if !slices.Contains(bs.ExtraModuleMapFiles, spmModuleMapPath) {
+		t.Errorf("ExtraModuleMapFiles should contain SPM module map %q, got %v", spmModuleMapPath, bs.ExtraModuleMapFiles)
+	}
+	if !slices.Contains(bs.ExtraIncludePaths, spmModuleDir) {
+		t.Errorf("ExtraIncludePaths should contain SPM include dir %q, got %v", spmModuleDir, bs.ExtraIncludePaths)
+	}
+
+	// SDK module map (outside buildDir) should be excluded.
+	if slices.Contains(bs.ExtraModuleMapFiles, sdkModuleMapPath) {
+		t.Errorf("ExtraModuleMapFiles should NOT contain SDK module map %q", sdkModuleMapPath)
+	}
+	if slices.Contains(bs.ExtraFrameworkPaths, filepath.Dir(sdkRoot)) {
+		t.Errorf("ExtraFrameworkPaths should NOT contain SDK framework path %q", filepath.Dir(sdkRoot))
+	}
+	for _, p := range bs.ExtraIncludePaths {
+		if strings.HasPrefix(p, sdkRoot) {
+			t.Errorf("ExtraIncludePaths should NOT contain SDK path %q", p)
+		}
 	}
 }
 
