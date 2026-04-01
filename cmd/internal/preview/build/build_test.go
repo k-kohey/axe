@@ -535,13 +535,13 @@ func TestExtractCompilerPaths_DependencyManifestFallback(t *testing.T) {
 	if len(bs.ExtraModuleMapFiles) != 1 || bs.ExtraModuleMapFiles[0] != moduleMapPath {
 		t.Fatalf("ExtraModuleMapFiles = %v, want [%q]", bs.ExtraModuleMapFiles, moduleMapPath)
 	}
-	if !containsString(bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot)) {
+	if !slices.Contains(bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot)) {
 		t.Fatalf("ExtraFrameworkPaths = %v, want to contain %q", bs.ExtraFrameworkPaths, filepath.Dir(frameworkRoot))
 	}
-	if !containsString(bs.ExtraIncludePaths, headersDir) {
+	if !slices.Contains(bs.ExtraIncludePaths, headersDir) {
 		t.Fatalf("ExtraIncludePaths = %v, want to contain %q", bs.ExtraIncludePaths, headersDir)
 	}
-	if !containsString(bs.ExtraIncludePaths, generatedModuleMapsDir) {
+	if !slices.Contains(bs.ExtraIncludePaths, generatedModuleMapsDir) {
 		t.Fatalf("ExtraIncludePaths = %v, want to contain generated module maps dir %q", bs.ExtraIncludePaths, generatedModuleMapsDir)
 	}
 }
@@ -570,11 +570,62 @@ func TestExtractCompilerPaths_DependencyManifestRelativeUmbrellaPath(t *testing.
 
 	ExtractCompilerPaths(context.Background(), bs, dirs)
 
-	if !containsString(bs.ExtraModuleMapFiles, moduleMapPath) {
+	if !slices.Contains(bs.ExtraModuleMapFiles, moduleMapPath) {
 		t.Fatalf("ExtraModuleMapFiles = %v, want to contain %q", bs.ExtraModuleMapFiles, moduleMapPath)
 	}
-	if !containsString(bs.ExtraIncludePaths, moduleMapDir) {
+	if !slices.Contains(bs.ExtraIncludePaths, moduleMapDir) {
 		t.Fatalf("ExtraIncludePaths = %v, want to contain module map dir %q", bs.ExtraIncludePaths, moduleMapDir)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestInvalidJSON(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	depDir := filepath.Join(dirs.Build, "Build", "Intermediates.noindex",
+		"TestProject.build", "Debug-iphonesimulator",
+		bs.ModuleName+".build", "Objects-normal", "arm64")
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "TestModule-dependencies-1.json"), []byte(`{invalid`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should not panic; paths remain empty.
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if len(bs.ExtraModuleMapFiles) != 0 {
+		t.Errorf("ExtraModuleMapFiles should be empty, got %v", bs.ExtraModuleMapFiles)
+	}
+	if len(bs.ExtraIncludePaths) != 0 {
+		t.Errorf("ExtraIncludePaths should be empty, got %v", bs.ExtraIncludePaths)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestEmptyArray(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if len(bs.ExtraModuleMapFiles) != 0 {
+		t.Errorf("ExtraModuleMapFiles should be empty, got %v", bs.ExtraModuleMapFiles)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestNonExistentModuleMap(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: "/nonexistent/path/module.modulemap"},
+	})
+
+	// Should not panic; non-existent paths are silently skipped.
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if len(bs.ExtraModuleMapFiles) != 0 {
+		t.Errorf("ExtraModuleMapFiles should be empty for non-existent paths, got %v", bs.ExtraModuleMapFiles)
 	}
 }
 
@@ -653,8 +704,4 @@ func writeDependencyManifest(t *testing.T, dirs ProjectDirs, moduleName string, 
 		t.Fatal(err)
 	}
 	return manifestPath
-}
-
-func containsString(values []string, target string) bool {
-	return slices.Contains(values, target)
 }
