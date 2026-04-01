@@ -307,6 +307,10 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		seenM[path] = true
 		s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, path)
 	}
+	// addAncestors adds the given path and its parent directories up to `depth`
+	// levels as include paths. Depth of 3 covers typical layouts where umbrella
+	// headers sit 1-2 levels below the directory that swiftc needs on -I
+	// (e.g. .build/checkouts/Pkg/Sources/CModule/include/shim.h → include/).
 	addAncestors := func(path string, depth int) {
 		current := filepath.Clean(path)
 		for range depth {
@@ -320,9 +324,7 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 	}
 
 	generatedModuleMapsDir := filepath.Join(buildDir, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
-	if generatedModuleMapsDir != "" {
-		addIncludePath(generatedModuleMapsDir)
-	}
+	addIncludePath(generatedModuleMapsDir)
 
 	for _, entry := range entries {
 		if entry.ClangModuleMapPath == "" {
@@ -331,6 +333,7 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		addModuleMapPath(entry.ClangModuleMapPath)
 
 		moduleMapPath := filepath.Clean(entry.ClangModuleMapPath)
+		// Versioned frameworks or non-standard module map names are not covered here.
 		if strings.HasSuffix(moduleMapPath, "/Modules/module.modulemap") {
 			for current := filepath.Dir(moduleMapPath); current != "/" && current != "."; current = filepath.Dir(current) {
 				if strings.HasSuffix(current, ".framework") {
@@ -338,14 +341,12 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 					addIncludePath(filepath.Join(current, "Headers"))
 					break
 				}
-				if parent := filepath.Dir(current); parent == current {
-					break
-				}
 			}
 		}
 
 		moduleMapData, err := os.ReadFile(moduleMapPath)
 		if err != nil {
+			slog.Debug("Failed to read module map file", "path", moduleMapPath, "err", err)
 			continue
 		}
 		for line := range strings.SplitSeq(string(moduleMapData), "\n") {
