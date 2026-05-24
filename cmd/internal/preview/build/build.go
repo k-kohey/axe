@@ -127,7 +127,7 @@ func Run(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) erro
 	args = append(args,
 		"-destination", "generic/platform=iOS Simulator",
 		"-derivedDataPath", dirs.Build,
-		"OTHER_SWIFT_FLAGS=-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
+		"OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports",
 	)
 
 	out, err := r.Build(ctx, args)

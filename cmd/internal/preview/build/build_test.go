@@ -367,6 +367,9 @@ func TestRun_Success(t *testing.T) {
 	if !strings.Contains(args, "OTHER_SWIFT_FLAGS") {
 		t.Errorf("buildArgs should contain OTHER_SWIFT_FLAGS, got %v", r.buildArgs)
 	}
+	if !strings.Contains(args, "OTHER_SWIFT_FLAGS=$(inherited)") {
+		t.Errorf("buildArgs should preserve inherited OTHER_SWIFT_FLAGS, got %v", r.buildArgs)
+	}
 }
 
 func TestRun_Failure(t *testing.T) {
