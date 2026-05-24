@@ -53,7 +53,7 @@ static void *listener_thread(void *arg) {
             LOG("dlopen succeeded");
             typedef void (*RefreshFunc)(void);
             RefreshFunc refresh = (RefreshFunc)dlsym(handle, "axe_preview_refresh");
-            dispatch_async(dispatch_get_main_queue(), ^{
+            dispatch_sync(dispatch_get_main_queue(), ^{
                 if (refresh) {
                     refresh();
                     LOG("Called axe_preview_refresh");
