@@ -464,3 +464,60 @@ func TestRewriteInfoPlist_InvalidPlist(t *testing.T) {
 	// Should not panic on invalid plist.
 	rewriteInfoPlist(plistPath, "axe.com.example.TestModule", "axe TestModule")
 }
+
+func TestRewriteEmbeddedAppExtensionBundleIDs(t *testing.T) {
+	t.Parallel()
+
+	appDir := filepath.Join(t.TempDir(), "TestModule.app")
+	shareExtensionDir := filepath.Join(appDir, "PlugIns", "ShareExtension.appex")
+	unrelatedExtensionDir := filepath.Join(appDir, "PlugIns", "Unrelated.appex")
+	if err := os.MkdirAll(shareExtensionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(unrelatedExtensionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	sharePlistPath := filepath.Join(shareExtensionDir, "Info.plist")
+	unrelatedPlistPath := filepath.Join(unrelatedExtensionDir, "Info.plist")
+	sharePlist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.example.TestModule.ShareExtension</string>
+</dict>
+</plist>`
+	unrelatedPlist := `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.other.UnrelatedExtension</string>
+</dict>
+</plist>`
+	if err := os.WriteFile(sharePlistPath, []byte(sharePlist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unrelatedPlistPath, []byte(unrelatedPlist), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rewriteEmbeddedAppExtensionBundleIDs(appDir, "com.example.TestModule", "axe.com.example.TestModule")
+
+	shareData, err := os.ReadFile(sharePlistPath)
+	if err != nil {
+		t.Fatalf("failed to read share extension plist: %v", err)
+	}
+	unrelatedData, err := os.ReadFile(unrelatedPlistPath)
+	if err != nil {
+		t.Fatalf("failed to read unrelated extension plist: %v", err)
+	}
+
+	if !strings.Contains(string(shareData), "axe.com.example.TestModule.ShareExtension") {
+		t.Error("share extension bundle ID should be rewritten with axe prefix")
+	}
+	if !strings.Contains(string(unrelatedData), "com.other.UnrelatedExtension") {
+		t.Error("unrelated extension bundle ID should be preserved")
+	}
+}

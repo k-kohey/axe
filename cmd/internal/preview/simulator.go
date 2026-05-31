@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/buildlock"
@@ -81,6 +82,7 @@ func installApp(ctx context.Context, bs *build.Settings, dirs previewDirs, devic
 		bs.BundleID,
 		"axe "+bs.ModuleName,
 	)
+	rewriteEmbeddedAppExtensionBundleIDs(stagedAppPath, bs.OriginalBundleID, bs.BundleID)
 
 	if err := ar.Install(ctx, device, stagedAppPath, deviceSetPath); err != nil {
 		return "", fmt.Errorf("install: %w", err)
@@ -117,6 +119,57 @@ func rewriteInfoPlist(plistPath, bundleID, displayName string) {
 
 	if err := os.WriteFile(plistPath, out, 0o600); err != nil {
 		slog.Warn("Failed to write Info.plist", "path", plistPath, "err", err)
+	}
+}
+
+func rewriteEmbeddedAppExtensionBundleIDs(appPath, originalBundleID, bundleID string) {
+	if originalBundleID == "" || bundleID == "" {
+		return
+	}
+
+	plistPaths, err := filepath.Glob(filepath.Join(appPath, "PlugIns", "*.appex", "Info.plist"))
+	if err != nil {
+		slog.Warn("Failed to find app extension Info.plist files", "app", appPath, "err", err)
+		return
+	}
+
+	for _, plistPath := range plistPaths {
+		rewriteEmbeddedAppExtensionBundleID(plistPath, originalBundleID, bundleID)
+	}
+}
+
+func rewriteEmbeddedAppExtensionBundleID(plistPath, originalBundleID, bundleID string) {
+	data, err := os.ReadFile(plistPath)
+	if err != nil {
+		slog.Warn("Failed to read app extension Info.plist", "path", plistPath, "err", err)
+		return
+	}
+
+	var info map[string]any
+	if _, err := plist.Unmarshal(data, &info); err != nil {
+		slog.Warn("Failed to decode app extension Info.plist", "path", plistPath, "err", err)
+		return
+	}
+
+	extensionBundleID, ok := info["CFBundleIdentifier"].(string)
+	if !ok {
+		return
+	}
+
+	prefix := originalBundleID + "."
+	if !strings.HasPrefix(extensionBundleID, prefix) {
+		return
+	}
+	info["CFBundleIdentifier"] = bundleID + strings.TrimPrefix(extensionBundleID, originalBundleID)
+
+	out, err := plist.Marshal(info, plist.XMLFormat)
+	if err != nil {
+		slog.Warn("Failed to encode app extension Info.plist", "path", plistPath, "err", err)
+		return
+	}
+
+	if err := os.WriteFile(plistPath, out, 0o600); err != nil {
+		slog.Warn("Failed to write app extension Info.plist", "path", plistPath, "err", err)
 	}
 }
 

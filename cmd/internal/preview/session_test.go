@@ -433,7 +433,7 @@ struct HogeView: View {
 	})
 
 	// Call CapturePreview 3 times.
-	// 1st: cold start (launch), 2nd+3rd: hot-reload (SendReloadCommand).
+	// 1st: cold start (launch + explicit initial reload), 2nd+3rd: hot-reload.
 	const n = 3
 	for i := range n {
 		err := sess.CapturePreview(t.Context(), CaptureRequest{
@@ -458,9 +458,9 @@ struct HogeView: View {
 		t.Errorf("launch was called %d times, want 1", got)
 	}
 
-	// Hot-reload should have been called twice (2nd and 3rd captures).
-	if got := reloadCount.Load(); got != 2 {
-		t.Errorf("reload was called %d times, want 2", got)
+	// Reload should have been called three times: initial reload + two hot-reloads.
+	if got := reloadCount.Load(); got != 3 {
+		t.Errorf("reload was called %d times, want 3", got)
 	}
 
 	// reloadCounter should have advanced to n.
@@ -522,17 +522,20 @@ struct HogeView: View {
 		t.Fatal(err)
 	}
 
-	// Socket that responds with ERR: on reload to simulate hot-reload failure.
-	// connCount tracks connections: 1st = WaitForReady (cold start),
-	// 2nd = SendReloadCommand (returns ERR), 3rd = WaitForReady (fallback cold start).
+	// Socket that responds with ERR: on the second reload to simulate
+	// hot-reload failure. Connection sequence:
+	// 1st = WaitForReady, 2nd = initial reload, 3rd = hot-reload (ERR),
+	// 4th = fallback WaitForReady, 5th = fallback initial reload.
 	var connCount atomic.Int32
+	var reloadCount atomic.Int32
 	startFakeSocketCustom(t, sess.dirs.Socket, func(conn net.Conn) {
-		n := connCount.Add(1)
+		connCount.Add(1)
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			// SendReloadCommand: client sent a dylib path.
+			n := reloadCount.Add(1)
 			if n == 2 {
-				// 2nd connection: respond with ERR to trigger fallback.
+				// 2nd reload: respond with ERR to trigger fallback.
 				_, _ = fmt.Fprintf(conn, "ERR:dlopen failed (test)\n")
 			} else {
 				_, _ = fmt.Fprintf(conn, "OK\n")

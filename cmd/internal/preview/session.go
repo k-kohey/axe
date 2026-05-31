@@ -167,7 +167,9 @@ func NewPreviewSession(ctx context.Context, cfg SessionConfig) (*PreviewSession,
 
 // CapturePreview compiles a main-only thunk for the given source file and
 // delivers it to the running app. On the first call, a cold start (terminate →
-// launch → WaitForReady) is performed. Subsequent calls use hot-reload via
+// launch → WaitForReady → SendReloadCommand) is performed. The explicit reload
+// after launch makes the initial preview mount deterministic instead of relying
+// on the loader's best-effort startup hook. Subsequent calls use hot-reload via
 // SendReloadCommand, falling back to cold start on failure.
 func (s *PreviewSession) CapturePreview(ctx context.Context, req CaptureRequest) error {
 	counter := s.reloadCounter
@@ -206,8 +208,8 @@ func (s *PreviewSession) CapturePreview(ctx context.Context, req CaptureRequest)
 	return nil
 }
 
-// coldStart terminates any running app, launches fresh with the given dylib,
-// and waits for the loader socket to become ready.
+// coldStart terminates any running app, launches fresh, waits for the loader
+// socket, then explicitly asks the loader to mount the preview dylib.
 func (s *PreviewSession) coldStart(ctx context.Context, dylibPath string) error {
 	terminateApp(ctx, s.bs, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner)
 
@@ -217,6 +219,9 @@ func (s *PreviewSession) coldStart(ctx context.Context, dylibPath string) error 
 
 	if err := codegen.WaitForReady(ctx, s.dirs.Socket); err != nil {
 		return fmt.Errorf("wait for ready: %w", err)
+	}
+	if err := codegen.SendReloadCommand(ctx, s.dirs.Socket, dylibPath); err != nil {
+		return fmt.Errorf("initial reload: %w", err)
 	}
 
 	s.appLaunched = true
