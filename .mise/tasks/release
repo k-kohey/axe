@@ -28,4 +28,4 @@ done
 # Generate SHA256 checksums for release binaries
 cd .output && shasum -a 256 axe-darwin-* axe-parser-darwin-* axe-index-reader-darwin-* > checksums.txt && cd ..
 
-cd vscode-extension && pnpm run compile && npx vsce package -o ../.output/
+cd vscode-extension && pnpm run compile && pnpm exec vsce package -o ../.output/

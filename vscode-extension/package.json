@@ -3,6 +3,7 @@
   "displayName": "SwiftUI Preview with axe",
   "description": "Automatically run axe preview for SwiftUI #Preview files",
   "version": "0.0.0",
+  "packageManager": "pnpm@10.11.0",
   "publisher": "k-kohey",
   "icon": "icon.png",
   "license": "SEE LICENSE IN LICENSE",
@@ -96,15 +97,15 @@
     "check": "biome check --write src"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
-    "@types/mocha": "^10.0.10",
-    "@types/node": "^25.2.3",
-    "@types/vscode": "^1.85.0",
-    "@vscode/test-electron": "^2.5.2",
-    "@vscode/vsce": "^3.3.2",
-    "glob": "^13.0.5",
-    "mocha": "^11.7.5",
-    "ts-proto": "^2.6.1",
-    "typescript": "^5.3.0"
+    "@biomejs/biome": "2.4.4",
+    "@types/mocha": "10.0.10",
+    "@types/node": "25.2.3",
+    "@types/vscode": "1.109.0",
+    "@vscode/test-electron": "2.5.2",
+    "@vscode/vsce": "3.7.1",
+    "glob": "13.0.5",
+    "mocha": "11.7.5",
+    "ts-proto": "2.11.2",
+    "typescript": "5.9.3"
   }
 }
