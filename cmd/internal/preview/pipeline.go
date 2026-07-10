@@ -116,17 +116,35 @@ func compilePipeline(
 		return "", fmt.Errorf("no types found in tracked files")
 	}
 
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, previewSelector, sourceFile, counter)
+	moduleName := moduleNameForSource(sourceFile, bs.ModuleName, cache)
+	thunkPaths, err := codegen.GenerateThunks(files, moduleName, dirs.Thunk, previewSelector, sourceFile, counter)
 	if err != nil {
 		return "", fmt.Errorf("thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, counter, sourceFile, tc)
+	compileCfg := compileConfigFromSettings(bs)
+	compileCfg.ModuleName = moduleName
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileCfg, dirs.Thunk, dirs.Build, counter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("compile: %w", err)
 	}
 
 	return dylibPath, nil
+}
+
+func moduleNameForSource(sourceFile, fallback string, cache *analysis.IndexStoreCache) string {
+	if cache == nil {
+		return fallback
+	}
+	if moduleName := cache.FileModuleName(sourceFile); moduleName != "" {
+		return moduleName
+	}
+	if abs, err := filepath.Abs(sourceFile); err == nil {
+		if moduleName := cache.FileModuleName(abs); moduleName != "" {
+			return moduleName
+		}
+	}
+	return fallback
 }
 
 // compileMainOnlyPipeline runs the lightweight "main-only" thunk pipeline.
@@ -146,12 +164,21 @@ func compileMainOnlyPipeline(
 		return "", fmt.Errorf("source imports: %w", err)
 	}
 
-	thunkPaths, err := codegen.GenerateMainOnlyThunk(bs.ModuleName, dirs.Thunk, sourceFile, previewSelector, imports, reloadCounter)
+	moduleName := bs.ModuleName
+	if cache, err := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), ""); err == nil {
+		moduleName = moduleNameForSource(sourceFile, bs.ModuleName, cache)
+	} else {
+		slog.Debug("Failed to load index store for main-only module resolution", "err", err)
+	}
+
+	thunkPaths, err := codegen.GenerateMainOnlyThunk(moduleName, dirs.Thunk, sourceFile, previewSelector, imports, reloadCounter)
 	if err != nil {
 		return "", fmt.Errorf("main-only thunk: %w", err)
 	}
 
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, reloadCounter, sourceFile, tc)
+	compileCfg := compileConfigFromSettings(bs)
+	compileCfg.ModuleName = moduleName
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileCfg, dirs.Thunk, dirs.Build, reloadCounter, sourceFile, tc)
 	if err != nil {
 		return "", fmt.Errorf("main-only compile: %w", err)
 	}

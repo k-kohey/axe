@@ -257,7 +257,7 @@ type dependencyManifestEntry struct {
 	ClangModuleMapPath string `json:"clangModuleMapPath"`
 }
 
-var umbrellaDirectiveRE = regexp.MustCompile(`^(umbrella header|umbrella)\s+"([^"]+)"`)
+var moduleMapIncludeDirectiveRE = regexp.MustCompile(`^(umbrella header|umbrella|header)\s+"([^"]+)"`)
 
 func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath string) error {
 	data, err := os.ReadFile(manifestPath)
@@ -308,16 +308,16 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		s.ExtraModuleMapFiles = append(s.ExtraModuleMapFiles, path)
 	}
 
-	// Only process module maps that belong to this build (under buildDir).
-	// SDK module maps (e.g. UIKit, Foundation) are resolved by swiftc via -sdk
-	// and must not be added explicitly — doing so bloats the compiler flags and
-	// can cause swiftc to hang.
-	isOwnedByBuild := func(path string) bool {
-		rel, err := filepath.Rel(filepath.Clean(buildDir), filepath.Clean(path))
-		if err != nil {
-			return false
-		}
-		return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	// SDK and toolchain module maps (e.g. UIKit, Foundation, Clang builtins)
+	// are resolved by swiftc via -sdk/toolchain defaults and must not be added
+	// explicitly. Third-party module maps may live outside buildDir when a project
+	// generator keeps checkouts or derived module maps in the workspace, so do
+	// not restrict dependency-manifest paths to buildDir.
+	isSDKOrToolchainModuleMap := func(path string) bool {
+		path = filepath.Clean(path)
+		sep := string(filepath.Separator)
+		return strings.Contains(path, sep+"Platforms"+sep) && strings.Contains(path, sep+"SDKs"+sep) ||
+			strings.Contains(path, sep+"Toolchains"+sep)
 	}
 
 	generatedModuleMapsDir := filepath.Join(buildDir, "Build", "Intermediates.noindex", "GeneratedModuleMaps-iphonesimulator")
@@ -329,7 +329,7 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 		}
 
 		moduleMapPath := filepath.Clean(entry.ClangModuleMapPath)
-		if !isOwnedByBuild(moduleMapPath) {
+		if isSDKOrToolchainModuleMap(moduleMapPath) {
 			continue
 		}
 
@@ -347,20 +347,21 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 			continue
 		}
 
-		// For non-framework module maps, add the umbrella header/directory as -I.
+		// For non-framework module maps, add referenced header or umbrella paths as -I.
 		moduleMapData, err := os.ReadFile(moduleMapPath)
 		if err != nil {
 			slog.Debug("Failed to read module map file", "path", moduleMapPath, "err", err)
 			continue
 		}
 		for line := range strings.SplitSeq(string(moduleMapData), "\n") {
-			m := umbrellaDirectiveRE.FindStringSubmatch(strings.TrimSpace(line))
+			m := moduleMapIncludeDirectiveRE.FindStringSubmatch(strings.TrimSpace(line))
 			if len(m) != 3 {
 				continue
 			}
 
-			targetPath := m[2]
-			if !filepath.IsAbs(targetPath) {
+			directive, targetPath := m[1], m[2]
+			isRelative := !filepath.IsAbs(targetPath)
+			if isRelative {
 				targetPath = filepath.Join(filepath.Dir(moduleMapPath), targetPath)
 			}
 			targetPath = filepath.Clean(targetPath)
@@ -370,6 +371,8 @@ func extractCompilerPathsFromDependencies(s *Settings, buildDir, manifestPath st
 			}
 			if info.IsDir() {
 				addIncludePath(targetPath)
+			} else if directive == "header" && isRelative {
+				addIncludePath(filepath.Dir(moduleMapPath))
 			} else {
 				addIncludePath(filepath.Dir(targetPath))
 			}
