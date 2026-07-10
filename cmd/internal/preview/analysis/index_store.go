@@ -3,6 +3,8 @@ package analysis
 import (
 	"context"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"sync"
 
 	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
@@ -24,6 +26,53 @@ type IndexStoreCache struct {
 // Used by tests that need to construct a cache without invoking the index reader.
 func NewIndexStoreCache(files map[string]*pb.IndexFileData, typeMap map[string][]string) *IndexStoreCache {
 	return &IndexStoreCache{files: files, typeMap: typeMap}
+}
+
+func indexPathCandidates(path string) []string {
+	if path == "" {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	var paths []string
+	add := func(candidate string) {
+		if candidate == "" {
+			return
+		}
+		candidate = filepath.Clean(candidate)
+		if !seen[candidate] {
+			seen[candidate] = true
+			paths = append(paths, candidate)
+		}
+	}
+
+	add(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		add(abs)
+		if eval, err := filepath.EvalSymlinks(abs); err == nil {
+			add(eval)
+		}
+	}
+
+	for _, candidate := range append([]string(nil), paths...) {
+		if suffix, ok := strings.CutPrefix(candidate, "/private/tmp/"); ok {
+			add("/tmp/" + suffix)
+		}
+		if suffix, ok := strings.CutPrefix(candidate, "/tmp/"); ok {
+			add("/private/tmp/" + suffix)
+		}
+	}
+
+	return paths
+}
+
+func (c *IndexStoreCache) fileDataLocked(path string) *pb.IndexFileData {
+	for _, candidate := range indexPathCandidates(path) {
+		if fd := c.files[candidate]; fd != nil {
+			return fd
+		}
+	}
+	return nil
 }
 
 // LoadIndexStore invokes the extended axe-index-reader and caches all data.
@@ -64,7 +113,7 @@ func (c *IndexStoreCache) TypeFileMultiMap() map[string][]string {
 func (c *IndexStoreCache) ReferencedTypes(path string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	fd := c.files[path]
+	fd := c.fileDataLocked(path)
 	if fd == nil {
 		return nil
 	}
@@ -75,7 +124,7 @@ func (c *IndexStoreCache) ReferencedTypes(path string) []string {
 func (c *IndexStoreCache) DefinedTypes(path string) []string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	fd := c.files[path]
+	fd := c.fileDataLocked(path)
 	if fd == nil {
 		return nil
 	}
@@ -87,7 +136,7 @@ func (c *IndexStoreCache) DefinedTypes(path string) []string {
 func (c *IndexStoreCache) FileData(path string) *pb.IndexFileData {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.files[path]
+	return c.fileDataLocked(path)
 }
 
 // FileModuleName returns the Swift module name for the given file path.
@@ -95,7 +144,7 @@ func (c *IndexStoreCache) FileData(path string) *pb.IndexFileData {
 func (c *IndexStoreCache) FileModuleName(path string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	fd := c.files[path]
+	fd := c.fileDataLocked(path)
 	if fd == nil {
 		return ""
 	}

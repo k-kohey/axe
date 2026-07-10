@@ -102,6 +102,31 @@ func TestIndexStoreCache_FileModuleName(t *testing.T) {
 	}
 }
 
+func TestIndexStoreCache_LookupHandlesPrivateTmpAlias(t *testing.T) {
+	cache := &IndexStoreCache{
+		files: map[string]*pb.IndexFileData{
+			"/tmp/project/A.swift": {
+				FilePath:            "/tmp/project/A.swift",
+				ModuleName:          "FeatureUI",
+				ReferencedTypeNames: []string{"Dependency"},
+				DefinedTypeNames:    []string{"FeatureView"},
+			},
+		},
+		typeMap: map[string][]string{},
+	}
+
+	path := "/private/tmp/project/A.swift"
+	if got := cache.FileModuleName(path); got != "FeatureUI" {
+		t.Fatalf("FileModuleName = %q, want FeatureUI", got)
+	}
+	if got := cache.ReferencedTypes(path); len(got) != 1 || got[0] != "Dependency" {
+		t.Fatalf("ReferencedTypes = %v, want [Dependency]", got)
+	}
+	if got := cache.DefinedTypes(path); len(got) != 1 || got[0] != "FeatureView" {
+		t.Fatalf("DefinedTypes = %v, want [FeatureView]", got)
+	}
+}
+
 func TestBuildTransitiveDeps_WithCache(t *testing.T) {
 	// Test BFS using IndexStoreCache instead of SwiftFileParser.
 	target := filepath.Join("/project", "ContentView.swift")

@@ -58,6 +58,24 @@ func buildTestCache(entries map[string]*pb.IndexFileData) *analysis.IndexStoreCa
 	return analysis.NewIndexStoreCache(entries, map[string][]string{})
 }
 
+func TestModuleNameForSourceUsesIndexStoreModule(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "FeatureView.swift")
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {FilePath: sourcePath, ModuleName: "FeatureUI"},
+	})
+
+	if got := moduleNameForSource(sourcePath, "App", cache); got != "FeatureUI" {
+		t.Fatalf("moduleNameForSource = %q, want FeatureUI", got)
+	}
+}
+
+func TestModuleNameForSourceFallsBack(t *testing.T) {
+	if got := moduleNameForSource("/missing.swift", "App", buildTestCache(map[string]*pb.IndexFileData{})); got != "App" {
+		t.Fatalf("moduleNameForSource fallback = %q, want App", got)
+	}
+}
+
 func TestParseTrackedFiles_SourceAndDependency(t *testing.T) {
 	dir := t.TempDir()
 

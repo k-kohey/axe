@@ -581,6 +581,73 @@ func TestExtractCompilerPaths_DependencyManifestRelativeUmbrellaPath(t *testing.
 	}
 }
 
+func TestExtractCompilerPaths_DependencyManifestIncludesNonSDKPathsOutsideBuildDir(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	moduleMapDir := filepath.Join(t.TempDir(), "GeneratedProject", ".build", "derived", "ModuleMaps", "VendorCAuth")
+	if err := os.MkdirAll(moduleMapDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	includeDir := filepath.Join(t.TempDir(), "GeneratedProject", ".build", "checkouts", "vendor-c-runtime", "vendor-c-auth", "include")
+	if err := os.MkdirAll(includeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moduleMapPath := filepath.Join(moduleMapDir, "VendorCAuth.modulemap")
+	if err := os.WriteFile(moduleMapPath, []byte(`module VendorCAuth {
+  umbrella "`+includeDir+`"
+  export *
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: moduleMapPath},
+	})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if !slices.Contains(bs.ExtraModuleMapFiles, moduleMapPath) {
+		t.Fatalf("ExtraModuleMapFiles = %v, want to contain %q", bs.ExtraModuleMapFiles, moduleMapPath)
+	}
+	if !slices.Contains(bs.ExtraIncludePaths, includeDir) {
+		t.Fatalf("ExtraIncludePaths = %v, want to contain %q", bs.ExtraIncludePaths, includeDir)
+	}
+}
+
+func TestExtractCompilerPaths_DependencyManifestHeaderDirective(t *testing.T) {
+	bs, dirs := setupDependencyManifest(t)
+
+	moduleMapDir := filepath.Join(t.TempDir(), "vendor-c-runtime", "config")
+	headerDir := filepath.Join(moduleMapDir, "vendor", "common")
+	if err := os.MkdirAll(headerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moduleMapPath := filepath.Join(moduleMapDir, "module.modulemap")
+	headerPath := filepath.Join(headerDir, "config.h")
+	if err := os.WriteFile(headerPath, []byte("// config"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(moduleMapPath, []byte(`module VendorCPlatformConfig {
+  header "vendor/common/config.h"
+  export *
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeDependencyManifest(t, dirs, bs.ModuleName, []dependencyManifestEntry{
+		{ClangModuleMapPath: moduleMapPath},
+	})
+
+	ExtractCompilerPaths(context.Background(), bs, dirs)
+
+	if !slices.Contains(bs.ExtraModuleMapFiles, moduleMapPath) {
+		t.Fatalf("ExtraModuleMapFiles = %v, want to contain %q", bs.ExtraModuleMapFiles, moduleMapPath)
+	}
+	if !slices.Contains(bs.ExtraIncludePaths, moduleMapDir) {
+		t.Fatalf("ExtraIncludePaths = %v, want to contain module map dir %q", bs.ExtraIncludePaths, moduleMapDir)
+	}
+}
+
 func TestExtractCompilerPaths_DependencyManifestSkipsSDKPaths(t *testing.T) {
 	bs, dirs := setupDependencyManifest(t)
 
