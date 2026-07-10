@@ -35,6 +35,9 @@ Useful endpoints:
 - `POST /v1/sessions`
 - `GET /v1/sessions/{session_id}`
 - `DELETE /v1/sessions/{session_id}`
+- `POST /v1/sessions/{session_id}/install`
+- `POST /v1/sessions/{session_id}/launch`
+- `POST /v1/sessions/{session_id}/terminate`
 - `POST /v1/sessions/{session_id}/input`
 - `GET /v1/sessions/{session_id}/events`
 - `GET /v1/sessions/{session_id}/video`

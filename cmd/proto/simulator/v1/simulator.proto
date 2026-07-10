@@ -10,6 +10,9 @@ service SimulatorService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   rpc GetSession(GetSessionRequest) returns (Session);
   rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
+  rpc InstallApp(InstallAppRequest) returns (InstallAppResponse);
+  rpc LaunchApp(LaunchAppRequest) returns (LaunchAppResponse);
+  rpc TerminateApp(TerminateAppRequest) returns (TerminateAppResponse);
   rpc SendInput(SendInputRequest) returns (SendInputResponse);
   rpc WatchEvents(WatchEventsRequest) returns (stream Event);
   rpc WatchVideo(WatchVideoRequest) returns (stream VideoFrame);
@@ -70,6 +73,29 @@ message StopSessionRequest {
 }
 
 message StopSessionResponse {}
+
+message InstallAppRequest {
+  string session_id = 1;
+  string app_path = 2;
+}
+
+message InstallAppResponse {}
+
+message LaunchAppRequest {
+  string session_id = 1;
+  string bundle_id = 2;
+  map<string, string> env = 3;
+  repeated string args = 4;
+}
+
+message LaunchAppResponse {}
+
+message TerminateAppRequest {
+  string session_id = 1;
+  string bundle_id = 2;
+}
+
+message TerminateAppResponse {}
 
 message Session {
   string session_id = 1;

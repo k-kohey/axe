@@ -52,6 +52,27 @@ func (s *GRPCServer) StopSession(ctx context.Context, req *simulatorv1.StopSessi
 	return &simulatorv1.StopSessionResponse{}, nil
 }
 
+func (s *GRPCServer) InstallApp(ctx context.Context, req *simulatorv1.InstallAppRequest) (*simulatorv1.InstallAppResponse, error) {
+	if err := s.runtime.InstallApp(ctx, req.GetSessionId(), req.GetAppPath()); err != nil {
+		return nil, err
+	}
+	return &simulatorv1.InstallAppResponse{}, nil
+}
+
+func (s *GRPCServer) LaunchApp(ctx context.Context, req *simulatorv1.LaunchAppRequest) (*simulatorv1.LaunchAppResponse, error) {
+	if err := s.runtime.LaunchApp(ctx, req.GetSessionId(), req.GetBundleId(), req.GetEnv(), req.GetArgs()); err != nil {
+		return nil, err
+	}
+	return &simulatorv1.LaunchAppResponse{}, nil
+}
+
+func (s *GRPCServer) TerminateApp(ctx context.Context, req *simulatorv1.TerminateAppRequest) (*simulatorv1.TerminateAppResponse, error) {
+	if err := s.runtime.TerminateApp(ctx, req.GetSessionId(), req.GetBundleId()); err != nil {
+		return nil, err
+	}
+	return &simulatorv1.TerminateAppResponse{}, nil
+}
+
 func (s *GRPCServer) SendInput(ctx context.Context, req *simulatorv1.SendInputRequest) (*simulatorv1.SendInputResponse, error) {
 	if err := s.runtime.SendInput(ctx, req.GetSessionId(), inputFromProto(req.GetInput())); err != nil {
 		return nil, err

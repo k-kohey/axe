@@ -136,7 +136,7 @@ func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *
 }
 
 // dispatchProtocolCommands reads protocol Commands and dispatches them to typed channels.
-func dispatchProtocolCommands(ctx context.Context, protoCmdCh <-chan *pb.Command, hid *protocol.HIDHandler,
+func dispatchProtocolCommands(ctx context.Context, protoCmdCh <-chan *pb.Command,
 	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, forceRebuildCh chan<- struct{}, inputCh chan<- *pb.Input) {
 	for {
 		select {

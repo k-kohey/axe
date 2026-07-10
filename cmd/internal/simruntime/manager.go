@@ -146,7 +146,7 @@ func (m *RuntimeManager) startSession(ctx context.Context, s *Session, req Creat
 	s.bundleID = bundleID
 	if bundleID != "" {
 		s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "launching"}})
-		if err := m.launchApp(ctx, s.deviceUDID, bundleID); err != nil {
+		if err := m.launchApp(ctx, s.deviceUDID, bundleID, nil, nil); err != nil {
 			return err
 		}
 	}
@@ -202,6 +202,48 @@ func (m *RuntimeManager) StopSession(ctx context.Context, id string) error {
 	s.publish(Event{SessionID: id, Time: time.Now(), Stopped: &StoppedEvent{Reason: "stopped", Message: ""}})
 	s.closeEvents()
 	return nil
+}
+
+func (m *RuntimeManager) InstallApp(ctx context.Context, id, appPath string) error {
+	s, err := m.lookup(id)
+	if err != nil {
+		return err
+	}
+	if appPath == "" {
+		return fmt.Errorf("app path is required")
+	}
+	s.publish(Event{SessionID: id, Time: time.Now(), Status: &StatusEvent{Phase: "installing"}})
+	return m.installApp(ctx, s.deviceUDID, appPath)
+}
+
+func (m *RuntimeManager) LaunchApp(ctx context.Context, id, bundleID string, env map[string]string, args []string) error {
+	s, err := m.lookup(id)
+	if err != nil {
+		return err
+	}
+	if bundleID == "" {
+		return fmt.Errorf("bundle id is required")
+	}
+	s.publish(Event{SessionID: id, Time: time.Now(), Status: &StatusEvent{Phase: "launching"}})
+	if err := m.launchApp(ctx, s.deviceUDID, bundleID, env, args); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.bundleID = bundleID
+	s.mu.Unlock()
+	s.publish(Event{SessionID: id, Time: time.Now(), Status: &StatusEvent{Phase: "running"}})
+	return nil
+}
+
+func (m *RuntimeManager) TerminateApp(ctx context.Context, id, bundleID string) error {
+	s, err := m.lookup(id)
+	if err != nil {
+		return err
+	}
+	if bundleID == "" {
+		return fmt.Errorf("bundle id is required")
+	}
+	return m.terminateApp(ctx, s.deviceUDID, bundleID)
 }
 
 func (m *RuntimeManager) SendInput(ctx context.Context, id string, input InputEvent) error {
@@ -357,11 +399,25 @@ func (m *RuntimeManager) installApp(ctx context.Context, udid, path string) erro
 	return nil
 }
 
-func (m *RuntimeManager) launchApp(ctx context.Context, udid, bundleID string) error {
+func (m *RuntimeManager) terminateApp(ctx context.Context, udid, bundleID string) error {
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", m.deviceSetPath, "terminate", udid, bundleID).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("simctl terminate: %w\n%s", err, out)
+	}
+	return nil
+}
+
+func (m *RuntimeManager) launchApp(ctx context.Context, udid, bundleID string, env map[string]string, args []string) error {
 	if bundleID == "" {
 		return nil
 	}
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", m.deviceSetPath, "launch", udid, bundleID).CombinedOutput()
+	launchArgs := append([]string{"simctl", "--set", m.deviceSetPath, "launch", udid, bundleID}, args...)
+	cmd := procgroup.Command(ctx, "xcrun", launchArgs...)
+	cmd.Env = os.Environ()
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("simctl launch: %w\n%s", err, out)
 	}

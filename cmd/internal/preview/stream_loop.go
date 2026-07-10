@@ -8,7 +8,6 @@ import (
 
 	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
@@ -22,7 +21,7 @@ type eventLoopConfig struct {
 	dirs       previewDirs
 	wctx       watchContext
 	ws         *watchState
-	hid        *protocol.HIDHandler
+	hid        inputHandler
 
 	// Event sources (receive-only channels).
 	// A nil channel blocks forever in select, effectively disabling that case.

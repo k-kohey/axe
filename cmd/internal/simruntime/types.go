@@ -112,6 +112,9 @@ type Manager interface {
 	CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error)
 	GetSession(id string) (*SessionInfo, error)
 	StopSession(ctx context.Context, id string) error
+	InstallApp(ctx context.Context, id, appPath string) error
+	LaunchApp(ctx context.Context, id, bundleID string, env map[string]string, args []string) error
+	TerminateApp(ctx context.Context, id, bundleID string) error
 	SendInput(ctx context.Context, id string, input InputEvent) error
 	SubscribeEvents(ctx context.Context, id string) (<-chan Event, error)
 	WatchVideo(ctx context.Context, id string, fps int) (<-chan VideoFrame, error)

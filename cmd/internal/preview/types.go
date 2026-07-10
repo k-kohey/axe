@@ -10,6 +10,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
@@ -54,6 +55,10 @@ type RunOptions struct {
 	// Only invoked in oneshot mode (not watch, not serve).
 	// If nil, oneshot returns immediately after verifying readiness.
 	OnReady func(ctx context.Context, device, deviceSetPath string) error
+}
+
+type inputHandler interface {
+	HandleInput(ctx context.Context, input *pb.Input)
 }
 
 // compileConfigFromSettings converts build.Settings to codegen.CompileConfig.

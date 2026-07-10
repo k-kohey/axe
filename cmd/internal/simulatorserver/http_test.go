@@ -81,6 +81,34 @@ func TestHTTPServerSendInputUsesPathSessionID(t *testing.T) {
 	}
 }
 
+func TestHTTPServerLaunchApp(t *testing.T) {
+	manager := newFakeManager()
+	server := NewHTTPServer(manager, "test")
+	body := `{
+		"bundleId": "com.example.App",
+		"env": {"SIMCTL_CHILD_FOO": "bar"},
+		"args": ["--flag"]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/sessions/session-1/launch", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	server.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(manager.launched) != 1 {
+		t.Fatalf("launch calls = %d", len(manager.launched))
+	}
+	got := manager.launched[0]
+	if got.sessionID != "session-1" || got.bundleID != "com.example.App" {
+		t.Fatalf("launch = %+v", got)
+	}
+	if got.env["SIMCTL_CHILD_FOO"] != "bar" || len(got.args) != 1 || got.args[0] != "--flag" {
+		t.Fatalf("launch details = %+v", got)
+	}
+}
+
 func TestHTTPServerDeleteSession(t *testing.T) {
 	manager := newFakeManager()
 	server := NewHTTPServer(manager, "test")

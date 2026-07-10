@@ -106,6 +106,12 @@ func (s *HTTPServer) handleSessionResource(w http.ResponseWriter, r *http.Reques
 	switch parts[1] {
 	case "input":
 		s.handleInput(w, r, sessionID)
+	case "install":
+		s.handleInstall(w, r, sessionID)
+	case "launch":
+		s.handleLaunch(w, r, sessionID)
+	case "terminate":
+		s.handleTerminate(w, r, sessionID)
 	case "events":
 		s.handleEvents(w, r, sessionID)
 	case "video":
@@ -153,6 +159,66 @@ func (s *HTTPServer) handleInput(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	writeProto(w, &simulatorv1.SendInputResponse{})
+}
+
+func (s *HTTPServer) handleInstall(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	req := &simulatorv1.InstallAppRequest{}
+	if err := readProto(r, req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.SessionId == "" {
+		req.SessionId = sessionID
+	}
+	if err := s.runtime.InstallApp(r.Context(), req.GetSessionId(), req.GetAppPath()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeProto(w, &simulatorv1.InstallAppResponse{})
+}
+
+func (s *HTTPServer) handleLaunch(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	req := &simulatorv1.LaunchAppRequest{}
+	if err := readProto(r, req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.SessionId == "" {
+		req.SessionId = sessionID
+	}
+	if err := s.runtime.LaunchApp(r.Context(), req.GetSessionId(), req.GetBundleId(), req.GetEnv(), req.GetArgs()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeProto(w, &simulatorv1.LaunchAppResponse{})
+}
+
+func (s *HTTPServer) handleTerminate(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	req := &simulatorv1.TerminateAppRequest{}
+	if err := readProto(r, req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.SessionId == "" {
+		req.SessionId = sessionID
+	}
+	if err := s.runtime.TerminateApp(r.Context(), req.GetSessionId(), req.GetBundleId()); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeProto(w, &simulatorv1.TerminateAppResponse{})
 }
 
 func (s *HTTPServer) handleEvents(w http.ResponseWriter, r *http.Request, sessionID string) {

@@ -17,9 +17,19 @@ type fakeManager struct {
 	createReqs []simruntime.CreateSessionRequest
 	inputs     []simruntime.InputEvent
 	stoppedIDs []string
+	installed  []string
+	launched   []launchCall
+	terminated []string
 
 	events chan simruntime.Event
 	frames chan simruntime.VideoFrame
+}
+
+type launchCall struct {
+	sessionID string
+	bundleID  string
+	env       map[string]string
+	args      []string
 }
 
 func newFakeManager() *fakeManager {
@@ -72,6 +82,27 @@ func (m *fakeManager) StopSession(_ context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stoppedIDs = append(m.stoppedIDs, id)
+	return nil
+}
+
+func (m *fakeManager) InstallApp(_ context.Context, id, appPath string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.installed = append(m.installed, id+":"+appPath)
+	return nil
+}
+
+func (m *fakeManager) LaunchApp(_ context.Context, id, bundleID string, env map[string]string, args []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.launched = append(m.launched, launchCall{sessionID: id, bundleID: bundleID, env: env, args: args})
+	return nil
+}
+
+func (m *fakeManager) TerminateApp(_ context.Context, id, bundleID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.terminated = append(m.terminated, id+":"+bundleID)
 	return nil
 }
 

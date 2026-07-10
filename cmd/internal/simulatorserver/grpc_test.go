@@ -43,3 +43,28 @@ func TestGRPCServerSendInput(t *testing.T) {
 		t.Fatalf("inputs = %+v", manager.inputs)
 	}
 }
+
+func TestGRPCServerLaunchApp(t *testing.T) {
+	manager := newFakeManager()
+	server := NewGRPCServer(manager, "test")
+
+	_, err := server.LaunchApp(context.Background(), &simulatorv1.LaunchAppRequest{
+		SessionId: "session-1",
+		BundleId:  "com.example.App",
+		Env:       map[string]string{"SIMCTL_CHILD_FOO": "bar"},
+		Args:      []string{"--flag"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.launched) != 1 {
+		t.Fatalf("launch calls = %d", len(manager.launched))
+	}
+	got := manager.launched[0]
+	if got.sessionID != "session-1" || got.bundleID != "com.example.App" {
+		t.Fatalf("launch = %+v", got)
+	}
+	if got.env["SIMCTL_CHILD_FOO"] != "bar" || len(got.args) != 1 || got.args[0] != "--flag" {
+		t.Fatalf("launch details = %+v", got)
+	}
+}

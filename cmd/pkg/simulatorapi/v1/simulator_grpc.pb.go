@@ -24,6 +24,9 @@ const (
 	SimulatorService_CreateSession_FullMethodName = "/axe.simulator.v1.SimulatorService/CreateSession"
 	SimulatorService_GetSession_FullMethodName    = "/axe.simulator.v1.SimulatorService/GetSession"
 	SimulatorService_StopSession_FullMethodName   = "/axe.simulator.v1.SimulatorService/StopSession"
+	SimulatorService_InstallApp_FullMethodName    = "/axe.simulator.v1.SimulatorService/InstallApp"
+	SimulatorService_LaunchApp_FullMethodName     = "/axe.simulator.v1.SimulatorService/LaunchApp"
+	SimulatorService_TerminateApp_FullMethodName  = "/axe.simulator.v1.SimulatorService/TerminateApp"
 	SimulatorService_SendInput_FullMethodName     = "/axe.simulator.v1.SimulatorService/SendInput"
 	SimulatorService_WatchEvents_FullMethodName   = "/axe.simulator.v1.SimulatorService/WatchEvents"
 	SimulatorService_WatchVideo_FullMethodName    = "/axe.simulator.v1.SimulatorService/WatchVideo"
@@ -38,6 +41,9 @@ type SimulatorServiceClient interface {
 	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error)
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*Session, error)
 	StopSession(ctx context.Context, in *StopSessionRequest, opts ...grpc.CallOption) (*StopSessionResponse, error)
+	InstallApp(ctx context.Context, in *InstallAppRequest, opts ...grpc.CallOption) (*InstallAppResponse, error)
+	LaunchApp(ctx context.Context, in *LaunchAppRequest, opts ...grpc.CallOption) (*LaunchAppResponse, error)
+	TerminateApp(ctx context.Context, in *TerminateAppRequest, opts ...grpc.CallOption) (*TerminateAppResponse, error)
 	SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error)
 	WatchEvents(ctx context.Context, in *WatchEventsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Event], error)
 	WatchVideo(ctx context.Context, in *WatchVideoRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[VideoFrame], error)
@@ -101,6 +107,36 @@ func (c *simulatorServiceClient) StopSession(ctx context.Context, in *StopSessio
 	return out, nil
 }
 
+func (c *simulatorServiceClient) InstallApp(ctx context.Context, in *InstallAppRequest, opts ...grpc.CallOption) (*InstallAppResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InstallAppResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_InstallApp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) LaunchApp(ctx context.Context, in *LaunchAppRequest, opts ...grpc.CallOption) (*LaunchAppResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LaunchAppResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_LaunchApp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) TerminateApp(ctx context.Context, in *TerminateAppRequest, opts ...grpc.CallOption) (*TerminateAppResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TerminateAppResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_TerminateApp_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *simulatorServiceClient) SendInput(ctx context.Context, in *SendInputRequest, opts ...grpc.CallOption) (*SendInputResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SendInputResponse)
@@ -158,6 +194,9 @@ type SimulatorServiceServer interface {
 	CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error)
 	GetSession(context.Context, *GetSessionRequest) (*Session, error)
 	StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error)
+	InstallApp(context.Context, *InstallAppRequest) (*InstallAppResponse, error)
+	LaunchApp(context.Context, *LaunchAppRequest) (*LaunchAppResponse, error)
+	TerminateApp(context.Context, *TerminateAppRequest) (*TerminateAppResponse, error)
 	SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error)
 	WatchEvents(*WatchEventsRequest, grpc.ServerStreamingServer[Event]) error
 	WatchVideo(*WatchVideoRequest, grpc.ServerStreamingServer[VideoFrame]) error
@@ -185,6 +224,15 @@ func (UnimplementedSimulatorServiceServer) GetSession(context.Context, *GetSessi
 }
 func (UnimplementedSimulatorServiceServer) StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StopSession not implemented")
+}
+func (UnimplementedSimulatorServiceServer) InstallApp(context.Context, *InstallAppRequest) (*InstallAppResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InstallApp not implemented")
+}
+func (UnimplementedSimulatorServiceServer) LaunchApp(context.Context, *LaunchAppRequest) (*LaunchAppResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LaunchApp not implemented")
+}
+func (UnimplementedSimulatorServiceServer) TerminateApp(context.Context, *TerminateAppRequest) (*TerminateAppResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TerminateApp not implemented")
 }
 func (UnimplementedSimulatorServiceServer) SendInput(context.Context, *SendInputRequest) (*SendInputResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendInput not implemented")
@@ -306,6 +354,60 @@ func _SimulatorService_StopSession_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SimulatorService_InstallApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InstallAppRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).InstallApp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_InstallApp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).InstallApp(ctx, req.(*InstallAppRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_LaunchApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LaunchAppRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).LaunchApp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_LaunchApp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).LaunchApp(ctx, req.(*LaunchAppRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_TerminateApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TerminateAppRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).TerminateApp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_TerminateApp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).TerminateApp(ctx, req.(*TerminateAppRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SimulatorService_SendInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SendInputRequest)
 	if err := dec(in); err != nil {
@@ -372,6 +474,18 @@ var SimulatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StopSession",
 			Handler:    _SimulatorService_StopSession_Handler,
+		},
+		{
+			MethodName: "InstallApp",
+			Handler:    _SimulatorService_InstallApp_Handler,
+		},
+		{
+			MethodName: "LaunchApp",
+			Handler:    _SimulatorService_LaunchApp_Handler,
+		},
+		{
+			MethodName: "TerminateApp",
+			Handler:    _SimulatorService_TerminateApp_Handler,
 		},
 		{
 			MethodName: "SendInput",

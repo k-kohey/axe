@@ -37,7 +37,7 @@ func sendWatchStatus(wctx watchContext, phase string) {
 // and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	bs *build.Settings, dirs previewDirs, wctx watchContext,
-	ws *watchState, hid *protocol.HIDHandler,
+	ws *watchState, hid inputHandler,
 	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
 
 	// Set up shared file watcher.
@@ -65,11 +65,12 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	if wctx.serve {
 		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
-		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	} else {
 		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
-		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
+		directHID, _ := hid.(*protocol.HIDHandler)
+		go dispatchStdinCommands(ctx, cmdCh, directHID, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	}
 
 	cfg := &eventLoopConfig{

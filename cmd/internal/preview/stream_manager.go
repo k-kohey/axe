@@ -61,7 +61,7 @@ type stream struct {
 	bootCompanion companionProcess
 	idbCompanion  companionProcess
 	idbClient     idb.IDBClient
-	hid           *protocol.HIDHandler
+	hid           inputHandler
 	ws            *watchState
 	loaderPath    string
 

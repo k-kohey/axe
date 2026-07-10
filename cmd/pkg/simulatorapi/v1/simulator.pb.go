@@ -718,6 +718,286 @@ func (*StopSessionResponse) Descriptor() ([]byte, []int) {
 	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{12}
 }
 
+type InstallAppRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	AppPath       string                 `protobuf:"bytes,2,opt,name=app_path,json=appPath,proto3" json:"app_path,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallAppRequest) Reset() {
+	*x = InstallAppRequest{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallAppRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallAppRequest) ProtoMessage() {}
+
+func (x *InstallAppRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallAppRequest.ProtoReflect.Descriptor instead.
+func (*InstallAppRequest) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *InstallAppRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *InstallAppRequest) GetAppPath() string {
+	if x != nil {
+		return x.AppPath
+	}
+	return ""
+}
+
+type InstallAppResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InstallAppResponse) Reset() {
+	*x = InstallAppResponse{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InstallAppResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InstallAppResponse) ProtoMessage() {}
+
+func (x *InstallAppResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InstallAppResponse.ProtoReflect.Descriptor instead.
+func (*InstallAppResponse) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{14}
+}
+
+type LaunchAppRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	BundleId      string                 `protobuf:"bytes,2,opt,name=bundle_id,json=bundleId,proto3" json:"bundle_id,omitempty"`
+	Env           map[string]string      `protobuf:"bytes,3,rep,name=env,proto3" json:"env,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Args          []string               `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LaunchAppRequest) Reset() {
+	*x = LaunchAppRequest{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LaunchAppRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LaunchAppRequest) ProtoMessage() {}
+
+func (x *LaunchAppRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LaunchAppRequest.ProtoReflect.Descriptor instead.
+func (*LaunchAppRequest) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *LaunchAppRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *LaunchAppRequest) GetBundleId() string {
+	if x != nil {
+		return x.BundleId
+	}
+	return ""
+}
+
+func (x *LaunchAppRequest) GetEnv() map[string]string {
+	if x != nil {
+		return x.Env
+	}
+	return nil
+}
+
+func (x *LaunchAppRequest) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+type LaunchAppResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LaunchAppResponse) Reset() {
+	*x = LaunchAppResponse{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LaunchAppResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LaunchAppResponse) ProtoMessage() {}
+
+func (x *LaunchAppResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LaunchAppResponse.ProtoReflect.Descriptor instead.
+func (*LaunchAppResponse) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{16}
+}
+
+type TerminateAppRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	BundleId      string                 `protobuf:"bytes,2,opt,name=bundle_id,json=bundleId,proto3" json:"bundle_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminateAppRequest) Reset() {
+	*x = TerminateAppRequest{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminateAppRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminateAppRequest) ProtoMessage() {}
+
+func (x *TerminateAppRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminateAppRequest.ProtoReflect.Descriptor instead.
+func (*TerminateAppRequest) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *TerminateAppRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TerminateAppRequest) GetBundleId() string {
+	if x != nil {
+		return x.BundleId
+	}
+	return ""
+}
+
+type TerminateAppResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TerminateAppResponse) Reset() {
+	*x = TerminateAppResponse{}
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TerminateAppResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TerminateAppResponse) ProtoMessage() {}
+
+func (x *TerminateAppResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TerminateAppResponse.ProtoReflect.Descriptor instead.
+func (*TerminateAppResponse) Descriptor() ([]byte, []int) {
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{18}
+}
+
 type Session struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
@@ -734,7 +1014,7 @@ type Session struct {
 
 func (x *Session) Reset() {
 	*x = Session{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[13]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -746,7 +1026,7 @@ func (x *Session) String() string {
 func (*Session) ProtoMessage() {}
 
 func (x *Session) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[13]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -759,7 +1039,7 @@ func (x *Session) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Session.ProtoReflect.Descriptor instead.
 func (*Session) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{13}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Session) GetSessionId() string {
@@ -828,7 +1108,7 @@ type SendInputRequest struct {
 
 func (x *SendInputRequest) Reset() {
 	*x = SendInputRequest{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[14]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -840,7 +1120,7 @@ func (x *SendInputRequest) String() string {
 func (*SendInputRequest) ProtoMessage() {}
 
 func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[14]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -853,7 +1133,7 @@ func (x *SendInputRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendInputRequest.ProtoReflect.Descriptor instead.
 func (*SendInputRequest) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{14}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SendInputRequest) GetSessionId() string {
@@ -878,7 +1158,7 @@ type SendInputResponse struct {
 
 func (x *SendInputResponse) Reset() {
 	*x = SendInputResponse{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[15]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -890,7 +1170,7 @@ func (x *SendInputResponse) String() string {
 func (*SendInputResponse) ProtoMessage() {}
 
 func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[15]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -903,7 +1183,7 @@ func (x *SendInputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendInputResponse.ProtoReflect.Descriptor instead.
 func (*SendInputResponse) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{15}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{21}
 }
 
 type InputEvent struct {
@@ -923,7 +1203,7 @@ type InputEvent struct {
 
 func (x *InputEvent) Reset() {
 	*x = InputEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[16]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -935,7 +1215,7 @@ func (x *InputEvent) String() string {
 func (*InputEvent) ProtoMessage() {}
 
 func (x *InputEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[16]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -948,7 +1228,7 @@ func (x *InputEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputEvent.ProtoReflect.Descriptor instead.
 func (*InputEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{16}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *InputEvent) GetEvent() isInputEvent_Event {
@@ -1062,7 +1342,7 @@ type TouchEvent struct {
 
 func (x *TouchEvent) Reset() {
 	*x = TouchEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[17]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1074,7 +1354,7 @@ func (x *TouchEvent) String() string {
 func (*TouchEvent) ProtoMessage() {}
 
 func (x *TouchEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[17]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1087,7 +1367,7 @@ func (x *TouchEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TouchEvent.ProtoReflect.Descriptor instead.
 func (*TouchEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{17}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *TouchEvent) GetX() float64 {
@@ -1113,7 +1393,7 @@ type TextEvent struct {
 
 func (x *TextEvent) Reset() {
 	*x = TextEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[18]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1125,7 +1405,7 @@ func (x *TextEvent) String() string {
 func (*TextEvent) ProtoMessage() {}
 
 func (x *TextEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[18]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1418,7 @@ func (x *TextEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TextEvent.ProtoReflect.Descriptor instead.
 func (*TextEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{18}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TextEvent) GetValue() string {
@@ -1158,7 +1438,7 @@ type TapEvent struct {
 
 func (x *TapEvent) Reset() {
 	*x = TapEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[19]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1170,7 +1450,7 @@ func (x *TapEvent) String() string {
 func (*TapEvent) ProtoMessage() {}
 
 func (x *TapEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[19]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1183,7 +1463,7 @@ func (x *TapEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TapEvent.ProtoReflect.Descriptor instead.
 func (*TapEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{19}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *TapEvent) GetX() float64 {
@@ -1213,7 +1493,7 @@ type SwipeEvent struct {
 
 func (x *SwipeEvent) Reset() {
 	*x = SwipeEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[20]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1225,7 +1505,7 @@ func (x *SwipeEvent) String() string {
 func (*SwipeEvent) ProtoMessage() {}
 
 func (x *SwipeEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[20]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,7 +1518,7 @@ func (x *SwipeEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SwipeEvent.ProtoReflect.Descriptor instead.
 func (*SwipeEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{20}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *SwipeEvent) GetStartX() float64 {
@@ -1285,7 +1565,7 @@ type WatchEventsRequest struct {
 
 func (x *WatchEventsRequest) Reset() {
 	*x = WatchEventsRequest{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[21]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1297,7 +1577,7 @@ func (x *WatchEventsRequest) String() string {
 func (*WatchEventsRequest) ProtoMessage() {}
 
 func (x *WatchEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[21]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1310,7 +1590,7 @@ func (x *WatchEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchEventsRequest.ProtoReflect.Descriptor instead.
 func (*WatchEventsRequest) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{21}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *WatchEventsRequest) GetSessionId() string {
@@ -1336,7 +1616,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[22]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1348,7 +1628,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[22]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1361,7 +1641,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{22}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *Event) GetSessionId() string {
@@ -1443,7 +1723,7 @@ type StatusEvent struct {
 
 func (x *StatusEvent) Reset() {
 	*x = StatusEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[23]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1455,7 +1735,7 @@ func (x *StatusEvent) String() string {
 func (*StatusEvent) ProtoMessage() {}
 
 func (x *StatusEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[23]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1468,7 +1748,7 @@ func (x *StatusEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusEvent.ProtoReflect.Descriptor instead.
 func (*StatusEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{23}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *StatusEvent) GetPhase() string {
@@ -1488,7 +1768,7 @@ type StoppedEvent struct {
 
 func (x *StoppedEvent) Reset() {
 	*x = StoppedEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[24]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1500,7 +1780,7 @@ func (x *StoppedEvent) String() string {
 func (*StoppedEvent) ProtoMessage() {}
 
 func (x *StoppedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[24]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1513,7 +1793,7 @@ func (x *StoppedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StoppedEvent.ProtoReflect.Descriptor instead.
 func (*StoppedEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{24}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *StoppedEvent) GetReason() string {
@@ -1539,7 +1819,7 @@ type ErrorEvent struct {
 
 func (x *ErrorEvent) Reset() {
 	*x = ErrorEvent{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[25]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1551,7 +1831,7 @@ func (x *ErrorEvent) String() string {
 func (*ErrorEvent) ProtoMessage() {}
 
 func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[25]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1564,7 +1844,7 @@ func (x *ErrorEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorEvent.ProtoReflect.Descriptor instead.
 func (*ErrorEvent) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{25}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ErrorEvent) GetMessage() string {
@@ -1584,7 +1864,7 @@ type WatchVideoRequest struct {
 
 func (x *WatchVideoRequest) Reset() {
 	*x = WatchVideoRequest{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[26]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1596,7 +1876,7 @@ func (x *WatchVideoRequest) String() string {
 func (*WatchVideoRequest) ProtoMessage() {}
 
 func (x *WatchVideoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[26]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1609,7 +1889,7 @@ func (x *WatchVideoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchVideoRequest.ProtoReflect.Descriptor instead.
 func (*WatchVideoRequest) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{26}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *WatchVideoRequest) GetSessionId() string {
@@ -1639,7 +1919,7 @@ type VideoFrame struct {
 
 func (x *VideoFrame) Reset() {
 	*x = VideoFrame{}
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[27]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1651,7 +1931,7 @@ func (x *VideoFrame) String() string {
 func (*VideoFrame) ProtoMessage() {}
 
 func (x *VideoFrame) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[27]
+	mi := &file_proto_simulator_v1_simulator_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1664,7 +1944,7 @@ func (x *VideoFrame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VideoFrame.ProtoReflect.Descriptor instead.
 func (*VideoFrame) Descriptor() ([]byte, []int) {
-	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{27}
+	return file_proto_simulator_v1_simulator_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *VideoFrame) GetSessionId() string {
@@ -1748,7 +2028,27 @@ const file_proto_simulator_v1_simulator_proto_rawDesc = "" +
 	"\x12StopSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\"\x15\n" +
-	"\x13StopSessionResponse\"\x9f\x02\n" +
+	"\x13StopSessionResponse\"M\n" +
+	"\x11InstallAppRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x19\n" +
+	"\bapp_path\x18\x02 \x01(\tR\aappPath\"\x14\n" +
+	"\x12InstallAppResponse\"\xd9\x01\n" +
+	"\x10LaunchAppRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tbundle_id\x18\x02 \x01(\tR\bbundleId\x12=\n" +
+	"\x03env\x18\x03 \x03(\v2+.axe.simulator.v1.LaunchAppRequest.EnvEntryR\x03env\x12\x12\n" +
+	"\x04args\x18\x04 \x03(\tR\x04args\x1a6\n" +
+	"\bEnvEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x13\n" +
+	"\x11LaunchAppResponse\"Q\n" +
+	"\x13TerminateAppRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
+	"\tbundle_id\x18\x02 \x01(\tR\bbundleId\"\x16\n" +
+	"\x14TerminateAppResponse\"\x9f\x02\n" +
 	"\aSession\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1f\n" +
@@ -1830,14 +2130,18 @@ const file_proto_simulator_v1_simulator_proto_rawDesc = "" +
 	"\x16SESSION_STATE_STARTING\x10\x01\x12\x19\n" +
 	"\x15SESSION_STATE_RUNNING\x10\x02\x12\x19\n" +
 	"\x15SESSION_STATE_STOPPED\x10\x03\x12\x18\n" +
-	"\x14SESSION_STATE_FAILED\x10\x042\xc0\x05\n" +
+	"\x14SESSION_STATE_FAILED\x10\x042\xce\a\n" +
 	"\x10SimulatorService\x12K\n" +
 	"\x06Health\x12\x1f.axe.simulator.v1.HealthRequest\x1a .axe.simulator.v1.HealthResponse\x12Z\n" +
 	"\vListDevices\x12$.axe.simulator.v1.ListDevicesRequest\x1a%.axe.simulator.v1.ListDevicesResponse\x12`\n" +
 	"\rCreateSession\x12&.axe.simulator.v1.CreateSessionRequest\x1a'.axe.simulator.v1.CreateSessionResponse\x12L\n" +
 	"\n" +
 	"GetSession\x12#.axe.simulator.v1.GetSessionRequest\x1a\x19.axe.simulator.v1.Session\x12Z\n" +
-	"\vStopSession\x12$.axe.simulator.v1.StopSessionRequest\x1a%.axe.simulator.v1.StopSessionResponse\x12T\n" +
+	"\vStopSession\x12$.axe.simulator.v1.StopSessionRequest\x1a%.axe.simulator.v1.StopSessionResponse\x12W\n" +
+	"\n" +
+	"InstallApp\x12#.axe.simulator.v1.InstallAppRequest\x1a$.axe.simulator.v1.InstallAppResponse\x12T\n" +
+	"\tLaunchApp\x12\".axe.simulator.v1.LaunchAppRequest\x1a#.axe.simulator.v1.LaunchAppResponse\x12]\n" +
+	"\fTerminateApp\x12%.axe.simulator.v1.TerminateAppRequest\x1a&.axe.simulator.v1.TerminateAppResponse\x12T\n" +
 	"\tSendInput\x12\".axe.simulator.v1.SendInputRequest\x1a#.axe.simulator.v1.SendInputResponse\x12N\n" +
 	"\vWatchEvents\x12$.axe.simulator.v1.WatchEventsRequest\x1a\x17.axe.simulator.v1.Event0\x01\x12Q\n" +
 	"\n" +
@@ -1856,7 +2160,7 @@ func file_proto_simulator_v1_simulator_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_simulator_v1_simulator_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_simulator_v1_simulator_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_proto_simulator_v1_simulator_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_proto_simulator_v1_simulator_proto_goTypes = []any{
 	(SessionState)(0),             // 0: axe.simulator.v1.SessionState
 	(*HealthRequest)(nil),         // 1: axe.simulator.v1.HealthRequest
@@ -1872,60 +2176,74 @@ var file_proto_simulator_v1_simulator_proto_goTypes = []any{
 	(*GetSessionRequest)(nil),     // 11: axe.simulator.v1.GetSessionRequest
 	(*StopSessionRequest)(nil),    // 12: axe.simulator.v1.StopSessionRequest
 	(*StopSessionResponse)(nil),   // 13: axe.simulator.v1.StopSessionResponse
-	(*Session)(nil),               // 14: axe.simulator.v1.Session
-	(*SendInputRequest)(nil),      // 15: axe.simulator.v1.SendInputRequest
-	(*SendInputResponse)(nil),     // 16: axe.simulator.v1.SendInputResponse
-	(*InputEvent)(nil),            // 17: axe.simulator.v1.InputEvent
-	(*TouchEvent)(nil),            // 18: axe.simulator.v1.TouchEvent
-	(*TextEvent)(nil),             // 19: axe.simulator.v1.TextEvent
-	(*TapEvent)(nil),              // 20: axe.simulator.v1.TapEvent
-	(*SwipeEvent)(nil),            // 21: axe.simulator.v1.SwipeEvent
-	(*WatchEventsRequest)(nil),    // 22: axe.simulator.v1.WatchEventsRequest
-	(*Event)(nil),                 // 23: axe.simulator.v1.Event
-	(*StatusEvent)(nil),           // 24: axe.simulator.v1.StatusEvent
-	(*StoppedEvent)(nil),          // 25: axe.simulator.v1.StoppedEvent
-	(*ErrorEvent)(nil),            // 26: axe.simulator.v1.ErrorEvent
-	(*WatchVideoRequest)(nil),     // 27: axe.simulator.v1.WatchVideoRequest
-	(*VideoFrame)(nil),            // 28: axe.simulator.v1.VideoFrame
+	(*InstallAppRequest)(nil),     // 14: axe.simulator.v1.InstallAppRequest
+	(*InstallAppResponse)(nil),    // 15: axe.simulator.v1.InstallAppResponse
+	(*LaunchAppRequest)(nil),      // 16: axe.simulator.v1.LaunchAppRequest
+	(*LaunchAppResponse)(nil),     // 17: axe.simulator.v1.LaunchAppResponse
+	(*TerminateAppRequest)(nil),   // 18: axe.simulator.v1.TerminateAppRequest
+	(*TerminateAppResponse)(nil),  // 19: axe.simulator.v1.TerminateAppResponse
+	(*Session)(nil),               // 20: axe.simulator.v1.Session
+	(*SendInputRequest)(nil),      // 21: axe.simulator.v1.SendInputRequest
+	(*SendInputResponse)(nil),     // 22: axe.simulator.v1.SendInputResponse
+	(*InputEvent)(nil),            // 23: axe.simulator.v1.InputEvent
+	(*TouchEvent)(nil),            // 24: axe.simulator.v1.TouchEvent
+	(*TextEvent)(nil),             // 25: axe.simulator.v1.TextEvent
+	(*TapEvent)(nil),              // 26: axe.simulator.v1.TapEvent
+	(*SwipeEvent)(nil),            // 27: axe.simulator.v1.SwipeEvent
+	(*WatchEventsRequest)(nil),    // 28: axe.simulator.v1.WatchEventsRequest
+	(*Event)(nil),                 // 29: axe.simulator.v1.Event
+	(*StatusEvent)(nil),           // 30: axe.simulator.v1.StatusEvent
+	(*StoppedEvent)(nil),          // 31: axe.simulator.v1.StoppedEvent
+	(*ErrorEvent)(nil),            // 32: axe.simulator.v1.ErrorEvent
+	(*WatchVideoRequest)(nil),     // 33: axe.simulator.v1.WatchVideoRequest
+	(*VideoFrame)(nil),            // 34: axe.simulator.v1.VideoFrame
+	nil,                           // 35: axe.simulator.v1.LaunchAppRequest.EnvEntry
 }
 var file_proto_simulator_v1_simulator_proto_depIdxs = []int32{
 	5,  // 0: axe.simulator.v1.ListDevicesResponse.device_types:type_name -> axe.simulator.v1.DeviceType
 	6,  // 1: axe.simulator.v1.DeviceType.runtimes:type_name -> axe.simulator.v1.Runtime
 	8,  // 2: axe.simulator.v1.CreateSessionRequest.app_bundle:type_name -> axe.simulator.v1.AppBundle
 	9,  // 3: axe.simulator.v1.CreateSessionRequest.installed_app:type_name -> axe.simulator.v1.InstalledApp
-	14, // 4: axe.simulator.v1.CreateSessionResponse.session:type_name -> axe.simulator.v1.Session
-	0,  // 5: axe.simulator.v1.Session.state:type_name -> axe.simulator.v1.SessionState
-	17, // 6: axe.simulator.v1.SendInputRequest.input:type_name -> axe.simulator.v1.InputEvent
-	18, // 7: axe.simulator.v1.InputEvent.touch_down:type_name -> axe.simulator.v1.TouchEvent
-	18, // 8: axe.simulator.v1.InputEvent.touch_move:type_name -> axe.simulator.v1.TouchEvent
-	18, // 9: axe.simulator.v1.InputEvent.touch_up:type_name -> axe.simulator.v1.TouchEvent
-	19, // 10: axe.simulator.v1.InputEvent.text:type_name -> axe.simulator.v1.TextEvent
-	20, // 11: axe.simulator.v1.InputEvent.tap:type_name -> axe.simulator.v1.TapEvent
-	21, // 12: axe.simulator.v1.InputEvent.swipe:type_name -> axe.simulator.v1.SwipeEvent
-	24, // 13: axe.simulator.v1.Event.status:type_name -> axe.simulator.v1.StatusEvent
-	25, // 14: axe.simulator.v1.Event.stopped:type_name -> axe.simulator.v1.StoppedEvent
-	26, // 15: axe.simulator.v1.Event.error:type_name -> axe.simulator.v1.ErrorEvent
-	1,  // 16: axe.simulator.v1.SimulatorService.Health:input_type -> axe.simulator.v1.HealthRequest
-	3,  // 17: axe.simulator.v1.SimulatorService.ListDevices:input_type -> axe.simulator.v1.ListDevicesRequest
-	7,  // 18: axe.simulator.v1.SimulatorService.CreateSession:input_type -> axe.simulator.v1.CreateSessionRequest
-	11, // 19: axe.simulator.v1.SimulatorService.GetSession:input_type -> axe.simulator.v1.GetSessionRequest
-	12, // 20: axe.simulator.v1.SimulatorService.StopSession:input_type -> axe.simulator.v1.StopSessionRequest
-	15, // 21: axe.simulator.v1.SimulatorService.SendInput:input_type -> axe.simulator.v1.SendInputRequest
-	22, // 22: axe.simulator.v1.SimulatorService.WatchEvents:input_type -> axe.simulator.v1.WatchEventsRequest
-	27, // 23: axe.simulator.v1.SimulatorService.WatchVideo:input_type -> axe.simulator.v1.WatchVideoRequest
-	2,  // 24: axe.simulator.v1.SimulatorService.Health:output_type -> axe.simulator.v1.HealthResponse
-	4,  // 25: axe.simulator.v1.SimulatorService.ListDevices:output_type -> axe.simulator.v1.ListDevicesResponse
-	10, // 26: axe.simulator.v1.SimulatorService.CreateSession:output_type -> axe.simulator.v1.CreateSessionResponse
-	14, // 27: axe.simulator.v1.SimulatorService.GetSession:output_type -> axe.simulator.v1.Session
-	13, // 28: axe.simulator.v1.SimulatorService.StopSession:output_type -> axe.simulator.v1.StopSessionResponse
-	16, // 29: axe.simulator.v1.SimulatorService.SendInput:output_type -> axe.simulator.v1.SendInputResponse
-	23, // 30: axe.simulator.v1.SimulatorService.WatchEvents:output_type -> axe.simulator.v1.Event
-	28, // 31: axe.simulator.v1.SimulatorService.WatchVideo:output_type -> axe.simulator.v1.VideoFrame
-	24, // [24:32] is the sub-list for method output_type
-	16, // [16:24] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	20, // 4: axe.simulator.v1.CreateSessionResponse.session:type_name -> axe.simulator.v1.Session
+	35, // 5: axe.simulator.v1.LaunchAppRequest.env:type_name -> axe.simulator.v1.LaunchAppRequest.EnvEntry
+	0,  // 6: axe.simulator.v1.Session.state:type_name -> axe.simulator.v1.SessionState
+	23, // 7: axe.simulator.v1.SendInputRequest.input:type_name -> axe.simulator.v1.InputEvent
+	24, // 8: axe.simulator.v1.InputEvent.touch_down:type_name -> axe.simulator.v1.TouchEvent
+	24, // 9: axe.simulator.v1.InputEvent.touch_move:type_name -> axe.simulator.v1.TouchEvent
+	24, // 10: axe.simulator.v1.InputEvent.touch_up:type_name -> axe.simulator.v1.TouchEvent
+	25, // 11: axe.simulator.v1.InputEvent.text:type_name -> axe.simulator.v1.TextEvent
+	26, // 12: axe.simulator.v1.InputEvent.tap:type_name -> axe.simulator.v1.TapEvent
+	27, // 13: axe.simulator.v1.InputEvent.swipe:type_name -> axe.simulator.v1.SwipeEvent
+	30, // 14: axe.simulator.v1.Event.status:type_name -> axe.simulator.v1.StatusEvent
+	31, // 15: axe.simulator.v1.Event.stopped:type_name -> axe.simulator.v1.StoppedEvent
+	32, // 16: axe.simulator.v1.Event.error:type_name -> axe.simulator.v1.ErrorEvent
+	1,  // 17: axe.simulator.v1.SimulatorService.Health:input_type -> axe.simulator.v1.HealthRequest
+	3,  // 18: axe.simulator.v1.SimulatorService.ListDevices:input_type -> axe.simulator.v1.ListDevicesRequest
+	7,  // 19: axe.simulator.v1.SimulatorService.CreateSession:input_type -> axe.simulator.v1.CreateSessionRequest
+	11, // 20: axe.simulator.v1.SimulatorService.GetSession:input_type -> axe.simulator.v1.GetSessionRequest
+	12, // 21: axe.simulator.v1.SimulatorService.StopSession:input_type -> axe.simulator.v1.StopSessionRequest
+	14, // 22: axe.simulator.v1.SimulatorService.InstallApp:input_type -> axe.simulator.v1.InstallAppRequest
+	16, // 23: axe.simulator.v1.SimulatorService.LaunchApp:input_type -> axe.simulator.v1.LaunchAppRequest
+	18, // 24: axe.simulator.v1.SimulatorService.TerminateApp:input_type -> axe.simulator.v1.TerminateAppRequest
+	21, // 25: axe.simulator.v1.SimulatorService.SendInput:input_type -> axe.simulator.v1.SendInputRequest
+	28, // 26: axe.simulator.v1.SimulatorService.WatchEvents:input_type -> axe.simulator.v1.WatchEventsRequest
+	33, // 27: axe.simulator.v1.SimulatorService.WatchVideo:input_type -> axe.simulator.v1.WatchVideoRequest
+	2,  // 28: axe.simulator.v1.SimulatorService.Health:output_type -> axe.simulator.v1.HealthResponse
+	4,  // 29: axe.simulator.v1.SimulatorService.ListDevices:output_type -> axe.simulator.v1.ListDevicesResponse
+	10, // 30: axe.simulator.v1.SimulatorService.CreateSession:output_type -> axe.simulator.v1.CreateSessionResponse
+	20, // 31: axe.simulator.v1.SimulatorService.GetSession:output_type -> axe.simulator.v1.Session
+	13, // 32: axe.simulator.v1.SimulatorService.StopSession:output_type -> axe.simulator.v1.StopSessionResponse
+	15, // 33: axe.simulator.v1.SimulatorService.InstallApp:output_type -> axe.simulator.v1.InstallAppResponse
+	17, // 34: axe.simulator.v1.SimulatorService.LaunchApp:output_type -> axe.simulator.v1.LaunchAppResponse
+	19, // 35: axe.simulator.v1.SimulatorService.TerminateApp:output_type -> axe.simulator.v1.TerminateAppResponse
+	22, // 36: axe.simulator.v1.SimulatorService.SendInput:output_type -> axe.simulator.v1.SendInputResponse
+	29, // 37: axe.simulator.v1.SimulatorService.WatchEvents:output_type -> axe.simulator.v1.Event
+	34, // 38: axe.simulator.v1.SimulatorService.WatchVideo:output_type -> axe.simulator.v1.VideoFrame
+	28, // [28:39] is the sub-list for method output_type
+	17, // [17:28] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_proto_simulator_v1_simulator_proto_init() }
@@ -1937,7 +2255,7 @@ func file_proto_simulator_v1_simulator_proto_init() {
 		(*CreateSessionRequest_AppBundle)(nil),
 		(*CreateSessionRequest_InstalledApp)(nil),
 	}
-	file_proto_simulator_v1_simulator_proto_msgTypes[16].OneofWrappers = []any{
+	file_proto_simulator_v1_simulator_proto_msgTypes[22].OneofWrappers = []any{
 		(*InputEvent_TouchDown)(nil),
 		(*InputEvent_TouchMove)(nil),
 		(*InputEvent_TouchUp)(nil),
@@ -1945,7 +2263,7 @@ func file_proto_simulator_v1_simulator_proto_init() {
 		(*InputEvent_Tap)(nil),
 		(*InputEvent_Swipe)(nil),
 	}
-	file_proto_simulator_v1_simulator_proto_msgTypes[22].OneofWrappers = []any{
+	file_proto_simulator_v1_simulator_proto_msgTypes[28].OneofWrappers = []any{
 		(*Event_Status)(nil),
 		(*Event_Stopped)(nil),
 		(*Event_Error)(nil),
@@ -1956,7 +2274,7 @@ func file_proto_simulator_v1_simulator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_simulator_v1_simulator_proto_rawDesc), len(file_proto_simulator_v1_simulator_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   28,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
