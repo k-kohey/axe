@@ -5,6 +5,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/build"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
@@ -73,6 +74,63 @@ func TestModuleNameForSourceUsesIndexStoreModule(t *testing.T) {
 func TestModuleNameForSourceFallsBack(t *testing.T) {
 	if got := moduleNameForSource("/missing.swift", "App", buildTestCache(map[string]*pb.IndexFileData{})); got != "App" {
 		t.Fatalf("moduleNameForSource fallback = %q, want App", got)
+	}
+}
+
+func TestCompileFullThunkFilesUsesSourceModule(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "FeatureView.swift")
+	if err := os.WriteFile(sourcePath, []byte(`import SwiftUI
+
+struct FeatureView: View {
+    var body: some View {
+        Text("Hello")
+    }
+}
+
+#Preview {
+    FeatureView()
+}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	analysis.ResetCache()
+
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {FilePath: sourcePath, ModuleName: "FeatureUI"},
+	})
+	files := []analysis.FileThunkData{{
+		FileName:   filepath.Base(sourcePath),
+		AbsPath:    sourcePath,
+		ModuleName: "FeatureUI",
+	}}
+	bs := &build.Settings{
+		ModuleName:       "HostApp",
+		BuiltProductsDir: filepath.Join(dir, "Products"),
+		DeploymentTarget: "17.0",
+	}
+	dirs := previewDirs{
+		ProjectDirs: build.ProjectDirs{Build: filepath.Join(dir, "build")},
+		Thunk:       filepath.Join(dir, "thunk"),
+	}
+	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}
+
+	if _, err := compileFullThunkFiles(context.Background(), sourcePath, files, cache, bs, dirs, "0", 0, tc); err != nil {
+		t.Fatal(err)
+	}
+
+	args := strings.Join(tc.compileSwiftArgs, " ")
+	if !strings.Contains(args, "-module-name FeatureUI_PreviewReplacement_FeatureView_0") {
+		t.Fatalf("compile args should use source module, got:\n%s", args)
+	}
+
+	mainPath := filepath.Join(dirs.Thunk, "thunk_0__main.swift")
+	mainContent, err := os.ReadFile(mainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainContent), `@_private(sourceFile: "FeatureView.swift") import FeatureUI`) {
+		t.Fatalf("main thunk should privately import source module, got:\n%s", string(mainContent))
 	}
 }
 

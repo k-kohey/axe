@@ -199,13 +199,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 	ws.mu.Unlock()
 
 	// 3. Fast path: generate thunk → compile → hot-reload.
-	cfg := compileConfigFromSettings(bs)
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, "0", newSourceFile, counter)
-	if err != nil {
-		return fmt.Errorf("thunk: %w", err)
-	}
-
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+	dylibPath, err := compileFullThunkFiles(ctx, newSourceFile, files, cache, bs, dirs, "0", counter, wctx.toolchain)
 	if err != nil {
 		// If context was cancelled (e.g. Ctrl+C), skip retries.
 		if ctx.Err() != nil {
@@ -216,7 +210,7 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		if buildErr := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); buildErr != nil {
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
-		dylibPath, err = codegen.CompileThunk(ctx, thunkPaths, cfg, dirs.Thunk, dirs.Build, counter, newSourceFile, wctx.toolchain)
+		dylibPath, err = compileFullThunkFiles(ctx, newSourceFile, files, cache, bs, dirs, "0", counter, wctx.toolchain)
 		if err != nil {
 			// 5. Full restart as last resort.
 			slog.Warn("Compile still failing after rebuild, performing full restart", "err", err)
@@ -315,13 +309,8 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	selector := ws.previewSelector
 	ws.mu.Unlock()
 
-	thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, selector, sourceFile, counter)
-	if err != nil {
-		return fmt.Errorf("thunk: %w", err)
-	}
-
 	sendWatchStatus(wctx, "compiling_thunk")
-	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, counter, sourceFile, wctx.toolchain)
+	dylibPath, err := compileFullThunkFiles(ctx, sourceFile, files, rebuildCache, bs, dirs, selector, counter, wctx.toolchain)
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
