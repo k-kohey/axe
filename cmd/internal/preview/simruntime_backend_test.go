@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -637,10 +638,8 @@ func waitForParsedEvent(t *testing.T, buf *syncBuffer, timeout time.Duration, ma
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
-		for _, event := range collectEvents(t, buf) {
-			if match(event) {
-				return
-			}
+		if slices.ContainsFunc(collectEvents(t, buf), match) {
+			return
 		}
 		select {
 		case <-deadline:
