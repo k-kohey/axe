@@ -238,11 +238,7 @@ func (sm *StreamManager) compileInitialThunk(ctx context.Context, s *stream, bs 
 		if err != nil {
 			return "", err
 		}
-		thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
-		if err != nil {
-			return "", err
-		}
-		dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
+		dylibPath, err := compileFullThunkFiles(ctx, s.file, files, sm.indexCache.Get(), bs, s.dirs, "0", 0, sm.toolchain)
 		if err != nil {
 			return "", err
 		}

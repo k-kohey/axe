@@ -193,12 +193,7 @@ func Run(opts RunOptions) error {
 			}
 			trackedFiles = tf
 
-			thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, dirs.Thunk, opts.PreviewSelector, opts.SourceFile, 0)
-			if err != nil {
-				return "", err
-			}
-
-			return codegen.CompileThunk(ctx, thunkPaths, compileConfigFromSettings(bs), dirs.Thunk, dirs.Build, 0, opts.SourceFile, tc)
+			return compileFullThunkFiles(ctx, opts.SourceFile, files, indexCache.Get(), bs, dirs, opts.PreviewSelector, 0, tc)
 		},
 		CompileModeMainOnly: func(ctx context.Context) (string, error) {
 			return compileMainOnlyPipeline(ctx, opts.SourceFile, bs, dirs, opts.PreviewSelector, 0, tc)

@@ -132,6 +132,36 @@ func compilePipeline(
 	return dylibPath, nil
 }
 
+func compileFullThunkFiles(
+	ctx context.Context,
+	sourceFile string,
+	files []analysis.FileThunkData,
+	cache *analysis.IndexStoreCache,
+	bs *build.Settings,
+	dirs previewDirs,
+	previewSelector string,
+	counter int,
+	tc ToolchainRunner,
+) (string, error) {
+	if len(files) == 0 {
+		return "", fmt.Errorf("no types found in tracked files")
+	}
+
+	moduleName := moduleNameForSource(sourceFile, bs.ModuleName, cache)
+	thunkPaths, err := codegen.GenerateThunks(files, moduleName, dirs.Thunk, previewSelector, sourceFile, counter)
+	if err != nil {
+		return "", fmt.Errorf("thunk: %w", err)
+	}
+
+	compileCfg := compileConfigFromSettings(bs)
+	compileCfg.ModuleName = moduleName
+	dylibPath, err := codegen.CompileThunk(ctx, thunkPaths, compileCfg, dirs.Thunk, dirs.Build, counter, sourceFile, tc)
+	if err != nil {
+		return "", fmt.Errorf("compile: %w", err)
+	}
+	return dylibPath, nil
+}
+
 func moduleNameForSource(sourceFile, fallback string, cache *analysis.IndexStoreCache) string {
 	if cache == nil {
 		return fallback
