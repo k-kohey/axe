@@ -28,12 +28,19 @@ func WithDeviceSetPath(path string) Option {
 	}
 }
 
+func WithSkipOrphanCleanup(skip bool) Option {
+	return func(m *RuntimeManager) {
+		m.skipOrphanCleanup = skip
+	}
+}
+
 type RuntimeManager struct {
-	mu            sync.Mutex
-	deviceSetPath string
-	simctl        *platform.RealSimctlRunner
-	pool          *platform.DevicePool
-	sessions      map[string]*Session
+	mu                sync.Mutex
+	deviceSetPath     string
+	simctl            *platform.RealSimctlRunner
+	pool              *platform.DevicePool
+	sessions          map[string]*Session
+	skipOrphanCleanup bool
 }
 
 func New(opts ...Option) (*RuntimeManager, error) {
@@ -50,8 +57,10 @@ func New(opts ...Option) (*RuntimeManager, error) {
 		opt(m)
 	}
 	m.pool = platform.NewDevicePool(m.simctl, m.deviceSetPath)
-	if err := m.pool.CleanupOrphans(context.Background()); err != nil {
-		slog.Warn("Failed to clean up orphaned simulator devices", "err", err)
+	if !m.skipOrphanCleanup {
+		if err := m.pool.CleanupOrphans(context.Background()); err != nil {
+			slog.Warn("Failed to clean up orphaned simulator devices", "err", err)
+		}
 	}
 	return m, nil
 }
@@ -73,10 +82,10 @@ func (m *RuntimeManager) ListDevices(ctx context.Context) ([]DeviceType, error) 
 }
 
 func (m *RuntimeManager) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
-	if req.DeviceType == "" {
+	if req.DeviceUDID == "" && req.DeviceType == "" {
 		return nil, fmt.Errorf("device type is required")
 	}
-	if req.Runtime == "" {
+	if req.DeviceUDID == "" && req.Runtime == "" {
 		return nil, fmt.Errorf("runtime is required")
 	}
 	id, err := newSessionID()
@@ -105,22 +114,32 @@ func (m *RuntimeManager) CreateSession(ctx context.Context, req CreateSessionReq
 }
 
 func (m *RuntimeManager) startSession(ctx context.Context, s *Session, req CreateSessionRequest) error {
-	s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "acquiring_device"}})
-	udid, err := m.pool.Acquire(ctx, req.DeviceType, req.Runtime)
-	if err != nil {
-		return fmt.Errorf("acquiring device: %w", err)
+	if req.DeviceUDID != "" {
+		s.deviceUDID = req.DeviceUDID
+	} else {
+		s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "acquiring_device"}})
+		udid, err := m.pool.Acquire(ctx, req.DeviceType, req.Runtime)
+		if err != nil {
+			return fmt.Errorf("acquiring device: %w", err)
+		}
+		s.deviceUDID = udid
 	}
-	s.deviceUDID = udid
 
 	s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "booting"}})
-	bootCompanion, err := bootHeadlessWithRetry(ctx, udid, m.deviceSetPath)
-	if err != nil {
-		return fmt.Errorf("booting simulator: %w", err)
+	if req.NoHeadless {
+		if err := m.simctl.Boot(ctx, s.deviceUDID); err != nil {
+			return fmt.Errorf("booting simulator: %w", err)
+		}
+	} else {
+		bootCompanion, err := bootHeadlessWithRetry(ctx, s.deviceUDID, m.deviceSetPath)
+		if err != nil {
+			return fmt.Errorf("booting simulator: %w", err)
+		}
+		s.bootCompanion = bootCompanion
 	}
-	s.bootCompanion = bootCompanion
 
 	s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "starting_idb"}})
-	idbCompanion, err := idb.Start(udid, m.deviceSetPath)
+	idbCompanion, err := idb.Start(s.deviceUDID, m.deviceSetPath)
 	if err != nil {
 		return fmt.Errorf("starting idb companion: %w", err)
 	}
@@ -254,6 +273,17 @@ func (m *RuntimeManager) SendInput(ctx context.Context, id string, input InputEv
 	return s.sendInput(ctx, input)
 }
 
+func (m *RuntimeManager) Screenshot(ctx context.Context, id string) ([]byte, error) {
+	s, err := m.lookup(id)
+	if err != nil {
+		return nil, err
+	}
+	if s.client == nil {
+		return nil, fmt.Errorf("session is not ready for screenshot")
+	}
+	return s.client.Screenshot(ctx)
+}
+
 func (m *RuntimeManager) SubscribeEvents(ctx context.Context, id string) (<-chan Event, error) {
 	s, err := m.lookup(id)
 	if err != nil {
@@ -361,7 +391,7 @@ func (m *RuntimeManager) cleanupSession(ctx context.Context, s *Session) {
 	if s.bootCompanion != nil {
 		_ = s.bootCompanion.Stop()
 	}
-	if s.deviceUDID != "" {
+	if s.deviceUDID != "" && s.deviceType != "" && s.runtime != "" {
 		if err := m.pool.Release(ctx, s.deviceUDID); err != nil {
 			slog.Debug("failed to release device", "session", s.id, "udid", s.deviceUDID, "err", err)
 		}
@@ -375,8 +405,12 @@ func (m *RuntimeManager) cleanupSessionWithTimeout(parent context.Context, s *Se
 }
 
 func (m *RuntimeManager) watchCompanions(s *Session) {
+	var bootDone <-chan struct{}
+	if s.bootCompanion != nil {
+		bootDone = s.bootCompanion.Done()
+	}
 	select {
-	case <-s.bootCompanion.Done():
+	case <-bootDone:
 		if err := s.bootCompanion.Err(); err != nil {
 			s.publish(Event{SessionID: s.id, Time: time.Now(), Error: &ErrorEvent{Message: err.Error()}})
 		}
@@ -392,7 +426,12 @@ func (m *RuntimeManager) installApp(ctx context.Context, udid, path string) erro
 	if err != nil {
 		return err
 	}
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", m.deviceSetPath, "install", udid, abs).CombinedOutput()
+	args := []string{"simctl"}
+	if m.deviceSetPath != "" {
+		args = append(args, "--set", m.deviceSetPath)
+	}
+	args = append(args, "install", udid, abs)
+	out, err := procgroup.Command(ctx, "xcrun", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("simctl install: %w\n%s", err, out)
 	}
@@ -400,7 +439,12 @@ func (m *RuntimeManager) installApp(ctx context.Context, udid, path string) erro
 }
 
 func (m *RuntimeManager) terminateApp(ctx context.Context, udid, bundleID string) error {
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", m.deviceSetPath, "terminate", udid, bundleID).CombinedOutput()
+	args := []string{"simctl"}
+	if m.deviceSetPath != "" {
+		args = append(args, "--set", m.deviceSetPath)
+	}
+	args = append(args, "terminate", udid, bundleID)
+	out, err := procgroup.Command(ctx, "xcrun", args...).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("simctl terminate: %w\n%s", err, out)
 	}
@@ -411,7 +455,12 @@ func (m *RuntimeManager) launchApp(ctx context.Context, udid, bundleID string, e
 	if bundleID == "" {
 		return nil
 	}
-	launchArgs := append([]string{"simctl", "--set", m.deviceSetPath, "launch", udid, bundleID}, args...)
+	launchArgs := []string{"simctl"}
+	if m.deviceSetPath != "" {
+		launchArgs = append(launchArgs, "--set", m.deviceSetPath)
+	}
+	launchArgs = append(launchArgs, "launch", udid, bundleID)
+	launchArgs = append(launchArgs, args...)
 	cmd := procgroup.Command(ctx, "xcrun", launchArgs...)
 	cmd.Env = os.Environ()
 	for k, v := range env {
@@ -426,7 +475,7 @@ func (m *RuntimeManager) launchApp(ctx context.Context, udid, bundleID string, e
 
 func bootHeadlessWithRetry(ctx context.Context, udid, deviceSetPath string) (*idb.Companion, error) {
 	var lastErr error
-	for attempt := 0; attempt < 4; attempt++ {
+	for range 4 {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

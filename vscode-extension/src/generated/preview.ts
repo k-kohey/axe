@@ -24,7 +24,7 @@ export interface Command {
 
 /**
  * AddStream creates a new preview stream.
- * The CLI allocates a simulator from the device pool based on device_type + runtime.
+ * The CLI allocates a simulator session through simruntime based on device_type + runtime.
  */
 export interface AddStream {
   /** Swift file path to preview */

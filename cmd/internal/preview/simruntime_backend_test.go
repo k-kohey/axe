@@ -26,10 +26,12 @@ type fakeSimRuntimeManager struct {
 	inputs     []simruntime.InputEvent
 	stopped    []string
 	shutdown   bool
+	screenshot []byte
 
 	frames        chan simruntime.VideoFrame
 	events        chan simruntime.Event
 	watchVideoErr error
+	createErr     error
 	installErr    error
 }
 
@@ -54,10 +56,17 @@ func (m *fakeSimRuntimeManager) ListDevices(context.Context) ([]simruntime.Devic
 func (m *fakeSimRuntimeManager) CreateSession(_ context.Context, req simruntime.CreateSessionRequest) (*simruntime.SessionInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.createErr != nil {
+		return nil, m.createErr
+	}
 	m.createReqs = append(m.createReqs, req)
+	udid := req.DeviceUDID
+	if udid == "" {
+		udid = "SIMRUNTIME-UDID"
+	}
 	return &simruntime.SessionInfo{
 		ID:           "session-1",
-		DeviceUDID:   "SIMRUNTIME-UDID",
+		DeviceUDID:   udid,
 		DeviceType:   req.DeviceType,
 		Runtime:      req.Runtime,
 		State:        simruntime.SessionRunning,
@@ -105,6 +114,13 @@ func (m *fakeSimRuntimeManager) SendInput(_ context.Context, _ string, input sim
 	defer m.mu.Unlock()
 	m.inputs = append(m.inputs, input)
 	return nil
+}
+
+func (m *fakeSimRuntimeManager) Screenshot(context.Context, string) ([]byte, error) {
+	if m.screenshot != nil {
+		return m.screenshot, nil
+	}
+	return []byte("fake-png"), nil
 }
 
 func (m *fakeSimRuntimeManager) SubscribeEvents(context.Context, string) (<-chan simruntime.Event, error) {
@@ -224,6 +240,26 @@ func TestStreamManagerWithSimRuntimeRoutesLifecycleVideoInputAndStop(t *testing.
 	}
 	if !foundFrame {
 		t.Fatalf("expected relayed frame event, got %+v", events)
+	}
+}
+
+func TestSimRuntimeInputHandlerTapAndSwipeUseRuntimeEvents(t *testing.T) {
+	runtime := newFakeSimRuntimeManager()
+	handler := newSimRuntimeInputHandler(runtime, "session-1")
+
+	handler.HandleTap(context.Background(), 0.5, 0.25)
+	handler.HandleSwipe(context.Background(), 0.1, 0.2, 0.8, 0.9, 0.5)
+
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.inputs) != 5 {
+		t.Fatalf("runtime inputs = %d, want 5", len(runtime.inputs))
+	}
+	if runtime.inputs[0].TouchDown == nil || runtime.inputs[1].TouchUp == nil {
+		t.Fatalf("tap inputs = %+v, %+v; want touch down/up", runtime.inputs[0], runtime.inputs[1])
+	}
+	if runtime.inputs[2].TouchDown == nil || runtime.inputs[3].TouchMove == nil || runtime.inputs[4].TouchUp == nil {
+		t.Fatalf("swipe inputs = %+v, %+v, %+v; want touch down/move/up", runtime.inputs[2], runtime.inputs[3], runtime.inputs[4])
 	}
 }
 

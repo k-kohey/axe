@@ -4,33 +4,12 @@ import (
 	"context"
 	"fmt"
 	"github.com/k-kohey/axe/internal/preview/build"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
-
-// fakeCompanion implements companionProcess for testing.
-type fakeCompanion struct {
-	doneCh  chan struct{}
-	stopped atomic.Bool
-	err     error
-}
-
-func (f *fakeCompanion) Done() <-chan struct{} { return f.doneCh }
-func (f *fakeCompanion) Err() error            { return f.err }
-func (f *fakeCompanion) Stop() error {
-	f.stopped.Store(true)
-	select {
-	case <-f.doneCh:
-		// Already closed.
-	default:
-		close(f.doneCh)
-	}
-	return nil
-}
 
 // newTestStream creates a stream with initialized channels for testing the event loop.
 func newTestStream(id string) *stream {
@@ -56,7 +35,7 @@ func TestStreamLoop_Cancellation(t *testing.T) {
 	s := newTestStream("test-cancel")
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -82,7 +61,7 @@ func TestStreamLoop_SwitchFile(t *testing.T) {
 	s := newTestStream("test-switch")
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -111,7 +90,7 @@ func TestStreamLoop_NextPreview(t *testing.T) {
 	s := newTestStream("test-next")
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -152,7 +131,7 @@ func TestStreamLoop_IDBError(t *testing.T) {
 	s := newTestStream("test-idb-err")
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	idbErrCh := make(chan error, 1)
 	idbErrCh <- fmt.Errorf("video stream died")

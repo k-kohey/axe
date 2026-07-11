@@ -79,8 +79,8 @@ func readProtocolCommands(ctx context.Context, ew *protocol.EventWriter, ch chan
 
 // dispatchStdinCommands reads stdinCommands and dispatches them to typed channels.
 // Commands that require multi-step HID operations (tap, swipe) are handled
-// directly via the HIDHandler since they cannot be represented as pb.Input.
-func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *protocol.HIDHandler,
+// directly via inputHandler since they cannot be represented as pb.Input.
+func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid inputHandler,
 	switchFileCh chan<- string, nextPreviewCh chan<- struct{}, forceRebuildCh chan<- struct{}, inputCh chan<- *pb.Input) {
 	for {
 		select {
@@ -107,9 +107,13 @@ func dispatchStdinCommands(ctx context.Context, cmdCh <-chan stdinCommand, hid *
 				default:
 				}
 			case "tap":
-				hid.HandleTap(ctx, cmd.X, cmd.Y)
+				if hid != nil {
+					hid.HandleTap(ctx, cmd.X, cmd.Y)
+				}
 			case "swipe":
-				hid.HandleSwipe(ctx, cmd.StartX, cmd.StartY, cmd.EndX, cmd.EndY, cmd.Duration)
+				if hid != nil {
+					hid.HandleSwipe(ctx, cmd.StartX, cmd.StartY, cmd.EndX, cmd.EndY, cmd.Duration)
+				}
 			case "text":
 				select {
 				case inputCh <- &pb.Input{Event: &pb.Input_Text{Text: &pb.TextEvent{Value: cmd.Value}}}:

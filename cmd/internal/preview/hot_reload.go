@@ -14,7 +14,6 @@ import (
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
@@ -69,8 +68,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	} else {
 		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
-		directHID, _ := hid.(*protocol.HIDHandler)
-		go dispatchStdinCommands(ctx, cmdCh, directHID, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
+		go dispatchStdinCommands(ctx, cmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	}
 
 	cfg := &eventLoopConfig{

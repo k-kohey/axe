@@ -275,7 +275,11 @@ func (s *HTTPServer) handleVideo(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	mw := multipart.NewWriter(w)
-	defer mw.Close()
+	defer func() {
+		if err := mw.Close(); err != nil {
+			slog.Debug("failed to close multipart writer", "err", err)
+		}
+	}()
 	w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary="+mw.Boundary())
 	for {
 		select {
@@ -300,7 +304,11 @@ func (s *HTTPServer) handleVideo(w http.ResponseWriter, r *http.Request, session
 }
 
 func readProto(r *http.Request, msg proto.Message) error {
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			slog.Debug("failed to close request body", "err", err)
+		}
+	}()
 	data, err := readAll(r.Context(), r)
 	if err != nil {
 		return err
@@ -322,7 +330,10 @@ func writeProto(w http.ResponseWriter, msg proto.Message) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(data)
+	//nolint:gosec // data is produced by protojson marshaling, not user-provided HTML.
+	if _, err := w.Write(data); err != nil {
+		slog.Debug("failed to write response", "err", err)
+	}
 }
 
 func writeError(w http.ResponseWriter, code int, err error) {

@@ -16,7 +16,7 @@ import (
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview"
 	"github.com/k-kohey/axe/internal/preview/build"
-	"golang.org/x/sync/errgroup"
+	"github.com/k-kohey/axe/internal/simruntime"
 )
 
 // errBox wraps an error so that atomic.Pointer stores a uniform concrete type,
@@ -50,10 +50,10 @@ func effectiveConcurrency(totalFiles, requested int) int {
 	return limit
 }
 
-// setupReportPool creates a DevicePool and resolves the default device spec.
-func setupReportPool(ctx context.Context) (pool *platform.DevicePool, setPath, deviceType, runtime string, err error) {
+// setupReportRuntime creates a shared simulator runtime and resolves the default device spec.
+func setupReportRuntime() (runtime simruntime.Manager, setPath, deviceType, runtimeID string, err error) {
 	simctl := &platform.RealSimctlRunner{}
-	deviceType, runtime, err = platform.FindDefaultDeviceSpec(simctl)
+	deviceType, runtimeID, err = platform.FindDefaultDeviceSpec(simctl)
 	if err != nil {
 		return nil, "", "", "", fmt.Errorf("resolving device spec: %w", err)
 	}
@@ -64,11 +64,11 @@ func setupReportPool(ctx context.Context) (pool *platform.DevicePool, setPath, d
 	if mkErr := os.MkdirAll(setPath, 0o755); mkErr != nil {
 		return nil, "", "", "", fmt.Errorf("creating device set directory: %w", mkErr)
 	}
-	pool = platform.NewDevicePool(simctl, setPath)
-	if cleanErr := pool.CleanupOrphans(ctx); cleanErr != nil {
-		slog.Warn("orphan cleanup failed", "err", cleanErr)
+	runtime, err = simruntime.New(simruntime.WithDeviceSetPath(setPath))
+	if err != nil {
+		return nil, "", "", "", err
 	}
-	return pool, setPath, deviceType, runtime, nil
+	return runtime, setPath, deviceType, runtimeID, nil
 }
 
 // allFailures builds a captureResult where every preview in every file is failed.
@@ -89,45 +89,23 @@ func allFailures(blocks []fileBlocks, err error) captureResult {
 }
 
 // runParallelCapture orchestrates multi-simulator capture.
-// It creates a DevicePool, pre-warms the build cache, acquires devices,
-// and dispatches file-level jobs to worker goroutines.
+// It pre-warms the build cache and dispatches file-level jobs to worker goroutines.
 func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBlocks,
 	preparer *build.Preparer, failFast bool) captureResult {
 
-	// 1. DevicePool setup
-	pool, setPath, deviceType, runtime, err := setupReportPool(ctx)
+	// 1. Runtime setup
+	runtime, setPath, deviceType, runtimeID, err := setupReportRuntime()
 	if err != nil {
 		return allFailures(blocks, err)
 	}
-	defer pool.ShutdownAll(context.Background())
-	defer pool.GarbageCollect(context.Background())
+	defer runtime.Shutdown(context.Background())
 
-	// 2. Build prewarm + device acquisition in parallel
+	// 2. Build prewarm
 	conc := effectiveConcurrency(len(blocks), opts.Concurrency)
 	slog.Info("parallel capture", "concurrency", conc, "files", len(blocks))
 
-	devices := make([]string, conc)
-	{
-		g, gctx := errgroup.WithContext(ctx)
-		// Prewarm build cache
-		g.Go(func() error {
-			_, err := preparer.Prepare(gctx)
-			return err
-		})
-		// Acquire devices concurrently
-		for i := range conc {
-			g.Go(func() error {
-				udid, err := pool.Acquire(gctx, deviceType, runtime)
-				if err != nil {
-					return err
-				}
-				devices[i] = udid
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			return allFailures(blocks, err)
-		}
+	if _, err := preparer.Prepare(ctx); err != nil {
+		return allFailures(blocks, err)
 	}
 
 	// 3. Queue creation + job submission
@@ -156,28 +134,26 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 	var firstErr atomic.Pointer[errBox] // for failFast
 
 	for workerIdx := range conc {
-		wg.Add(1)
-		udid := devices[workerIdx]
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Create a PreviewSession per worker. Build is cached by Preparer,
 			// so only Boot + Install + Loader run per worker.
 			br, tc, ar, fc := preview.DefaultSessionRunners()
 			sess, sessErr := preview.NewPreviewSession(ctx, preview.SessionConfig{
-				PC:            opts.PC,
-				DeviceUDID:    udid,
-				DeviceSetPath: setPath,
-				Preparer:      preparer,
-				ReuseBuild:    opts.ReuseBuild,
-				BuildRunner:   br,
-				Toolchain:     tc,
-				AppRunner:     ar,
-				Copier:        fc,
+				PC:             opts.PC,
+				DeviceType:     deviceType,
+				Runtime:        runtimeID,
+				DeviceSetPath:  setPath,
+				Preparer:       preparer,
+				ReuseBuild:     opts.ReuseBuild,
+				BuildRunner:    br,
+				Toolchain:      tc,
+				AppRunner:      ar,
+				Copier:         fc,
+				RuntimeManager: runtime,
 			})
 			if sessErr != nil {
 				slog.Error("worker session creation failed",
-					"worker", workerIdx, "udid", udid, "err", sessErr)
+					"worker", workerIdx, "err", sessErr)
 				// Drain the queue: mark all remaining jobs as failed.
 				for {
 					job := queue.Dequeue()
@@ -286,7 +262,7 @@ func runParallelCapture(ctx context.Context, opts ReportOptions, blocks []fileBl
 				// File succeeded.
 				queue.Finish()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

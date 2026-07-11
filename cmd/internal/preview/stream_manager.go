@@ -15,23 +15,6 @@ import (
 	"github.com/k-kohey/axe/internal/simruntime"
 )
 
-// DevicePoolInterface abstracts DevicePool for testability.
-type DevicePoolInterface interface {
-	Acquire(ctx context.Context, deviceType, runtime string) (string, error)
-	Release(ctx context.Context, udid string) error
-	ShutdownAll(ctx context.Context)
-	CleanupOrphans(ctx context.Context) error
-	GarbageCollect(ctx context.Context)
-}
-
-// companionProcess abstracts idb.Companion for testability.
-// Both boot and idb companions satisfy this interface.
-type companionProcess interface {
-	Done() <-chan struct{}
-	Err() error
-	Stop() error
-}
-
 // stream represents a single preview stream's state.
 type stream struct {
 	id               string
@@ -90,7 +73,6 @@ func (s *stream) sendStopped(ew *protocol.EventWriter, reason, message, diagnost
 type StreamManager struct {
 	mu      sync.Mutex
 	streams map[string]*stream
-	pool    DevicePoolInterface
 	runtime simruntime.Manager
 	ew      *protocol.EventWriter
 
@@ -126,31 +108,23 @@ type StreamManager struct {
 
 	// StreamLauncher is called per-stream in a goroutine.
 	// It should block until the stream ends (context cancelled or error).
-	// The default implementation performs the full preview lifecycle
-	// (boot, build, install, launch, watch). Tests override this with a fake.
+	// The default implementation performs the full preview lifecycle through
+	// simruntime (boot, build, install, launch, watch). Tests override this with a fake.
 	StreamLauncher func(ctx context.Context, sm *StreamManager, s *stream)
-}
-
-// NewStreamManager creates a StreamManager with the default stream launcher.
-func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
-	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
-	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
-	return newStreamManager(pool, nil, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
 }
 
 // NewRuntimeStreamManager creates a StreamManager backed by simruntime.Manager.
 func NewRuntimeStreamManager(runtime simruntime.Manager, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
 	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
-	return newStreamManager(nil, runtime, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
+	return newStreamManager(runtime, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
 }
 
-func newStreamManager(pool DevicePoolInterface, runtime simruntime.Manager, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
+func newStreamManager(runtime simruntime.Manager, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
 	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
-		pool:          pool,
 		runtime:       runtime,
 		ew:            ew,
 		strict:        strict,
@@ -364,14 +338,6 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 			return
 		}
 
-		// Release the device back to pool.
-		if s.deviceUDID != "" && sm.pool != nil {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := sm.pool.Release(releaseCtx, s.deviceUDID); err != nil {
-				slog.Warn("Failed to release device", "streamId", s.id, "udid", s.deviceUDID, "err", err)
-			}
-			releaseCancel()
-		}
 	})
 }
 
@@ -384,7 +350,7 @@ func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamMan
 	s.sendStopped(sm.ew, "internal_error", "simruntime manager is required for serve streams", "")
 }
 
-// StopAll stops all active streams and shuts down the device pool.
+// StopAll stops all active streams and shuts down the runtime manager.
 func (sm *StreamManager) StopAll() {
 	sm.mu.Lock()
 	streams := make([]*stream, 0, len(sm.streams))
@@ -410,8 +376,6 @@ func (sm *StreamManager) StopAll() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	if sm.runtime != nil {
 		sm.runtime.Shutdown(shutdownCtx)
-	} else if sm.pool != nil {
-		sm.pool.ShutdownAll(shutdownCtx)
 	}
 	shutdownCancel()
 }

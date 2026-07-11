@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	"github.com/k-kohey/axe/internal/preview/runner"
+	"github.com/k-kohey/axe/internal/simruntime"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -19,21 +19,19 @@ import (
 type SessionConfig struct {
 	PC               build.ProjectConfig
 	DeviceUDID       string
+	DeviceType       string
+	Runtime          string
 	DeviceSetPath    string
 	IsExternalDevice bool
 	NoHeadless       bool
 	Preparer         *build.Preparer
 	ReuseBuild       bool
 
-	BuildRunner BuildRunner
-	Toolchain   ToolchainRunner
-	AppRunner   AppRunner
-	Copier      FileCopier
-
-	// BootFunc overrides the default boot function for testing.
-	// When nil, bootWithRetry is used for axe-managed devices,
-	// or simctl.Boot for external devices.
-	BootFunc func(ctx context.Context, udid, setPath string, headless bool) (companionProcess, error)
+	BuildRunner    BuildRunner
+	Toolchain      ToolchainRunner
+	AppRunner      AppRunner
+	Copier         FileCopier
+	RuntimeManager simruntime.Manager
 }
 
 // CaptureRequest describes a single preview capture within an existing session.
@@ -50,11 +48,13 @@ type CaptureRequest struct {
 // concurrently on the same session. Each parallel worker should create its
 // own session.
 type PreviewSession struct {
-	cfg           SessionConfig
-	dirs          previewDirs
-	bs            *build.Settings
-	bootCompanion companionProcess // nil for external devices
-	loaderPath    string
+	cfg         SessionConfig
+	dirs        previewDirs
+	bs          *build.Settings
+	loaderPath  string
+	runtime     simruntime.Manager
+	sessionID   string
+	ownsRuntime bool
 
 	// Hot-reload state (mutable, not goroutine-safe).
 	reloadCounter int  // incremented after each successful reload/launch
@@ -64,12 +64,26 @@ type PreviewSession struct {
 // NewPreviewSession creates a PreviewSession by running Build and Boot in parallel,
 // then installing the app and compiling the loader.
 func NewPreviewSession(ctx context.Context, cfg SessionConfig) (*PreviewSession, error) {
-	dirs, err := newPreviewDirs(cfg.PC.PrimaryPath(), cfg.DeviceUDID)
-	if err != nil {
-		return nil, fmt.Errorf("preview dirs: %w", err)
+	runtime := cfg.RuntimeManager
+	ownsRuntime := false
+	if runtime == nil {
+		var err error
+		runtime, err = simruntime.New(
+			simruntime.WithDeviceSetPath(cfg.DeviceSetPath),
+			simruntime.WithSkipOrphanCleanup(cfg.DeviceSetPath == ""),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("creating simulator runtime: %w", err)
+		}
+		ownsRuntime = true
 	}
 
-	// Parallel: Build + Boot
+	projDirs, err := build.NewProjectDirs(cfg.PC.PrimaryPath())
+	if err != nil {
+		return nil, fmt.Errorf("preview project dirs: %w", err)
+	}
+
+	// Parallel: Build + runtime session creation.
 	g, gctx := errgroup.WithContext(ctx)
 
 	var bs *build.Settings
@@ -79,7 +93,7 @@ func NewPreviewSession(ctx context.Context, cfg SessionConfig) (*PreviewSession,
 		if cfg.Preparer != nil {
 			result, bErr = cfg.Preparer.Prepare(gctx)
 		} else {
-			result, bErr = build.Prepare(gctx, cfg.PC, dirs.ProjectDirs, cfg.ReuseBuild, cfg.BuildRunner)
+			result, bErr = build.Prepare(gctx, cfg.PC, projDirs, cfg.ReuseBuild, cfg.BuildRunner)
 		}
 		if bErr != nil {
 			return fmt.Errorf("build: %w", bErr)
@@ -88,80 +102,71 @@ func NewPreviewSession(ctx context.Context, cfg SessionConfig) (*PreviewSession,
 		return nil
 	})
 
-	var bootComp companionProcess
+	var info *simruntime.SessionInfo
 	g.Go(func() error {
-		if cfg.IsExternalDevice {
-			simctl := &platform.RealSimctlRunner{}
-			bootCtx, bootCancel := context.WithTimeout(gctx, 30*time.Second)
-			defer bootCancel()
-			if bErr := simctl.Boot(bootCtx, cfg.DeviceUDID); bErr != nil {
-				return fmt.Errorf("booting simulator (external): %w", bErr)
-			}
-			return nil
+		req := simruntime.CreateSessionRequest{
+			DeviceType: cfg.DeviceType,
+			Runtime:    cfg.Runtime,
+			DeviceUDID: cfg.DeviceUDID,
+			NoHeadless: cfg.NoHeadless || cfg.IsExternalDevice,
 		}
-		if cfg.BootFunc != nil {
-			var bErr error
-			bootComp, bErr = cfg.BootFunc(gctx, cfg.DeviceUDID, cfg.DeviceSetPath, !cfg.NoHeadless)
-			if bErr != nil {
-				return fmt.Errorf("booting simulator: %w", bErr)
-			}
-			return nil
+		var createErr error
+		info, createErr = runtime.CreateSession(gctx, req)
+		if createErr != nil {
+			return fmt.Errorf("creating simulator session: %w", createErr)
 		}
-		comp, bErr := bootWithRetry(gctx, cfg.DeviceUDID, cfg.DeviceSetPath, !cfg.NoHeadless)
-		if bErr != nil {
-			return fmt.Errorf("booting simulator: %w", bErr)
-		}
-		bootComp = comp
 		return nil
 	})
 
 	if err := g.Wait(); err != nil {
-		// Prevent companion leak on partial failure.
-		if bootComp != nil {
-			if stopErr := bootComp.Stop(); stopErr != nil {
-				slog.Debug("Failed to stop boot companion after session init failure", "err", stopErr)
-			}
+		if info != nil {
+			_ = runtime.StopSession(context.Background(), info.ID)
+		}
+		if ownsRuntime {
+			runtime.Shutdown(context.Background())
 		}
 		return nil, err
 	}
 
-	// Verify the simulator didn't crash immediately after boot.
-	if bootComp != nil {
-		select {
-		case <-bootComp.Done():
-			return nil, fmt.Errorf("simulator crashed immediately after boot: %w", bootComp.Err())
-		default:
+	dirs, err := newPreviewDirs(cfg.PC.PrimaryPath(), info.DeviceUDID)
+	if err != nil {
+		_ = runtime.StopSession(context.Background(), info.ID)
+		if ownsRuntime {
+			runtime.Shutdown(context.Background())
 		}
+		return nil, fmt.Errorf("preview dirs: %w", err)
 	}
 
 	// Sequential: Install + Loader (requires both Build result and Boot completion)
-	terminateApp(ctx, bs, cfg.DeviceUDID, cfg.DeviceSetPath, cfg.AppRunner)
+	appRunner := newSimRuntimeAppRunner(runtime, info.ID)
+	terminateApp(ctx, bs, info.DeviceUDID, cfg.DeviceSetPath, appRunner)
 
-	if _, err := installApp(ctx, bs, dirs, cfg.DeviceUDID, cfg.DeviceSetPath, cfg.AppRunner, cfg.Copier); err != nil {
-		if bootComp != nil {
-			if stopErr := bootComp.Stop(); stopErr != nil {
-				slog.Debug("Failed to stop boot companion after install failure", "err", stopErr)
-			}
+	if _, err := installApp(ctx, bs, dirs, info.DeviceUDID, cfg.DeviceSetPath, appRunner, cfg.Copier); err != nil {
+		_ = runtime.StopSession(context.Background(), info.ID)
+		if ownsRuntime {
+			runtime.Shutdown(context.Background())
 		}
 		return nil, fmt.Errorf("install: %w", err)
 	}
 
 	loaderPath, err := codegen.CompileLoader(ctx, dirs.Loader, bs.DeploymentTarget, cfg.Toolchain)
 	if err != nil {
-		if bootComp != nil {
-			if stopErr := bootComp.Stop(); stopErr != nil {
-				slog.Debug("Failed to stop boot companion after loader compile failure", "err", stopErr)
-			}
+		_ = runtime.StopSession(context.Background(), info.ID)
+		if ownsRuntime {
+			runtime.Shutdown(context.Background())
 		}
 		return nil, fmt.Errorf("compile loader: %w", err)
 	}
 
+	cfg.DeviceUDID = info.DeviceUDID
 	return &PreviewSession{
-		cfg:           cfg,
-		dirs:          dirs,
-		bs:            bs,
-		bootCompanion: bootComp,
-		loaderPath:    loaderPath,
+		cfg:         cfg,
+		dirs:        dirs,
+		bs:          bs,
+		loaderPath:  loaderPath,
+		runtime:     runtime,
+		sessionID:   info.ID,
+		ownsRuntime: ownsRuntime,
 	}, nil
 }
 
@@ -211,9 +216,10 @@ func (s *PreviewSession) CapturePreview(ctx context.Context, req CaptureRequest)
 // coldStart terminates any running app, launches fresh, waits for the loader
 // socket, then explicitly asks the loader to mount the preview dylib.
 func (s *PreviewSession) coldStart(ctx context.Context, dylibPath string) error {
-	terminateApp(ctx, s.bs, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner)
+	appRunner := newSimRuntimeAppRunner(s.runtime, s.sessionID)
+	terminateApp(ctx, s.bs, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, appRunner)
 
-	if err := launchWithHotReload(ctx, s.bs, s.loaderPath, dylibPath, s.dirs.Socket, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner); err != nil {
+	if err := launchWithHotReload(ctx, s.bs, s.loaderPath, dylibPath, s.dirs.Socket, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, appRunner); err != nil {
 		return fmt.Errorf("launch: %w", err)
 	}
 
@@ -228,21 +234,27 @@ func (s *PreviewSession) coldStart(ctx context.Context, dylibPath string) error 
 	return nil
 }
 
-// Close terminates the app, removes the socket, and stops the boot companion.
+func (s *PreviewSession) Screenshot(ctx context.Context) ([]byte, error) {
+	return s.runtime.Screenshot(ctx, s.sessionID)
+}
+
+// Close terminates the app, removes the socket, and stops the runtime session.
 func (s *PreviewSession) Close() {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	terminateApp(cleanupCtx, s.bs, s.cfg.DeviceUDID, s.cfg.DeviceSetPath, s.cfg.AppRunner)
+	if s.runtime != nil && s.sessionID != "" {
+		if err := s.runtime.StopSession(cleanupCtx, s.sessionID); err != nil {
+			slog.Debug("Failed to stop preview runtime session", "sessionId", s.sessionID, "err", err)
+		}
+	}
 
 	if err := os.Remove(s.dirs.Socket); err != nil && !os.IsNotExist(err) {
 		slog.Debug("Failed to remove socket", "path", s.dirs.Socket, "err", err)
 	}
 
-	if s.bootCompanion != nil {
-		if err := s.bootCompanion.Stop(); err != nil {
-			slog.Debug("Failed to stop boot companion", "err", err)
-		}
+	if s.ownsRuntime && s.runtime != nil {
+		s.runtime.Shutdown(cleanupCtx)
 	}
 }
 

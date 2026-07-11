@@ -256,7 +256,7 @@ func captureWithSession(ctx context.Context, sess *preview.PreviewSession,
 	err := sess.CapturePreview(ctx, preview.CaptureRequest{
 		SourceFile:      file,
 		PreviewSelector: strconv.Itoa(previewIndex),
-		OnReady: func(ctx context.Context, device, setPath string) error {
+		OnReady: func(ctx context.Context, _, _ string) error {
 			if renderDelay > 0 {
 				select {
 				case <-ctx.Done():
@@ -264,7 +264,7 @@ func captureWithSession(ctx context.Context, sess *preview.PreviewSession,
 				case <-time.After(renderDelay):
 				}
 			}
-			data, err := platform.Screenshot(ctx, device, setPath)
+			data, err := sess.Screenshot(ctx)
 			if err != nil {
 				return err
 			}

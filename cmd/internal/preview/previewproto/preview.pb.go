@@ -183,7 +183,7 @@ func (*Command_Input) isCommand_Payload() {}
 func (*Command_ForceRebuild) isCommand_Payload() {}
 
 // AddStream creates a new preview stream.
-// The CLI allocates a simulator from the device pool based on device_type + runtime.
+// The CLI allocates a simulator session through simruntime based on device_type + runtime.
 type AddStream struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	File          string                 `protobuf:"bytes,1,opt,name=file,proto3" json:"file,omitempty"`                               // Swift file path to preview

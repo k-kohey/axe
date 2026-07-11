@@ -16,60 +16,8 @@ import (
 	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
+	"github.com/k-kohey/axe/internal/simruntime"
 )
-
-// fakeDevicePool implements DevicePoolInterface for testing.
-type fakeDevicePool struct {
-	mu          sync.Mutex
-	nextID      int
-	acquired    map[string]bool // UDID → in-use
-	released    []string        // UDIDs that were released
-	shutdownAll bool
-
-	acquireErr error
-	releaseErr error
-}
-
-func newFakeDevicePool() *fakeDevicePool {
-	return &fakeDevicePool{
-		acquired: make(map[string]bool),
-	}
-}
-
-func (p *fakeDevicePool) Acquire(_ context.Context, _, _ string) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.acquireErr != nil {
-		return "", p.acquireErr
-	}
-	p.nextID++
-	udid := fmt.Sprintf("FAKE-%d", p.nextID)
-	p.acquired[udid] = true
-	return udid, nil
-}
-
-func (p *fakeDevicePool) Release(_ context.Context, udid string) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.releaseErr != nil {
-		return p.releaseErr
-	}
-	delete(p.acquired, udid)
-	p.released = append(p.released, udid)
-	return nil
-}
-
-func (p *fakeDevicePool) ShutdownAll(_ context.Context) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.shutdownAll = true
-}
-
-func (p *fakeDevicePool) CleanupOrphans(_ context.Context) error {
-	return nil
-}
-
-func (p *fakeDevicePool) GarbageCollect(_ context.Context) {}
 
 // parsedEvent is a loosely-typed event representation for test assertions.
 // We parse the JSON Lines output generically because the EventWriter now uses protojson,
@@ -133,20 +81,20 @@ func nopRunners() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLi
 // newTestStreamManagerWithRunners creates a StreamManager with nop runners and
 // the default stream launcher. Tests that need a custom launcher should set
 // sm.StreamLauncher after calling this.
-func newTestStreamManagerWithRunners(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
+func newTestStreamManagerWithRunners(ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
 	pc := ProjectConfig{}
 	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
-	return NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
+	return NewRuntimeStreamManager(newFakeSimRuntimeManager(), ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
 }
 
 // newTestStreamManager creates a StreamManager with a fake launcher that acquires
 // a device, sends a "booting" status event, and blocks until ctx is cancelled.
-func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *StreamManager {
+func newTestStreamManager(runtime *fakeSimRuntimeManager, ew *protocol.EventWriter) *StreamManager {
 	br, tc, ar, fc, sl := nopRunners()
 	pc := ProjectConfig{}
 	preparer := build.NewPreparer(pc, build.ProjectDirs{}, false, br)
-	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
+	sm := NewRuntimeStreamManager(runtime, ew, pc, "", preparer, br, tc, ar, fc, sl, false, 32, 0)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -155,12 +103,16 @@ func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *S
 			return
 		}
 
-		udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		info, err := sm.runtime.CreateSession(ctx, simruntime.CreateSessionRequest{
+			DeviceType: s.deviceType,
+			Runtime:    s.runtime,
+		})
 		if err != nil {
-			s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("acquiring device: %v", err), "")
+			s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("creating simruntime session: %v", err), "")
 			return
 		}
-		s.deviceUDID = udid
+		s.deviceUDID = info.DeviceUDID
+		s.runtimeSessionID = info.ID
 
 		if err := sm.ew.Send(&pb.Event{
 			StreamId: s.id,
@@ -174,12 +126,24 @@ func newTestStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter) *S
 	return sm
 }
 
+func startTestRuntimeSession(ctx context.Context, sm *StreamManager, s *stream) (string, error) {
+	info, err := sm.runtime.CreateSession(ctx, simruntime.CreateSessionRequest{
+		DeviceType: s.deviceType,
+		Runtime:    s.runtime,
+	})
+	if err != nil {
+		return "", err
+	}
+	s.deviceUDID = info.DeviceUDID
+	s.runtimeSessionID = info.ID
+	return info.DeviceUDID, nil
+}
+
 func TestStreamManager_AddStream_Events(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 
 	ctx := t.Context()
 
@@ -206,11 +170,11 @@ func TestStreamManager_AddStream_Events(t *testing.T) {
 }
 
 func TestStreamManager_RemoveStream(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	runtime := newFakeSimRuntimeManager()
+	sm := newTestStreamManager(runtime, ew)
 
 	ctx := t.Context()
 
@@ -247,20 +211,18 @@ func TestStreamManager_RemoveStream(t *testing.T) {
 		t.Errorf("expected StreamStopped{reason:removed}, events: %+v", events)
 	}
 
-	// Pool.Release should have been called.
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	if len(pool.released) == 0 {
-		t.Error("expected pool.Release to be called")
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.stopped) == 0 {
+		t.Error("expected runtime.StopSession to be called")
 	}
 }
 
 func TestStreamManager_NonexistentRemove(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 
 	ctx := context.Background()
 
@@ -274,11 +236,10 @@ func TestStreamManager_NonexistentRemove(t *testing.T) {
 }
 
 func TestStreamManager_TwoStreams(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 
 	ctx := t.Context()
 
@@ -308,12 +269,12 @@ func TestStreamManager_TwoStreams(t *testing.T) {
 	}
 }
 
-func TestStreamManager_StopAll_ShutdownsPool(t *testing.T) {
-	pool := newFakeDevicePool()
+func TestStreamManager_StopAll_ShutdownsRuntime(t *testing.T) {
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	runtime := newFakeSimRuntimeManager()
+	sm := newTestStreamManager(runtime, ew)
 
 	ctx := t.Context()
 
@@ -326,20 +287,20 @@ func TestStreamManager_StopAll_ShutdownsPool(t *testing.T) {
 
 	sm.StopAll()
 
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-	if !pool.shutdownAll {
-		t.Error("expected pool.ShutdownAll to be called")
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if !runtime.shutdown {
+		t.Error("expected runtime.Shutdown to be called")
 	}
 }
 
-func TestStreamManager_AcquireError(t *testing.T) {
-	pool := newFakeDevicePool()
-	pool.acquireErr = fmt.Errorf("no devices available")
+func TestStreamManager_CreateSessionError(t *testing.T) {
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	runtime := newFakeSimRuntimeManager()
+	runtime.createErr = fmt.Errorf("no devices available")
+	sm := newTestStreamManager(runtime, ew)
 	defer sm.StopAll()
 
 	ctx := context.Background()
@@ -367,11 +328,10 @@ func TestStreamManager_AcquireError(t *testing.T) {
 }
 
 func TestStreamManager_DuplicateStreamID(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 	defer sm.StopAll()
 
 	ctx := t.Context()
@@ -393,11 +353,10 @@ func TestStreamManager_DuplicateStreamID(t *testing.T) {
 }
 
 func TestStreamManager_EmptyCommand(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 	defer sm.StopAll()
 
 	// Command with no payload should not panic.
@@ -407,13 +366,12 @@ func TestStreamManager_EmptyCommand(t *testing.T) {
 // TestStreamManager_FullLifecycle verifies the fake launcher sends StreamStarted
 // and Frame events, and RemoveStream produces StreamStopped{removed}.
 func TestStreamManager_FullLifecycle(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, err := startTestRuntimeSession(ctx, sm, s)
 		if err != nil {
 			s.sendStopped(sm.ew, "resource_error", err.Error(), "")
 			return
@@ -481,13 +439,12 @@ func TestStreamManager_FullLifecycle(t *testing.T) {
 // TestStreamManager_TwoStreamsWithFrames verifies that two streams receive
 // independent Frame events with correct streamIds.
 func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -529,15 +486,14 @@ func TestStreamManager_TwoStreamsWithFrames(t *testing.T) {
 // sends StreamStopped due to error, and RemoveStream is then called, only one
 // StreamStopped event is produced.
 func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	launcherDone := make(chan struct{})
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		// Simulate an error: send StreamStopped and return.
@@ -585,15 +541,14 @@ func TestStreamManager_LauncherError_NoDoubleStopped(t *testing.T) {
 // TestStreamManager_SwitchFileRouting verifies that SwitchFile commands are
 // delivered to the stream's switchFileCh.
 func TestStreamManager_SwitchFileRouting(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	receivedFile := make(chan string, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -637,15 +592,14 @@ func TestStreamManager_SwitchFileRouting(t *testing.T) {
 // TestStreamManager_InputRouting verifies that Input commands are delivered
 // to the stream's inputCh.
 func TestStreamManager_InputRouting(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	receivedInput := make(chan *pb.Input, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -687,17 +641,17 @@ func TestStreamManager_InputRouting(t *testing.T) {
 }
 
 // TestStreamManager_CleanupOnError verifies that when the launcher exits with
-// error, the device is released and the stream is removed from the map.
+// error, the runtime session is stopped and the stream is removed from the map.
 func TestStreamManager_CleanupOnError(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
+	runtime := sm.runtime.(*fakeSimRuntimeManager)
 
 	launcherDone := make(chan struct{})
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 		s.sendStopped(sm.ew, "build_error", "failed", "")
 		close(launcherDone)
@@ -718,12 +672,11 @@ func TestStreamManager_CleanupOnError(t *testing.T) {
 	// Wait for runStream's defer to complete cleanup.
 	waitForStreamCount(t, sm, 0, 2*time.Second)
 
-	// Device should be released.
-	pool.mu.Lock()
-	released := len(pool.released)
-	pool.mu.Unlock()
-	if released == 0 {
-		t.Error("expected pool.Release to be called after launcher error")
+	runtime.mu.Lock()
+	stopped := len(runtime.stopped)
+	runtime.mu.Unlock()
+	if stopped == 0 {
+		t.Error("expected runtime.StopSession to be called after launcher error")
 	}
 
 	// Stream should be self-removed from map.
@@ -740,15 +693,14 @@ func TestStreamManager_CleanupOnError(t *testing.T) {
 // TestStreamManager_NextPreviewRouting verifies that NextPreview commands are
 // delivered to the stream's nextPreviewCh.
 func TestStreamManager_NextPreviewRouting(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	received := make(chan struct{}, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -790,15 +742,14 @@ func TestStreamManager_NextPreviewRouting(t *testing.T) {
 // TestStreamManager_ForceRebuildRouting verifies that ForceRebuild commands are
 // delivered to the stream's forceRebuildCh.
 func TestStreamManager_ForceRebuildRouting(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	received := make(chan struct{}, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -841,11 +792,10 @@ func TestStreamManager_ForceRebuildRouting(t *testing.T) {
 // sharedIndexCache instance from StreamManager. When one stream updates the
 // cache (simulating a rebuild), other streams see the new value.
 func TestStreamManager_SharedIndexCache(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	// Channels for synchronization between test and fake launcher goroutines.
 	streamAReady := make(chan struct{})
@@ -854,7 +804,7 @@ func TestStreamManager_SharedIndexCache(t *testing.T) {
 	streamBResult := make(chan bool, 1) // true if B sees the updated cache
 
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		// Initialize per-stream watchState with the shared cache.
@@ -983,8 +933,7 @@ func TestDegradedStreamLoop_RejectsCommands(t *testing.T) {
 
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	pool := newFakeDevicePool()
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	s := &stream{
 		id:             "degraded-1",
@@ -1045,8 +994,7 @@ func TestDegradedStreamLoop_ExitsOnRuntimeError(t *testing.T) {
 
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
-	pool := newFakeDevicePool()
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	s := &stream{
 		id:             "degraded-runtime-error",
@@ -1111,8 +1059,6 @@ func (a *cleanupCountingAppRunner) Launch(context.Context, string, string, strin
 
 func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	t.Parallel()
-
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
@@ -1130,7 +1076,8 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	}
 
 	_, tc, _, fc, sl := nopRunners()
-	sm := NewStreamManager(pool, ew, pc, "", preparer, br, tc, &cleanupCountingAppRunner{}, fc, sl, false, 32, 0)
+	runtime := newFakeSimRuntimeManager()
+	sm := NewRuntimeStreamManager(runtime, ew, pc, "", preparer, br, tc, &cleanupCountingAppRunner{}, fc, sl, false, 32, 0)
 
 	app := sm.app.(*cleanupCountingAppRunner)
 
@@ -1140,9 +1087,10 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	}
 
 	s := &stream{
-		id:         "stream-cleanup",
-		deviceUDID: "FAKE-1",
-		dirs:       previewDirs{Socket: socketPath},
+		id:               "stream-cleanup",
+		deviceUDID:       "FAKE-1",
+		runtimeSessionID: "session-cleanup",
+		dirs:             previewDirs{Socket: socketPath},
 	}
 
 	var wg sync.WaitGroup
@@ -1156,11 +1104,11 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	if app.terminateCalls.Load() != 1 {
 		t.Fatalf("Terminate called %d times, want 1", app.terminateCalls.Load())
 	}
-	pool.mu.Lock()
-	releasedCount := len(pool.released)
-	pool.mu.Unlock()
-	if releasedCount != 1 {
-		t.Fatalf("pool.Release called %d times, want 1", releasedCount)
+	runtime.mu.Lock()
+	stoppedCount := len(runtime.stopped)
+	runtime.mu.Unlock()
+	if stoppedCount != 1 {
+		t.Fatalf("runtime.StopSession called %d times, want 1", stoppedCount)
 	}
 
 	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {

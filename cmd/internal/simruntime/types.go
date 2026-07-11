@@ -33,6 +33,8 @@ type InstalledApp struct {
 type CreateSessionRequest struct {
 	DeviceType string
 	Runtime    string
+	DeviceUDID string
+	NoHeadless bool
 	Target     LaunchTarget
 }
 
@@ -116,6 +118,7 @@ type Manager interface {
 	LaunchApp(ctx context.Context, id, bundleID string, env map[string]string, args []string) error
 	TerminateApp(ctx context.Context, id, bundleID string) error
 	SendInput(ctx context.Context, id string, input InputEvent) error
+	Screenshot(ctx context.Context, id string) ([]byte, error)
 	SubscribeEvents(ctx context.Context, id string) (<-chan Event, error)
 	WatchVideo(ctx context.Context, id string, fps int) (<-chan VideoFrame, error)
 	Shutdown(ctx context.Context)

@@ -53,6 +53,29 @@ func (h *simRuntimeInputHandler) HandleInput(ctx context.Context, input *pb.Inpu
 	}
 }
 
+func (h *simRuntimeInputHandler) HandleTap(ctx context.Context, x, y float64) {
+	if h == nil {
+		return
+	}
+	h.sendRuntimeInput(ctx, simruntime.InputEvent{TouchDown: &simruntime.Point{X: x, Y: y}})
+	h.sendRuntimeInput(ctx, simruntime.InputEvent{TouchUp: &simruntime.Point{X: x, Y: y}})
+}
+
+func (h *simRuntimeInputHandler) HandleSwipe(ctx context.Context, startX, startY, endX, endY, _ float64) {
+	if h == nil {
+		return
+	}
+	h.sendRuntimeInput(ctx, simruntime.InputEvent{TouchDown: &simruntime.Point{X: startX, Y: startY}})
+	h.sendRuntimeInput(ctx, simruntime.InputEvent{TouchMove: &simruntime.Point{X: endX, Y: endY}})
+	h.sendRuntimeInput(ctx, simruntime.InputEvent{TouchUp: &simruntime.Point{X: endX, Y: endY}})
+}
+
+func (h *simRuntimeInputHandler) sendRuntimeInput(ctx context.Context, input simruntime.InputEvent) {
+	if err := h.manager.SendInput(ctx, h.sessionID, input); err != nil {
+		slog.Warn("simruntime input failed", "sessionId", h.sessionID, "err", err)
+	}
+}
+
 func inputToRuntimeEvent(input *pb.Input) simruntime.InputEvent {
 	switch {
 	case input.GetTouchDown() != nil:

@@ -116,6 +116,10 @@ func (m *fakeManager) SendInput(_ context.Context, id string, input simruntime.I
 	return nil
 }
 
+func (m *fakeManager) Screenshot(context.Context, string) ([]byte, error) {
+	return []byte("fake-png"), nil
+}
+
 func (m *fakeManager) SubscribeEvents(context.Context, string) (<-chan simruntime.Event, error) {
 	return m.events, nil
 }
