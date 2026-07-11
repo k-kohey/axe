@@ -158,7 +158,7 @@ func (m *fakeSimRuntimeManager) Shutdown(context.Context) {
 
 func TestStreamManagerWithSimRuntimeRoutesLifecycleVideoInputAndStop(t *testing.T) {
 	tmpDir := t.TempDir()
-	pc, bs, copier := setupSimRuntimeStreamTestProject(t, tmpDir)
+	pc, bs, _ := setupSimRuntimeStreamTestProject(t, tmpDir)
 	br := &fakeBuildRunner{}
 	preparer := sessionPreparer(t, pc, filepath.Join(tmpDir, "build"), bs)
 	runtime := newFakeSimRuntimeManager()
@@ -166,7 +166,8 @@ func TestStreamManagerWithSimRuntimeRoutesLifecycleVideoInputAndStop(t *testing.
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 	sm := NewRuntimeStreamManager(runtime, ew, pc, filepath.Join(tmpDir, "device-set"),
-		preparer, br, &sessionToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, copier, &errSourceLister{}, false, 32, 0)
+		preparer, br, &sessionToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false, 32, 0)
+	useFastSimRuntimeLauncher(t, sm, bs)
 
 	ctx := t.Context()
 	sm.HandleCommand(ctx, &pb.Command{
@@ -178,10 +179,14 @@ func TestStreamManagerWithSimRuntimeRoutesLifecycleVideoInputAndStop(t *testing.
 		}},
 	})
 
-	waitForEvents(t, &buf, 2, 2*time.Second)
+	waitForParsedEvent(t, &buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStarted != nil
+	})
 
 	runtime.frames <- simruntime.VideoFrame{JPEG: []byte("jpeg-bytes"), Width: 390, Height: 844}
-	waitForEvents(t, &buf, 3, 2*time.Second)
+	waitForParsedEvent(t, &buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.Frame != nil
+	})
 
 	sm.HandleCommand(ctx, &pb.Command{
 		StreamId: "stream-a",
@@ -201,7 +206,9 @@ func TestStreamManagerWithSimRuntimeRoutesLifecycleVideoInputAndStop(t *testing.
 		Payload:  &pb.Command_RemoveStream{RemoveStream: &pb.RemoveStream{}},
 	})
 
-	waitForEvents(t, &buf, 4, 2*time.Second)
+	waitForParsedEvent(t, &buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
@@ -276,9 +283,13 @@ func TestStreamManagerWithSimRuntimeStopsOnRuntimeErrorEvent(t *testing.T) {
 		}},
 	})
 
-	waitForEvents(t, buf, 2, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStarted != nil
+	})
 	runtime.events <- simruntime.Event{SessionID: "session-1", Error: &simruntime.ErrorEvent{Message: "idb died"}}
-	waitForEvents(t, buf, 3, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 	waitForCondition(t, 2*time.Second, func() bool {
 		runtime.mu.Lock()
 		defer runtime.mu.Unlock()
@@ -314,7 +325,9 @@ func TestStreamManagerWithSimRuntimeStopsWhenWatchVideoFails(t *testing.T) {
 		}},
 	})
 
-	waitForEvents(t, buf, 3, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 	waitForCondition(t, 2*time.Second, func() bool {
 		runtime.mu.Lock()
 		defer runtime.mu.Unlock()
@@ -346,9 +359,13 @@ func TestStreamManagerWithSimRuntimeStopsWhenVideoStreamEndsUnexpectedly(t *test
 		}},
 	})
 
-	waitForEvents(t, buf, 2, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStarted != nil
+	})
 	close(runtime.frames)
-	waitForEvents(t, buf, 3, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 
 	assertRuntimeStoppedOnce(t, runtime)
 	assertStoppedMessageContains(t, buf, "video stream ended unexpectedly")
@@ -367,9 +384,13 @@ func TestStreamManagerWithSimRuntimeStopsWhenEventStreamEndsUnexpectedly(t *test
 		}},
 	})
 
-	waitForEvents(t, buf, 2, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStarted != nil
+	})
 	close(runtime.events)
-	waitForEvents(t, buf, 3, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 
 	assertRuntimeStoppedOnce(t, runtime)
 	assertStoppedMessageContains(t, buf, "event stream ended unexpectedly")
@@ -389,7 +410,9 @@ func TestStreamManagerWithSimRuntimeStopsSessionAfterInstallFailure(t *testing.T
 		}},
 	})
 
-	waitForEvents(t, buf, 2, 2*time.Second)
+	waitForParsedEvent(t, buf, 2*time.Second, func(e parsedEvent) bool {
+		return e.StreamID == "stream-a" && e.StreamStopped != nil
+	})
 	waitForCondition(t, 2*time.Second, func() bool {
 		runtime.mu.Lock()
 		defer runtime.mu.Unlock()
@@ -493,8 +516,65 @@ func newSimRuntimeStreamManagerFixture(t *testing.T) (*fakeSimRuntimeManager, *s
 	ew := protocol.NewEventWriter(&buf)
 	sm := NewRuntimeStreamManager(runtime, ew, pc, filepath.Join(tmpDir, "device-set"),
 		preparer, br, &sessionToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, copier, &errSourceLister{}, false, 32, 0)
+	useFastSimRuntimeLauncher(t, sm, bs)
 
 	return runtime, &buf, sm, filepath.Join(tmpDir, "ContentView.swift")
+}
+
+func useFastSimRuntimeLauncher(t *testing.T, sm *StreamManager, bs *build.Settings) {
+	t.Helper()
+	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
+		if err := sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: "booting"}},
+		}); err != nil {
+			return
+		}
+
+		info, err := sm.runtime.CreateSession(ctx, simruntime.CreateSessionRequest{
+			DeviceType: s.deviceType,
+			Runtime:    s.runtime,
+		})
+		if err != nil {
+			s.sendStopped(sm.ew, "resource_error", err.Error(), "")
+			return
+		}
+		s.runtimeSessionID = info.ID
+		s.deviceUDID = info.DeviceUDID
+		s.appRunner = newSimRuntimeAppRunner(sm.runtime, info.ID)
+		s.hid = newSimRuntimeInputHandler(sm.runtime, info.ID)
+
+		dirs, err := newPreviewDirs(sm.pc.PrimaryPath(), info.DeviceUDID)
+		if err != nil {
+			s.sendStopped(sm.ew, "resource_error", err.Error(), "")
+			return
+		}
+		s.dirs = dirs
+
+		if err := sm.runtime.InstallApp(ctx, info.ID, filepath.Join(dirs.Staging, "TestModule.app")); err != nil {
+			s.sendStopped(sm.ew, "install_error", err.Error(), "")
+			return
+		}
+		env := map[string]string{"SIMCTL_CHILD_AXE_PREVIEW_SOCKET_PATH": dirs.Socket}
+		if err := sm.runtime.LaunchApp(ctx, info.ID, "axe."+bs.BundleID, env, nil); err != nil {
+			s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
+			return
+		}
+
+		idbErrCh := make(chan error, 1)
+		go relaySimRuntimeVideo(ctx, sm.runtime, info.ID, sm.ew, s.id, info.DeviceUDID, s.file, idbErrCh)
+		go relaySimRuntimeEvents(ctx, sm.runtime, info.ID, idbErrCh)
+		if err := sm.ew.Send(&pb.Event{
+			StreamId: s.id,
+			Payload:  &pb.Event_StreamStarted{StreamStarted: &pb.StreamStarted{PreviewCount: 1}},
+		}); err != nil {
+			return
+		}
+
+		if err := runDegradedStreamLoop(ctx, s, sm, idbErrCh); err != nil {
+			return
+		}
+	}
 }
 
 func setupSimRuntimeStreamTestProject(t *testing.T, tmpDir string) (ProjectConfig, *build.Settings, FileCopier) {
@@ -547,6 +627,24 @@ func waitForCondition(t *testing.T, timeout time.Duration, ok func() bool) {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for condition")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func waitForParsedEvent(t *testing.T, buf *syncBuffer, timeout time.Duration, match func(parsedEvent) bool) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		for _, event := range collectEvents(t, buf) {
+			if match(event) {
+				return
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for matching event; got %+v", collectEvents(t, buf))
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
