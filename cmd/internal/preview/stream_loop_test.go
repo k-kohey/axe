@@ -148,48 +148,6 @@ func TestStreamLoop_NextPreview(t *testing.T) {
 	}
 }
 
-func TestStreamLoop_BootCrash(t *testing.T) {
-	s := newTestStream("test-crash")
-	var buf syncBuffer
-	ew := protocol.NewEventWriter(&buf)
-	sm := newTestStreamManagerWithRunners(newFakeDevicePool(), ew)
-
-	// Simulate a boot companion that has already died.
-	bootDied := make(chan struct{})
-	close(bootDied)
-	s.bootCompanion = &fakeCompanion{doneCh: bootDied, err: fmt.Errorf("process exited with code 1")}
-
-	ctx := t.Context()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- runStreamLoop(ctx, s, sm, &build.Settings{}, nil)
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Error("expected non-nil error from boot crash")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("runStreamLoop did not exit on boot crash")
-	}
-
-	// Verify StreamStopped was sent.
-	events := filterEvents(collectEvents(t, &buf), "test-crash")
-	var foundStopped bool
-	for _, e := range events {
-		if e.StreamStopped != nil {
-			if reason, ok := e.StreamStopped["reason"].(string); ok && reason == "runtime_error" {
-				foundStopped = true
-			}
-		}
-	}
-	if !foundStopped {
-		t.Errorf("expected StreamStopped{reason:runtime_error}, events: %+v", events)
-	}
-}
-
 func TestStreamLoop_IDBError(t *testing.T) {
 	s := newTestStream("test-idb-err")
 	var buf syncBuffer

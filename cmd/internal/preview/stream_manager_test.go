@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -1041,7 +1040,7 @@ func TestDegradedStreamLoop_RejectsCommands(t *testing.T) {
 	}
 }
 
-func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
+func TestDegradedStreamLoop_ExitsOnRuntimeError(t *testing.T) {
 	t.Parallel()
 
 	var buf syncBuffer
@@ -1049,14 +1048,9 @@ func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
 	pool := newFakeDevicePool()
 	sm := newTestStreamManagerWithRunners(pool, ew)
 
-	bootDied := make(chan struct{})
 	s := &stream{
-		id:       "degraded-boot-crash",
-		degraded: true,
-		bootCompanion: &fakeCompanion{
-			doneCh: bootDied,
-			err:    fmt.Errorf("boot process exited with code 1"),
-		},
+		id:             "degraded-runtime-error",
+		degraded:       true,
 		switchFileCh:   make(chan string, 1),
 		nextPreviewCh:  make(chan struct{}, 1),
 		forceRebuildCh: make(chan struct{}, 1),
@@ -1072,16 +1066,15 @@ func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
 		loopDone <- runDegradedStreamLoop(ctx, s, sm, idbErrCh)
 	}()
 
-	// Simulate boot crash.
-	close(bootDied)
+	idbErrCh <- fmt.Errorf("runtime stream failed")
 
 	select {
 	case err := <-loopDone:
 		if err == nil {
-			t.Fatal("expected error on boot crash, got nil")
+			t.Fatal("expected error on runtime failure, got nil")
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for degraded loop to exit on boot crash")
+		t.Fatal("timed out waiting for degraded loop to exit on runtime failure")
 	}
 
 	// Verify StreamStopped was sent.
@@ -1097,52 +1090,8 @@ func TestDegradedStreamLoop_ExitsOnBootCrash(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected StreamStopped event on boot crash")
+		t.Error("expected StreamStopped event on runtime failure")
 	}
-}
-
-type cleanupCountingCompanion struct {
-	stopCalls atomic.Int32
-	doneCh    chan struct{}
-}
-
-func (c *cleanupCountingCompanion) Done() <-chan struct{} { return c.doneCh }
-func (c *cleanupCountingCompanion) Err() error            { return nil }
-func (c *cleanupCountingCompanion) Stop() error {
-	c.stopCalls.Add(1)
-	select {
-	case <-c.doneCh:
-	default:
-		close(c.doneCh)
-	}
-	return nil
-}
-
-type cleanupCountingIDBClient struct {
-	closeCalls atomic.Int32
-}
-
-func (c *cleanupCountingIDBClient) ScreenSize(context.Context) (int, int, error) { return 0, 0, nil }
-func (c *cleanupCountingIDBClient) VideoStream(context.Context, int) (<-chan []byte, error) {
-	return nil, nil
-}
-func (c *cleanupCountingIDBClient) Tap(context.Context, float64, float64) error { return nil }
-func (c *cleanupCountingIDBClient) Swipe(context.Context, float64, float64, float64, float64, float64) error {
-	return nil
-}
-func (c *cleanupCountingIDBClient) Text(context.Context, string) error { return nil }
-func (c *cleanupCountingIDBClient) Screenshot(context.Context) ([]byte, error) {
-	return nil, nil
-}
-func (c *cleanupCountingIDBClient) OpenHIDStream(context.Context) (idb.HIDStream, error) {
-	return nil, nil
-}
-func (c *cleanupCountingIDBClient) TouchDown(idb.HIDStream, float64, float64) error { return nil }
-func (c *cleanupCountingIDBClient) TouchMove(idb.HIDStream, float64, float64) error { return nil }
-func (c *cleanupCountingIDBClient) TouchUp(idb.HIDStream, float64, float64) error   { return nil }
-func (c *cleanupCountingIDBClient) Close() error {
-	c.closeCalls.Add(1)
-	return nil
 }
 
 type cleanupCountingAppRunner struct {
@@ -1190,16 +1139,10 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 		t.Fatalf("creating socket placeholder: %v", err)
 	}
 
-	idbClient := &cleanupCountingIDBClient{}
-	bootComp := &cleanupCountingCompanion{doneCh: make(chan struct{})}
-	idbComp := &cleanupCountingCompanion{doneCh: make(chan struct{})}
 	s := &stream{
-		id:            "stream-cleanup",
-		deviceUDID:    "FAKE-1",
-		dirs:          previewDirs{Socket: socketPath},
-		idbClient:     idbClient,
-		bootCompanion: bootComp,
-		idbCompanion:  idbComp,
+		id:         "stream-cleanup",
+		deviceUDID: "FAKE-1",
+		dirs:       previewDirs{Socket: socketPath},
 	}
 
 	var wg sync.WaitGroup
@@ -1213,16 +1156,6 @@ func TestStreamManager_CleanupStreamResources_Idempotent(t *testing.T) {
 	if app.terminateCalls.Load() != 1 {
 		t.Fatalf("Terminate called %d times, want 1", app.terminateCalls.Load())
 	}
-	if idbClient.closeCalls.Load() != 1 {
-		t.Fatalf("IDB client Close called %d times, want 1", idbClient.closeCalls.Load())
-	}
-	if idbComp.stopCalls.Load() != 1 {
-		t.Fatalf("idb companion Stop called %d times, want 1", idbComp.stopCalls.Load())
-	}
-	if bootComp.stopCalls.Load() != 1 {
-		t.Fatalf("boot companion Stop called %d times, want 1", bootComp.stopCalls.Load())
-	}
-
 	pool.mu.Lock()
 	releasedCount := len(pool.released)
 	pool.mu.Unlock()

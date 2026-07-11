@@ -51,7 +51,7 @@ func New(opts ...Option) (*RuntimeManager, error) {
 	}
 	m.pool = platform.NewDevicePool(m.simctl, m.deviceSetPath)
 	if err := m.pool.CleanupOrphans(context.Background()); err != nil {
-		return nil, err
+		slog.Warn("Failed to clean up orphaned simulator devices", "err", err)
 	}
 	return m, nil
 }

@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -20,7 +21,30 @@ import (
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/runner"
 	"github.com/k-kohey/axe/internal/preview/watch"
+	"github.com/k-kohey/axe/internal/simruntime"
 )
+
+type serveDeps struct {
+	in         io.Reader
+	out        io.Writer
+	runners    func() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister)
+	newRuntime func(deviceSetPath string) (simruntime.Manager, error)
+	newWatcher func(context.Context, string, SourceLister) (*watch.SharedWatcher, error)
+}
+
+func defaultServeDeps() serveDeps {
+	return serveDeps{
+		in:      os.Stdin,
+		out:     os.Stdout,
+		runners: defaultRunners,
+		newRuntime: func(deviceSetPath string) (simruntime.Manager, error) {
+			return simruntime.New(simruntime.WithDeviceSetPath(deviceSetPath))
+		},
+		newWatcher: func(ctx context.Context, watchRoot string, sl SourceLister) (*watch.SharedWatcher, error) {
+			return watch.NewSharedWatcher(ctx, watchRoot, sl)
+		},
+	}
+}
 
 // stepper tracks the current step number and total for progress output.
 type stepper struct {
@@ -485,7 +509,11 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	ew := protocol.NewEventWriter(os.Stdout)
+	return runServeWithDeps(ctx, pc, strict, maxThunkFiles, preThunkDepth, defaultServeDeps())
+}
+
+func runServeWithDeps(ctx context.Context, pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int, deps serveDeps) error {
+	ew := protocol.NewEventWriter(deps.out)
 
 	// Advertise the protocol version to the extension.
 	if err := ew.Send(&pb.Event{
@@ -504,13 +532,12 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 		return fmt.Errorf("creating device set directory: %w", err)
 	}
 
-	pool := platform.NewDevicePool(&platform.RealSimctlRunner{}, deviceSetPath)
-
-	if err := pool.CleanupOrphans(ctx); err != nil {
-		slog.Warn("Failed to clean up orphaned devices", "err", err)
+	runtime, err := deps.newRuntime(deviceSetPath)
+	if err != nil {
+		return fmt.Errorf("creating simulator runtime: %w", err)
 	}
 
-	br, tc, ar, fc, sl := defaultRunners()
+	br, tc, ar, fc, sl := deps.runners()
 
 	projDirs, err := build.NewProjectDirs(pc.PrimaryPath())
 	if err != nil {
@@ -518,10 +545,10 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 	}
 	preparer := build.NewPreparer(pc, projDirs, true, br)
 
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
+	sm := NewRuntimeStreamManager(runtime, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
 
 	// Start shared file watcher for all streams.
-	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
+	watcher, err := deps.newWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}
@@ -530,10 +557,9 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.
-	runCommandLoop(ctx, os.Stdin, ew, sm)
+	runCommandLoop(ctx, deps.in, ew, sm)
 
 	sm.StopAll()
-	pool.GarbageCollect(ctx)
 
 	return nil
 }
