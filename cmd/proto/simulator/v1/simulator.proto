@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package axe.simulator.v1;
+
+option go_package = "github.com/k-kohey/axe/pkg/simulatorapi/v1;simulatorv1";
+
+service SimulatorService {
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc GetSession(GetSessionRequest) returns (Session);
+  rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
+  rpc InstallApp(InstallAppRequest) returns (InstallAppResponse);
+  rpc LaunchApp(LaunchAppRequest) returns (LaunchAppResponse);
+  rpc TerminateApp(TerminateAppRequest) returns (TerminateAppResponse);
+  rpc SendInput(SendInputRequest) returns (SendInputResponse);
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+  rpc WatchVideo(WatchVideoRequest) returns (stream VideoFrame);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+}
+
+message ListDevicesRequest {}
+
+message ListDevicesResponse {
+  repeated DeviceType device_types = 1;
+}
+
+message DeviceType {
+  string identifier = 1;
+  string name = 2;
+  repeated Runtime runtimes = 3;
+}
+
+message Runtime {
+  string identifier = 1;
+  string name = 2;
+}
+
+message CreateSessionRequest {
+  string device_type = 1;
+  string runtime = 2;
+  oneof launch_target {
+    AppBundle app_bundle = 10;
+    InstalledApp installed_app = 11;
+  }
+}
+
+message AppBundle {
+  string path = 1;
+  string bundle_id = 2;
+}
+
+message InstalledApp {
+  string bundle_id = 1;
+}
+
+message CreateSessionResponse {
+  Session session = 1;
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message StopSessionRequest {
+  string session_id = 1;
+}
+
+message StopSessionResponse {}
+
+message InstallAppRequest {
+  string session_id = 1;
+  string app_path = 2;
+}
+
+message InstallAppResponse {}
+
+message LaunchAppRequest {
+  string session_id = 1;
+  string bundle_id = 2;
+  map<string, string> env = 3;
+  repeated string args = 4;
+}
+
+message LaunchAppResponse {}
+
+message TerminateAppRequest {
+  string session_id = 1;
+  string bundle_id = 2;
+}
+
+message TerminateAppResponse {}
+
+message Session {
+  string session_id = 1;
+  string device_udid = 2;
+  string device_type = 3;
+  string runtime = 4;
+  SessionState state = 5;
+  string bundle_id = 6;
+  int32 screen_width = 7;
+  int32 screen_height = 8;
+}
+
+enum SessionState {
+  SESSION_STATE_UNSPECIFIED = 0;
+  SESSION_STATE_STARTING = 1;
+  SESSION_STATE_RUNNING = 2;
+  SESSION_STATE_STOPPED = 3;
+  SESSION_STATE_FAILED = 4;
+}
+
+message SendInputRequest {
+  string session_id = 1;
+  InputEvent input = 2;
+}
+
+message SendInputResponse {}
+
+message InputEvent {
+  oneof event {
+    TouchEvent touch_down = 1;
+    TouchEvent touch_move = 2;
+    TouchEvent touch_up = 3;
+    TextEvent text = 4;
+    TapEvent tap = 5;
+    SwipeEvent swipe = 6;
+  }
+}
+
+message TouchEvent {
+  double x = 1;
+  double y = 2;
+}
+
+message TextEvent {
+  string value = 1;
+}
+
+message TapEvent {
+  double x = 1;
+  double y = 2;
+}
+
+message SwipeEvent {
+  double start_x = 1;
+  double start_y = 2;
+  double end_x = 3;
+  double end_y = 4;
+  double duration_seconds = 5;
+}
+
+message WatchEventsRequest {
+  string session_id = 1;
+}
+
+message Event {
+  string session_id = 1;
+  int64 timestamp_unix_ms = 2;
+  oneof payload {
+    StatusEvent status = 10;
+    StoppedEvent stopped = 11;
+    ErrorEvent error = 12;
+  }
+}
+
+message StatusEvent {
+  string phase = 1;
+}
+
+message StoppedEvent {
+  string reason = 1;
+  string message = 2;
+}
+
+message ErrorEvent {
+  string message = 1;
+}
+
+message WatchVideoRequest {
+  string session_id = 1;
+  int32 fps = 2;
+}
+
+message VideoFrame {
+  string session_id = 1;
+  bytes jpeg = 2;
+  int32 width = 3;
+  int32 height = 4;
+  int64 timestamp_unix_ms = 5;
+}

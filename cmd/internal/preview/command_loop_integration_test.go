@@ -12,11 +12,10 @@ import (
 )
 
 func TestRunCommandLoop_DispatchesToStreamManager(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 
 	input := `{"streamId":"stream-a","addStream":{"file":"HogeView.swift","deviceType":"iPhone16,1","runtime":"iOS-18-0"}}
 `
@@ -47,15 +46,14 @@ func TestRunCommandLoop_DispatchesToStreamManager(t *testing.T) {
 }
 
 func TestRunCommandLoop_MultipleCommands(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 
 	receivedFile := make(chan string, 1)
 	sm.StreamLauncher = func(ctx context.Context, sm *StreamManager, s *stream) {
-		udid, _ := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
+		udid, _ := startTestRuntimeSession(ctx, sm, s)
 		s.deviceUDID = udid
 
 		_ = sm.ew.Send(&pb.Event{
@@ -104,11 +102,10 @@ func TestRunCommandLoop_MultipleCommands(t *testing.T) {
 }
 
 func TestRunCommandLoop_SkipsInvalidJSON(t *testing.T) {
-	pool := newFakeDevicePool()
 	var buf syncBuffer
 	ew := protocol.NewEventWriter(&buf)
 
-	sm := newTestStreamManager(pool, ew)
+	sm := newTestStreamManager(newFakeSimRuntimeManager(), ew)
 
 	input := `not valid json
 {"streamId":"stream-a","addStream":{"file":"HogeView.swift","deviceType":"iPhone16,1","runtime":"iOS-18-0"}}
@@ -139,11 +136,10 @@ func TestRunCommandLoop_SkipsInvalidJSON(t *testing.T) {
 }
 
 func TestRunCommandLoop_SendsProtocolErrorForInvalidJSON(t *testing.T) {
-	pool := newFakeDevicePool()
 	var eventBuf syncBuffer
 	ew := protocol.NewEventWriter(&eventBuf)
 
-	sm := newTestStreamManagerWithRunners(pool, ew)
+	sm := newTestStreamManagerWithRunners(ew)
 	sm.StreamLauncher = func(ctx context.Context, _ *StreamManager, _ *stream) {
 		<-ctx.Done()
 	}

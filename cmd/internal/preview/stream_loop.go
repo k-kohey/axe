@@ -8,7 +8,6 @@ import (
 
 	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
@@ -22,7 +21,7 @@ type eventLoopConfig struct {
 	dirs       previewDirs
 	wctx       watchContext
 	ws         *watchState
-	hid        *protocol.HIDHandler
+	hid        inputHandler
 
 	// Event sources (receive-only channels).
 	// A nil channel blocks forever in select, effectively disabling that case.
@@ -177,14 +176,9 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 		ew:            sm.ew,
 		build:         sm.build,
 		toolchain:     sm.toolchain,
-		app:           sm.app,
+		app:           streamAppRunner(s, sm.app),
 		copier:        sm.copier,
 		sources:       sm.sources,
-	}
-
-	var bootDiedCh <-chan struct{}
-	if s.bootCompanion != nil {
-		bootDiedCh = s.bootCompanion.Done()
 	}
 
 	cfg := &eventLoopConfig{
@@ -201,13 +195,6 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 		forceRebuildCh: s.forceRebuildCh,
 		inputCh:        s.inputCh,
 		idbErrCh:       idbErrCh,
-		bootDiedCh:     bootDiedCh,
-		bootErr: func() error {
-			if s.bootCompanion != nil {
-				return s.bootCompanion.Err()
-			}
-			return nil
-		},
 		onFatal: func(reason, message string) {
 			s.sendStopped(sm.ew, reason, message, "")
 		},
@@ -216,8 +203,15 @@ func runStreamLoop(ctx context.Context, s *stream, sm *StreamManager,
 	return runEventLoop(ctx, cfg)
 }
 
+func streamAppRunner(s *stream, fallback AppRunner) AppRunner {
+	if s.appRunner != nil {
+		return s.appRunner
+	}
+	return fallback
+}
+
 // runDegradedStreamLoop handles a degraded stream where hot-reload is unavailable.
-// Only Input events and fatal events (boot crash, idb error) are processed.
+// Only Input events and fatal runtime events are processed.
 // SwitchFile, NextPreview, and ForceRebuild commands are rejected with a
 // "degraded" status re-send to inform the extension.
 func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, idbErrCh <-chan error) error {
@@ -228,11 +222,6 @@ func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, id
 		}); err != nil {
 			slog.Warn("Failed to re-send degraded status", "streamId", s.id, "err", err)
 		}
-	}
-
-	var bootDiedCh <-chan struct{}
-	if s.bootCompanion != nil {
-		bootDiedCh = s.bootCompanion.Done()
 	}
 
 	for {
@@ -256,16 +245,6 @@ func runDegradedStreamLoop(ctx context.Context, s *stream, sm *StreamManager, id
 			if s.hid != nil {
 				s.hid.HandleInput(ctx, input)
 			}
-
-		case <-bootDiedCh:
-			msg := "simulator crashed unexpectedly"
-			if s.bootCompanion != nil {
-				if err := s.bootCompanion.Err(); err != nil {
-					msg = fmt.Sprintf("simulator crashed: %v", err)
-				}
-			}
-			s.sendStopped(sm.ew, "runtime_error", msg, "")
-			return fmt.Errorf("boot companion died")
 
 		case err, ok := <-idbErrCh:
 			if ok && err != nil {

@@ -5,45 +5,26 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/k-kohey/axe/internal/idb"
-	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
-	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
+	"github.com/k-kohey/axe/internal/simruntime"
 )
-
-// DevicePoolInterface abstracts DevicePool for testability.
-type DevicePoolInterface interface {
-	Acquire(ctx context.Context, deviceType, runtime string) (string, error)
-	Release(ctx context.Context, udid string) error
-	ShutdownAll(ctx context.Context)
-	CleanupOrphans(ctx context.Context) error
-	GarbageCollect(ctx context.Context)
-}
-
-// companionProcess abstracts idb.Companion for testability.
-// Both boot and idb companions satisfy this interface.
-type companionProcess interface {
-	Done() <-chan struct{}
-	Err() error
-	Stop() error
-}
 
 // stream represents a single preview stream's state.
 type stream struct {
-	id         string
-	file       string
-	deviceType string
-	runtime    string
-	deviceUDID string
-	cancel     context.CancelFunc
-	done       chan struct{} // closed when stream goroutine exits
+	id               string
+	file             string
+	deviceType       string
+	runtime          string
+	deviceUDID       string
+	runtimeSessionID string
+	cancel           context.CancelFunc
+	done             chan struct{} // closed when stream goroutine exits
 
 	// degraded is true when the stream launched using main-only thunk fallback.
 	// Hot-reload is not available in this mode.
@@ -57,13 +38,11 @@ type stream struct {
 	fileChangeCh   chan string // from shared watcher
 
 	// Runtime state (set during stream initialization in the launcher).
-	dirs          previewDirs
-	bootCompanion companionProcess
-	idbCompanion  companionProcess
-	idbClient     idb.IDBClient
-	hid           *protocol.HIDHandler
-	ws            *watchState
-	loaderPath    string
+	dirs       previewDirs
+	hid        inputHandler
+	appRunner  AppRunner
+	ws         *watchState
+	loaderPath string
 
 	// Prevents duplicate StreamStopped events.
 	stoppedOnce sync.Once
@@ -94,7 +73,7 @@ func (s *stream) sendStopped(ew *protocol.EventWriter, reason, message, diagnost
 type StreamManager struct {
 	mu      sync.Mutex
 	streams map[string]*stream
-	pool    DevicePoolInterface
+	runtime simruntime.Manager
 	ew      *protocol.EventWriter
 
 	// strict mode disables degraded fallback.
@@ -129,18 +108,24 @@ type StreamManager struct {
 
 	// StreamLauncher is called per-stream in a goroutine.
 	// It should block until the stream ends (context cancelled or error).
-	// The default implementation performs the full preview lifecycle
-	// (boot, build, install, launch, watch). Tests override this with a fake.
+	// The default implementation performs the full preview lifecycle through
+	// simruntime (boot, build, install, launch, watch). Tests override this with a fake.
 	StreamLauncher func(ctx context.Context, sm *StreamManager, s *stream)
 }
 
-// NewStreamManager creates a StreamManager with the default stream launcher.
-func NewStreamManager(pool DevicePoolInterface, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
+// NewRuntimeStreamManager creates a StreamManager backed by simruntime.Manager.
+func NewRuntimeStreamManager(runtime simruntime.Manager, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
+	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
+	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
+	return newStreamManager(runtime, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
+}
+
+func newStreamManager(runtime simruntime.Manager, ew *protocol.EventWriter, pc ProjectConfig, deviceSetPath string,
 	preparer *build.Preparer, br BuildRunner, tc ToolchainRunner, ar AppRunner, fc FileCopier, sl SourceLister,
 	strict bool, maxThunkFiles, preThunkDepth int) *StreamManager {
 	sm := &StreamManager{
 		streams:       make(map[string]*stream),
-		pool:          pool,
+		runtime:       runtime,
 		ew:            ew,
 		strict:        strict,
 		pc:            pc,
@@ -296,7 +281,7 @@ func (sm *StreamManager) handleInput(streamID string, input *pb.Input) {
 // and coordinated cleanup.
 func (sm *StreamManager) runStream(ctx context.Context, s *stream) {
 	defer close(s.done)
-	defer s.cancel() // Ensure launcher goroutines (e.g. RelayVideoStreamEvents) stop on normal return.
+	defer s.cancel() // Ensure launcher goroutines stop on normal return.
 	defer sm.cleanupStreamResources(s)
 	defer func() {
 		// Self-remove from map. If handleRemoveStream already deleted us,
@@ -328,7 +313,11 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 		if s.deviceUDID != "" {
 			if p := sm.preparer.Cached(); p != nil {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, sm.app)
+				appRunner := sm.app
+				if s.appRunner != nil {
+					appRunner = s.appRunner
+				}
+				terminateApp(cleanupCtx, p.Settings, s.deviceUDID, sm.deviceSetPath, appRunner)
 				cleanupCancel()
 			}
 		}
@@ -340,363 +329,28 @@ func (sm *StreamManager) cleanupStreamResources(s *stream) {
 			}
 		}
 
-		// Close idb gRPC client.
-		if s.idbClient != nil {
-			if err := s.idbClient.Close(); err != nil {
-				slog.Debug("Failed to close idb client", "streamId", s.id, "err", err)
+		if s.runtimeSessionID != "" && sm.runtime != nil {
+			stopCtx, stopCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := sm.runtime.StopSession(stopCtx, s.runtimeSessionID); err != nil {
+				slog.Warn("Failed to stop simruntime session", "streamId", s.id, "sessionId", s.runtimeSessionID, "err", err)
 			}
+			stopCancel()
+			return
 		}
 
-		// Stop idb companion (video/HID).
-		if s.idbCompanion != nil {
-			if err := s.idbCompanion.Stop(); err != nil {
-				slog.Debug("Failed to stop idb companion", "streamId", s.id, "err", err)
-			}
-		}
-
-		// Stop boot companion (simulator).
-		if s.bootCompanion != nil {
-			if err := s.bootCompanion.Stop(); err != nil {
-				slog.Debug("Failed to stop boot companion", "streamId", s.id, "err", err)
-			}
-		}
-
-		// Release the device back to pool.
-		if s.deviceUDID != "" {
-			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := sm.pool.Release(releaseCtx, s.deviceUDID); err != nil {
-				slog.Warn("Failed to release device", "streamId", s.id, "udid", s.deviceUDID, "err", err)
-			}
-			releaseCancel()
-		}
 	})
 }
 
 // defaultStreamLauncher is the production stream lifecycle.
-// Steps: Boot → Build → Install → Launch → Video relay → event loop.
 func (sm *StreamManager) defaultStreamLauncher(ctx context.Context, _ *StreamManager, s *stream) {
-	sendStatus := func(phase string) {
-		if err := sm.ew.Send(&pb.Event{StreamId: s.id, Payload: &pb.Event_StreamStatus{StreamStatus: &pb.StreamStatus{Phase: phase}}}); err != nil {
-			slog.Warn("Failed to send StreamStatus", "streamId", s.id, "phase", phase, "err", err)
-		}
-	}
-
-	// 1. Acquire a device from pool.
-	sendStatus("booting")
-
-	udid, err := sm.pool.Acquire(ctx, s.deviceType, s.runtime)
-	if err != nil {
-		s.sendStopped(sm.ew, "resource_error", fmt.Sprintf("acquiring device: %v", err), "")
+	if sm.runtime != nil {
+		sm.simruntimeStreamLauncher(ctx, s)
 		return
 	}
-	s.deviceUDID = udid
-
-	// 2. Create per-stream preview directories.
-	dirs, err := newPreviewDirs(sm.pc.PrimaryPath(), udid)
-	if err != nil {
-		s.sendStopped(sm.ew, "resource_error", err.Error(), "")
-		return
-	}
-	s.dirs = dirs
-
-	launcherCtx, launcherCancel := context.WithCancel(ctx)
-	defer launcherCancel()
-
-	type bootResult struct {
-		companion companionProcess
-		err       error
-	}
-	type compileResult struct {
-		bs           *build.Settings
-		depGraph     *analysis.DependencyGraph
-		trackedFiles []string
-		dylibPath    string
-		degraded     bool
-		buildFailed  bool
-		buildDiag    string
-		err          error
-	}
-
-	bootResCh := make(chan bootResult, 1)
-	compileResCh := make(chan compileResult, 1)
-
-	// 3. Boot simulator in parallel with build/compile preparation.
-	go func() {
-		var res bootResult
-		res.companion, res.err = bootWithRetry(launcherCtx, udid, sm.deviceSetPath, true)
-		if res.err != nil {
-			res.err = fmt.Errorf("booting simulator: %w", res.err)
-		}
-		bootResCh <- res
-	}()
-
-	// 4. Build + compile path (runs in parallel with boot).
-	go func() {
-		res := compileResult{}
-
-		// Prepare: fetch settings + build (if needed) + extract compiler paths.
-		// Preparer caches the result so only the first stream pays the cost.
-		prepared, err := sm.preparer.Prepare(launcherCtx)
-		if err != nil {
-			res.buildFailed = true
-			res.buildDiag = err.Error()
-			res.err = fmt.Errorf("build failed")
-			compileResCh <- res
-			return
-		}
-		// Clone Settings so that each stream has an independent copy.
-		// ExtractCompilerPaths mutates slice fields, so sharing the pointer
-		// across concurrent streams would cause a data race.
-		bs := prepared.Settings.Clone()
-		res.bs = bs
-		builtThisLaunch := prepared.Built
-
-		if !builtThisLaunch {
-			sendStatus("reusing_build")
-			slog.Info("Reusing previous app build artifacts for stream launch", "streamId", s.id, "buildDir", s.dirs.Build)
-		} else {
-			sendStatus("building")
-		}
-
-		projectRoot := filepath.Dir(sm.pc.PrimaryPath())
-		compileAttempt := func() (*analysis.DependencyGraph, []string, string, error) {
-			sendStatus("compiling_thunk")
-			// Load (or refresh) the shared Index Store cache. The first stream to
-			// build populates it; subsequent streams reuse the same instance.
-			cache, cacheErr := analysis.LoadIndexStore(launcherCtx, s.dirs.IndexStorePath(), projectRoot)
-			if cacheErr != nil && launcherCtx.Err() == nil {
-				slog.Warn("Index store cache unavailable for stream",
-					"streamId", s.id, "err", cacheErr)
-			}
-			sm.indexCache.Set(cache)
-
-			depGraph, _, err := analysis.ResolveTransitiveDependencies(launcherCtx, s.file, sm.indexCache.Get())
-			if err != nil && launcherCtx.Err() == nil {
-				slog.Warn("Failed to resolve dependencies, proceeding with target only",
-					"streamId", s.id, "err", err)
-			}
-			trackedFiles := []string{s.file}
-			if depGraph != nil {
-				trackedFiles = append(trackedFiles, depGraph.DepsUpTo(sm.preThunkDepth)...)
-			}
-
-			files, trackedFiles, err := parseAndFilterTrackedFiles(s.file, trackedFiles, sm.indexCache.Get())
-			if err != nil {
-				return nil, nil, "", err
-			}
-
-			thunkPaths, err := codegen.GenerateThunks(files, bs.ModuleName, s.dirs.Thunk, "0", s.file, 0)
-			if err != nil {
-				return nil, nil, "", err
-			}
-
-			dylibPath, err := codegen.CompileThunk(launcherCtx, thunkPaths, compileConfigFromSettings(bs), s.dirs.Thunk, s.dirs.Build, 0, s.file, sm.toolchain)
-			if err != nil {
-				return nil, nil, "", err
-			}
-			return depGraph, trackedFiles, dylibPath, nil
-		}
-
-		strategy := NewCompileStrategy(true, true, false, sm.strict)
-		compilers := map[CompileMode]CompileFunc{
-			CompileModeFull: func(_ context.Context) (string, error) {
-				dg, tf, dylibPath, err := compileAttempt()
-				if err != nil && !builtThisLaunch {
-					slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
-					sendStatus("building")
-					if buildErr := build.Run(launcherCtx, sm.pc, s.dirs.ProjectDirs, sm.build); buildErr != nil {
-						res.buildFailed = true
-						res.buildDiag = buildErr.Error()
-						return "", fmt.Errorf("build failed")
-					}
-					build.ExtractCompilerPaths(launcherCtx, bs, s.dirs.ProjectDirs)
-					dg, tf, dylibPath, err = compileAttempt()
-				}
-				if err != nil {
-					return "", err
-				}
-				res.depGraph = dg
-				res.trackedFiles = tf
-				return dylibPath, nil
-			},
-			CompileModeMainOnly: func(_ context.Context) (string, error) {
-				return compileMainOnlyPipeline(launcherCtx, s.file, bs, s.dirs, "0", 0, sm.toolchain)
-			},
-		}
-
-		compileStratResult, stratErr := ExecuteCompileStrategy(launcherCtx, strategy, compilers)
-		if stratErr != nil {
-			res.err = stratErr
-		} else {
-			res.dylibPath = compileStratResult.DylibPath
-			res.degraded = compileStratResult.Degraded
-		}
-		compileResCh <- res
-	}()
-
-	var (
-		bootRes    bootResult
-		compileRes compileResult
-		bootDone   bool
-		compDone   bool
-	)
-	for !bootDone || !compDone {
-		select {
-		case br := <-bootResCh:
-			bootRes = br
-			bootDone = true
-			if br.err != nil {
-				launcherCancel()
-			}
-		case cr := <-compileResCh:
-			compileRes = cr
-			compDone = true
-			if cr.err != nil {
-				launcherCancel()
-			}
-		}
-	}
-	if bootRes.err != nil || compileRes.err != nil {
-		launcherCancel()
-		if bootRes.companion != nil {
-			if stopErr := bootRes.companion.Stop(); stopErr != nil {
-				slog.Debug("Failed to stop boot companion after parallel launch failure", "streamId", s.id, "err", stopErr)
-			}
-		}
-		if bootRes.err != nil {
-			s.sendStopped(sm.ew, "boot_error", bootRes.err.Error(), "")
-			return
-		}
-		if compileRes.buildFailed {
-			s.sendStopped(sm.ew, "build_error", "Build failed", compileRes.buildDiag)
-			return
-		}
-		s.sendStopped(sm.ew, "build_error", compileRes.err.Error(), "")
-		return
-	}
-
-	s.bootCompanion = bootRes.companion
-	s.degraded = compileRes.degraded
-	bs := compileRes.bs
-	depGraph := compileRes.depGraph
-	trackedFiles := compileRes.trackedFiles
-	dylibPath := compileRes.dylibPath
-
-	// Verify the simulator didn't crash immediately after boot.
-	select {
-	case <-s.bootCompanion.Done():
-		s.sendStopped(sm.ew, "boot_error",
-			fmt.Sprintf("simulator crashed immediately after boot: %v", s.bootCompanion.Err()), "")
-		return
-	default:
-	}
-
-	// 8. Install app and compile loader.
-	sendStatus("installing")
-	terminateApp(ctx, bs, udid, sm.deviceSetPath, sm.app)
-
-	if _, err := installApp(ctx, bs, s.dirs, udid, sm.deviceSetPath, sm.app, sm.copier); err != nil {
-		s.sendStopped(sm.ew, "install_error", err.Error(), "")
-		return
-	}
-
-	loaderPath, err := codegen.CompileLoader(ctx, s.dirs.Loader, bs.DeploymentTarget, sm.toolchain)
-	if err != nil {
-		s.sendStopped(sm.ew, "build_error", err.Error(), "")
-		return
-	}
-	s.loaderPath = loaderPath
-
-	// 9. Launch app with hot-reload.
-	sendStatus("running")
-	if err := launchWithHotReload(ctx, bs, loaderPath, dylibPath, s.dirs.Socket, udid, sm.deviceSetPath, sm.app); err != nil {
-		s.sendStopped(sm.ew, "runtime_error", err.Error(), "")
-		return
-	}
-
-	// 10. Count previews and send StreamStarted.
-	previewCount := 0
-	if blocks, parseErr := analysis.PreviewBlocks(s.file); parseErr == nil {
-		previewCount = len(blocks)
-	}
-	if err := sm.ew.Send(&pb.Event{
-		StreamId: s.id,
-		Payload:  &pb.Event_StreamStarted{StreamStarted: &pb.StreamStarted{PreviewCount: int32(previewCount)}},
-	}); err != nil {
-		slog.Warn("Failed to send StreamStarted", "streamId", s.id, "err", err)
-	}
-
-	// 13. Start idb_companion for video relay and HID.
-	companion, err := idb.Start(udid, sm.deviceSetPath)
-	if err != nil {
-		s.sendStopped(sm.ew, "runtime_error", fmt.Sprintf("starting idb_companion: %v", err), "")
-		return
-	}
-	s.idbCompanion = companion
-
-	idbClient, err := idb.NewClient(companion.Address())
-	if err != nil {
-		s.sendStopped(sm.ew, "runtime_error", fmt.Sprintf("connecting to idb_companion: %v", err), "")
-		return
-	}
-	s.idbClient = idbClient
-
-	idbErrCh := make(chan error, 1)
-	voc := &protocol.VideoOutputConfig{
-		EW:       sm.ew,
-		StreamID: s.id,
-		Device:   udid,
-		File:     s.file,
-	}
-	go protocol.RelayVideoStreamEvents(ctx, idbClient, idbErrCh, voc)
-
-	// 14. Create HID handler.
-	if w, h, err := idbClient.ScreenSize(ctx); err == nil {
-		s.hid = protocol.NewHIDHandler(idbClient, w, h)
-	}
-
-	// 15. Degraded mode: skip watcher, run simplified event loop.
-	if s.degraded {
-		sendStatus("degraded")
-		slog.Warn("Stream running in degraded mode: hot-reload not available", "streamId", s.id)
-		if err := runDegradedStreamLoop(ctx, s, sm, idbErrCh); err != nil {
-			slog.Info("Degraded stream loop exited", "streamId", s.id, "err", err)
-		}
-		return
-	}
-
-	// 16. Initialize watch state (full mode only).
-	smInitialLastUsed := make(map[string]int64, len(trackedFiles))
-	for i, f := range trackedFiles {
-		smInitialLastUsed[filepath.Clean(f)] = int64(i + 1)
-	}
-	s.ws = &watchState{
-		reloadCounter:   1, // 0 was used for the initial launch
-		previewSelector: "0",
-		previewIndex:    0,
-		previewCount:    previewCount,
-		skeletonMap:     buildSkeletonMap(trackedFiles),
-		trackedFiles:    trackedFiles,
-		depGraph:        depGraph,
-		indexCache:      sm.indexCache, // shared across all streams
-		maxThunkFiles:   sm.maxThunkFiles,
-		preThunkDepth:   sm.preThunkDepth,
-		usageTick:       int64(len(trackedFiles)),
-		lastUsed:        smInitialLastUsed,
-	}
-
-	// 17. Register with shared watcher for file change notifications.
-	if sm.watcher != nil {
-		sm.watcher.AddListener(s.id, s.fileChangeCh)
-	}
-
-	// 18. Enter the per-stream event loop (blocks until context cancelled or crash).
-	if err := runStreamLoop(ctx, s, sm, bs, idbErrCh); err != nil {
-		slog.Info("Stream loop exited", "streamId", s.id, "err", err)
-	}
+	s.sendStopped(sm.ew, "internal_error", "simruntime manager is required for serve streams", "")
 }
 
-// StopAll stops all active streams and shuts down the device pool.
+// StopAll stops all active streams and shuts down the runtime manager.
 func (sm *StreamManager) StopAll() {
 	sm.mu.Lock()
 	streams := make([]*stream, 0, len(sm.streams))
@@ -720,6 +374,8 @@ func (sm *StreamManager) StopAll() {
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	sm.pool.ShutdownAll(shutdownCtx)
+	if sm.runtime != nil {
+		sm.runtime.Shutdown(shutdownCtx)
+	}
 	shutdownCancel()
 }

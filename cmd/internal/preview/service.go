@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,7 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/k-kohey/axe/internal/idb"
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
@@ -20,7 +20,30 @@ import (
 	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/runner"
 	"github.com/k-kohey/axe/internal/preview/watch"
+	"github.com/k-kohey/axe/internal/simruntime"
 )
+
+type serveDeps struct {
+	in         io.Reader
+	out        io.Writer
+	runners    func() (BuildRunner, ToolchainRunner, AppRunner, FileCopier, SourceLister)
+	newRuntime func(deviceSetPath string) (simruntime.Manager, error)
+	newWatcher func(context.Context, string, SourceLister) (*watch.SharedWatcher, error)
+}
+
+func defaultServeDeps() serveDeps {
+	return serveDeps{
+		in:      os.Stdin,
+		out:     os.Stdout,
+		runners: defaultRunners,
+		newRuntime: func(deviceSetPath string) (simruntime.Manager, error) {
+			return simruntime.New(simruntime.WithDeviceSetPath(deviceSetPath))
+		},
+		newWatcher: func(ctx context.Context, watchRoot string, sl SourceLister) (*watch.SharedWatcher, error) {
+			return watch.NewSharedWatcher(ctx, watchRoot, sl)
+		},
+	}
+}
 
 // stepper tracks the current step number and total for progress output.
 type stepper struct {
@@ -191,46 +214,33 @@ func Run(opts RunOptions) error {
 	}
 	dylibPath := compileResult.DylibPath
 
-	// Boot the simulator.
-	// For external (standard Xcode set) devices, use simctl boot (non-headless)
-	// and skip shutdown on exit since the user may be using the device elsewhere.
-	// For axe-managed devices, use idb_companion via bootWithRetry.
+	// Create a runtime session.
 	sendStatus("booting")
-	var bootCompanion *idb.Companion
-	if isExternalDevice {
-		done = step.begin("Booting simulator (standard set)...")
-		bootCtx, bootCancel := context.WithTimeout(ctx, 30*time.Second)
-		err = simctl.Boot(bootCtx, device)
-		bootCancel()
+	done = step.begin("Creating simulator session...")
+	runtime, err := simruntime.New(
+		simruntime.WithDeviceSetPath(deviceSetPath),
+		simruntime.WithSkipOrphanCleanup(deviceSetPath == ""),
+	)
+	if err != nil {
 		done()
-		if err != nil {
-			sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
-			return fmt.Errorf("booting simulator: %w", err)
-		}
-	} else {
-		done = step.begin("Booting simulator...")
-		bootCompanion, err = bootWithRetry(ctx, device, deviceSetPath, !opts.NoHeadless)
-		done()
-		if err != nil {
-			sendStopped("boot_error", fmt.Sprintf("booting simulator: %v", err), "")
-			return fmt.Errorf("booting simulator: %w", err)
-		}
+		sendStopped("resource_error", fmt.Sprintf("creating simulator runtime: %v", err), "")
+		return fmt.Errorf("creating simulator runtime: %w", err)
 	}
-
-	// Verify the simulator didn't crash immediately after boot.
-	if bootCompanion != nil {
-		select {
-		case <-bootCompanion.Done():
-			msg := fmt.Sprintf("simulator crashed immediately after boot: %v", bootCompanion.Err())
-			sendStopped("boot_error", msg, "")
-			return fmt.Errorf("%s", msg)
-		default:
-		}
+	sessionInfo, err := runtime.CreateSession(ctx, simruntime.CreateSessionRequest{
+		DeviceUDID: device,
+		NoHeadless: opts.NoHeadless || isExternalDevice,
+	})
+	done()
+	if err != nil {
+		runtime.Shutdown(context.Background())
+		sendStopped("boot_error", fmt.Sprintf("creating simulator session: %v", err), "")
+		return fmt.Errorf("creating simulator session: %w", err)
 	}
+	device = sessionInfo.DeviceUDID
+	runtimeApp := newSimRuntimeAppRunner(runtime, sessionInfo.ID)
+	runtimeHID := newSimRuntimeInputHandler(runtime, sessionInfo.ID)
 
 	// Shared cleanup: runs on normal return, error return, and signal-triggered return.
-	var idbClient idb.IDBClient
-	var idbCompanion *idb.Companion
 	var cancelStream func()
 	defer func() {
 		if cancelStream != nil {
@@ -242,28 +252,17 @@ func Run(opts RunOptions) error {
 		if err := os.Remove(dirs.Socket); err != nil && !os.IsNotExist(err) {
 			slog.Debug("Failed to remove socket", "path", dirs.Socket, "err", err)
 		}
-		if idbClient != nil {
-			if err := idbClient.Close(); err != nil {
-				slog.Debug("Failed to close idb client", "err", err)
-			}
+		if err := runtime.StopSession(cleanupCtx, sessionInfo.ID); err != nil {
+			slog.Debug("Failed to stop simulator runtime session", "sessionId", sessionInfo.ID, "err", err)
 		}
-		if idbCompanion != nil {
-			if err := idbCompanion.Stop(); err != nil {
-				slog.Debug("Failed to stop idb companion", "err", err)
-			}
-		}
-		if bootCompanion != nil {
-			if err := bootCompanion.Stop(); err != nil {
-				slog.Debug("Failed to stop boot companion", "err", err)
-			}
-		}
+		runtime.Shutdown(cleanupCtx)
 	}()
 
-	terminateApp(ctx, bs, device, deviceSetPath, ar)
+	terminateApp(ctx, bs, device, deviceSetPath, runtimeApp)
 
 	sendStatus("installing")
 	done = step.begin("Installing app on simulator...")
-	_, err = installApp(ctx, bs, dirs, device, deviceSetPath, ar, fc)
+	_, err = installApp(ctx, bs, dirs, device, deviceSetPath, runtimeApp, fc)
 	done()
 	if err != nil {
 		sendStopped("install_error", err.Error(), "")
@@ -278,7 +277,7 @@ func Run(opts RunOptions) error {
 
 	sendStatus("running")
 	done = step.begin("Launching app...")
-	err = launchWithHotReload(ctx, bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath, ar)
+	err = launchWithHotReload(ctx, bs, loaderPath, dylibPath, dirs.Socket, device, deviceSetPath, runtimeApp)
 	done()
 	if err != nil {
 		sendStopped("runtime_error", err.Error(), "")
@@ -298,34 +297,13 @@ func Run(opts RunOptions) error {
 		}
 	}
 
-	// Set up idb client and companion for serve mode.
 	var idbErrCh chan error
-
 	if opts.Serve {
-		companion, err := idb.Start(device, deviceSetPath)
-		if err != nil {
-			sendStopped("runtime_error", fmt.Sprintf("starting idb_companion: %v", err), "")
-			return fmt.Errorf("starting idb_companion: %w", err)
-		}
-		idbCompanion = companion
-
-		client, err := idb.NewClient(companion.Address())
-		if err != nil {
-			sendStopped("runtime_error", fmt.Sprintf("connecting to idb_companion: %v", err), "")
-			return fmt.Errorf("connecting to idb_companion: %w", err)
-		}
-		idbClient = client
-
 		streamCtx, cancel := context.WithCancel(context.Background())
 		cancelStream = cancel
 		idbErrCh = make(chan error, 1)
-		voc := &protocol.VideoOutputConfig{
-			EW:       ew,
-			StreamID: defaultStreamID,
-			Device:   device,
-			File:     opts.SourceFile,
-		}
-		go protocol.RelayVideoStreamEvents(streamCtx, idbClient, idbErrCh, voc)
+		go relaySimRuntimeVideo(streamCtx, runtime, sessionInfo.ID, ew, defaultStreamID, device, opts.SourceFile, idbErrCh)
+		go relaySimRuntimeEvents(streamCtx, runtime, sessionInfo.ID, idbErrCh)
 	}
 
 	if compileResult.Degraded {
@@ -340,24 +318,9 @@ func Run(opts RunOptions) error {
 		// Block until termination signal or fatal event.
 		// Without this, the deferred cleanup would run immediately, stopping
 		// the simulator and making the degraded preview useless.
-		var bootDiedCh <-chan struct{}
-		if bootCompanion != nil {
-			bootDiedCh = bootCompanion.Done()
-		}
-		// nil channel blocks forever in select, which is correct for external
-		// devices — the "simulator crashed" case is effectively disabled.
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-bootDiedCh:
-			msg := "simulator crashed unexpectedly"
-			if bootCompanion != nil {
-				if err := bootCompanion.Err(); err != nil {
-					msg = fmt.Sprintf("simulator crashed: %v", err)
-				}
-			}
-			sendStopped("runtime_error", msg, "")
-			return fmt.Errorf("boot companion died")
 		case err := <-idbErrCh:
 			if err != nil {
 				msg := fmt.Sprintf("idb_companion error: %v", err)
@@ -380,7 +343,7 @@ func Run(opts RunOptions) error {
 		ew:            ew,
 		build:         br,
 		toolchain:     tc,
-		app:           ar,
+		app:           runtimeApp,
 		copier:        fc,
 		sources:       sl,
 	}
@@ -411,19 +374,8 @@ func Run(opts RunOptions) error {
 		lastUsed:        initialLastUsed,
 	}
 
-	var hid *protocol.HIDHandler
-	if idbClient != nil {
-		if w, h, err := idbClient.ScreenSize(context.Background()); err == nil {
-			hid = protocol.NewHIDHandler(idbClient, w, h)
-		}
-	}
-
-	var watchBootDiedCh <-chan struct{}
-	if bootCompanion != nil {
-		watchBootDiedCh = bootCompanion.Done()
-	}
 	fmt.Fprintln(os.Stderr, "Preview launched with hot-reload support.")
-	return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, hid, idbErrCh, watchBootDiedCh)
+	return runWatcher(ctx, opts.SourceFile, opts.PC, bs, dirs, wctx, ws, runtimeHID, idbErrCh, nil)
 }
 
 // runOneshot handles the oneshot preview mode (no watch, no serve) using
@@ -474,6 +426,13 @@ func runOneshot(ctx context.Context, opts RunOptions, br BuildRunner, tc Toolcha
 		PreviewSelector: opts.PreviewSelector,
 		OnReady:         opts.OnReady,
 	})
+	if err == nil && opts.OnScreenshot != nil {
+		var data []byte
+		data, err = sess.Screenshot(ctx)
+		if err == nil {
+			err = opts.OnScreenshot(ctx, data)
+		}
+	}
 	done()
 	return err
 }
@@ -485,7 +444,11 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	ew := protocol.NewEventWriter(os.Stdout)
+	return runServeWithDeps(ctx, pc, strict, maxThunkFiles, preThunkDepth, defaultServeDeps())
+}
+
+func runServeWithDeps(ctx context.Context, pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int, deps serveDeps) error {
+	ew := protocol.NewEventWriter(deps.out)
 
 	// Advertise the protocol version to the extension.
 	if err := ew.Send(&pb.Event{
@@ -504,13 +467,12 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 		return fmt.Errorf("creating device set directory: %w", err)
 	}
 
-	pool := platform.NewDevicePool(&platform.RealSimctlRunner{}, deviceSetPath)
-
-	if err := pool.CleanupOrphans(ctx); err != nil {
-		slog.Warn("Failed to clean up orphaned devices", "err", err)
+	runtime, err := deps.newRuntime(deviceSetPath)
+	if err != nil {
+		return fmt.Errorf("creating simulator runtime: %w", err)
 	}
 
-	br, tc, ar, fc, sl := defaultRunners()
+	br, tc, ar, fc, sl := deps.runners()
 
 	projDirs, err := build.NewProjectDirs(pc.PrimaryPath())
 	if err != nil {
@@ -518,10 +480,10 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 	}
 	preparer := build.NewPreparer(pc, projDirs, true, br)
 
-	sm := NewStreamManager(pool, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
+	sm := NewRuntimeStreamManager(runtime, ew, pc, deviceSetPath, preparer, br, tc, ar, fc, sl, strict, maxThunkFiles, preThunkDepth)
 
 	// Start shared file watcher for all streams.
-	watcher, err := watch.NewSharedWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
+	watcher, err := deps.newWatcher(ctx, filepath.Dir(pc.PrimaryPath()), sl)
 	if err != nil {
 		return fmt.Errorf("creating shared file watcher: %w", err)
 	}
@@ -530,10 +492,9 @@ func RunServe(pc ProjectConfig, strict bool, maxThunkFiles, preThunkDepth int) e
 
 	// Read commands from stdin. When stdin closes (extension crash/exit),
 	// the loop returns and we proceed to cleanup.
-	runCommandLoop(ctx, os.Stdin, ew, sm)
+	runCommandLoop(ctx, deps.in, ew, sm)
 
 	sm.StopAll()
-	pool.GarbageCollect(ctx)
 
 	return nil
 }

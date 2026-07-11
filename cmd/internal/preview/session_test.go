@@ -13,23 +13,6 @@ import (
 	"github.com/k-kohey/axe/internal/preview/build"
 )
 
-// sessionFakeCompanion implements companionProcess for session testing.
-type sessionFakeCompanion struct {
-	doneCh  chan struct{}
-	stopped atomic.Bool
-}
-
-func newSessionFakeCompanion() *sessionFakeCompanion {
-	return &sessionFakeCompanion{doneCh: make(chan struct{})}
-}
-
-func (f *sessionFakeCompanion) Done() <-chan struct{} { return f.doneCh }
-func (f *sessionFakeCompanion) Err() error            { return nil }
-func (f *sessionFakeCompanion) Stop() error {
-	f.stopped.Store(true)
-	return nil
-}
-
 // sessionToolchainRunner creates output files at the -o path for CompileSwift/CompileC.
 type sessionToolchainRunner struct {
 	sdkPathResult string
@@ -122,18 +105,16 @@ func setupSessionTest(t *testing.T) SessionConfig {
 	_ = preparer // not usable without real xcodebuild
 
 	return SessionConfig{
-		PC:            pc,
-		DeviceUDID:    "FAKE-SESSION-DEVICE",
-		DeviceSetPath: filepath.Join(tmpDir, "device-set"),
-		BuildRunner:   br,
-		Toolchain:     &sessionToolchainRunner{sdkPathResult: "/fake/sdk"},
-		AppRunner:     &fakeAppRunner{},
+		PC:             pc,
+		DeviceUDID:     "FAKE-SESSION-DEVICE",
+		DeviceSetPath:  filepath.Join(tmpDir, "device-set"),
+		BuildRunner:    br,
+		Toolchain:      &sessionToolchainRunner{sdkPathResult: "/fake/sdk"},
+		AppRunner:      &fakeAppRunner{},
+		RuntimeManager: newFakeSimRuntimeManager(),
 		Copier: &sessionFileCopier{
 			bs:  bs,
 			src: appDir,
-		},
-		BootFunc: func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-			return newSessionFakeCompanion(), nil
 		},
 	}
 }
@@ -230,8 +211,8 @@ func TestNewPreviewSession_Success(t *testing.T) {
 	if sess.loaderPath == "" {
 		t.Error("session.loaderPath is empty")
 	}
-	if sess.bootCompanion == nil {
-		t.Error("session.bootCompanion is nil for axe-managed device")
+	if sess.sessionID == "" {
+		t.Error("session.sessionID is empty")
 	}
 }
 
@@ -239,10 +220,7 @@ func TestNewPreviewSession_BuildFailure(t *testing.T) {
 	t.Parallel()
 
 	cfg := setupSessionTest(t)
-	companion := newSessionFakeCompanion()
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		return companion, nil
-	}
+	runtime := cfg.RuntimeManager.(*fakeSimRuntimeManager)
 	// Use a preparer with a build runner that fails.
 	tmpDir := t.TempDir()
 	buildDir := filepath.Join(tmpDir, "build")
@@ -257,19 +235,18 @@ func TestNewPreviewSession_BuildFailure(t *testing.T) {
 		t.Fatal("expected error from build failure")
 	}
 
-	// Boot companion should be stopped on build failure.
-	if !companion.stopped.Load() {
-		t.Error("boot companion was not stopped after build failure")
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if len(runtime.stopped) != 1 {
+		t.Errorf("runtime session stop calls = %d, want 1", len(runtime.stopped))
 	}
 }
 
-func TestNewPreviewSession_BootFailure(t *testing.T) {
+func TestNewPreviewSession_CreateSessionFailure(t *testing.T) {
 	t.Parallel()
 
 	cfg := setupSessionTest(t)
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		return nil, fmt.Errorf("boot failed")
-	}
+	cfg.RuntimeManager.(*fakeSimRuntimeManager).createErr = fmt.Errorf("boot failed")
 
 	// Need a valid preparer that won't fail.
 	tmpDir := t.TempDir()
@@ -289,7 +266,7 @@ func TestNewPreviewSession_BootFailure(t *testing.T) {
 
 	_, err := NewPreviewSession(t.Context(), cfg)
 	if err == nil {
-		t.Fatal("expected error from boot failure")
+		t.Fatal("expected error from session creation failure")
 	}
 }
 
@@ -396,18 +373,7 @@ func TestCapturePreview_MultipleCaptures_UsesHotReload(t *testing.T) {
 	cfg.Copier = &sessionFileCopier{bs: bs, src: appDir}
 	cfg.Preparer = sessionPreparer(t, cfg.PC, buildDir, bs)
 
-	// Track boot calls to verify boot only happens once.
-	var bootCount atomic.Int32
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		bootCount.Add(1)
-		return newSessionFakeCompanion(), nil
-	}
-
-	// Track launch calls to verify cold start only happens on 1st capture.
-	var launchCount atomic.Int32
-	cfg.AppRunner = &fakeAppRunner{
-		onLaunch: func() { launchCount.Add(1) },
-	}
+	runtime := cfg.RuntimeManager.(*fakeSimRuntimeManager)
 
 	sess, err := NewPreviewSession(t.Context(), cfg)
 	if err != nil {
@@ -448,14 +414,16 @@ struct HogeView: View {
 		}
 	}
 
-	// Boot should have been called exactly once (during NewPreviewSession).
-	if got := bootCount.Load(); got != 1 {
-		t.Errorf("boot was called %d times, want 1", got)
-	}
-
 	// Launch should have been called once (cold start on 1st capture).
-	if got := launchCount.Load(); got != 1 {
-		t.Errorf("launch was called %d times, want 1", got)
+	runtime.mu.Lock()
+	createCount := len(runtime.createReqs)
+	launchCount := len(runtime.launches)
+	runtime.mu.Unlock()
+	if createCount != 1 {
+		t.Errorf("CreateSession was called %d times, want 1", createCount)
+	}
+	if launchCount != 1 {
+		t.Errorf("launch was called %d times, want 1", launchCount)
 	}
 
 	// Reload should have been called three times: initial reload + two hot-reloads.
@@ -500,10 +468,7 @@ func TestCapturePreview_HotReloadFailure_FallsBackToColdStart(t *testing.T) {
 	cfg.Copier = &sessionFileCopier{bs: bs, src: appDir}
 	cfg.Preparer = sessionPreparer(t, cfg.PC, buildDir, bs)
 
-	var launchCount atomic.Int32
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		return newSessionFakeCompanion(), nil
-	}
+	runtime := cfg.RuntimeManager.(*fakeSimRuntimeManager)
 
 	sess, err := NewPreviewSession(t.Context(), cfg)
 	if err != nil {
@@ -544,12 +509,6 @@ struct HogeView: View {
 		// WaitForReady: client connected without sending data; just close.
 	})
 
-	// Use AppRunner that tracks launches via onLaunch.
-	cfg.AppRunner = &fakeAppRunner{
-		onLaunch: func() { launchCount.Add(1) },
-	}
-	sess.cfg.AppRunner = cfg.AppRunner
-
 	// 1st capture: cold start (WaitForReady).
 	err = sess.CapturePreview(t.Context(), CaptureRequest{
 		SourceFile:      sourceFile,
@@ -558,7 +517,10 @@ struct HogeView: View {
 	if err != nil {
 		t.Fatalf("CapturePreview(0) error: %v", err)
 	}
-	if got := launchCount.Load(); got != 1 {
+	runtime.mu.Lock()
+	firstLaunchCount := len(runtime.launches)
+	runtime.mu.Unlock()
+	if got := firstLaunchCount; got != 1 {
 		t.Fatalf("launch count after 1st capture = %d, want 1", got)
 	}
 
@@ -572,7 +534,10 @@ struct HogeView: View {
 	}
 
 	// Launch should have been called twice (1st cold start + fallback cold start).
-	if got := launchCount.Load(); got != 2 {
+	runtime.mu.Lock()
+	finalLaunchCount := len(runtime.launches)
+	runtime.mu.Unlock()
+	if got := finalLaunchCount; got != 2 {
 		t.Errorf("launch count = %d, want 2", got)
 	}
 }
@@ -608,13 +573,7 @@ func TestCapturePreview_ContextCanceled_NoFallback(t *testing.T) {
 	cfg.Copier = &sessionFileCopier{bs: bs, src: appDir}
 	cfg.Preparer = sessionPreparer(t, cfg.PC, buildDir, bs)
 
-	var launchCount atomic.Int32
-	cfg.AppRunner = &fakeAppRunner{
-		onLaunch: func() { launchCount.Add(1) },
-	}
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		return newSessionFakeCompanion(), nil
-	}
+	runtime := cfg.RuntimeManager.(*fakeSimRuntimeManager)
 
 	sess, err := NewPreviewSession(t.Context(), cfg)
 	if err != nil {
@@ -662,19 +621,19 @@ struct HogeView: View {
 	}
 
 	// Launch should have been called only once (initial cold start), not twice.
-	if got := launchCount.Load(); got != 1 {
+	runtime.mu.Lock()
+	launchCount := len(runtime.launches)
+	runtime.mu.Unlock()
+	if got := launchCount; got != 1 {
 		t.Errorf("launch count = %d, want 1 (fallback should NOT have run)", got)
 	}
 }
 
-func TestClose_StopsCompanion(t *testing.T) {
+func TestClose_StopsRuntimeSession(t *testing.T) {
 	t.Parallel()
 
 	cfg := setupSessionTest(t)
-	companion := newSessionFakeCompanion()
-	cfg.BootFunc = func(_ context.Context, _, _ string, _ bool) (companionProcess, error) {
-		return companion, nil
-	}
+	runtime := cfg.RuntimeManager.(*fakeSimRuntimeManager)
 
 	tmpDir := t.TempDir()
 	buildDir := filepath.Join(tmpDir, "build")
@@ -717,8 +676,11 @@ func TestClose_StopsCompanion(t *testing.T) {
 
 	sess.Close()
 
-	if !companion.stopped.Load() {
-		t.Error("boot companion was not stopped by Close()")
+	runtime.mu.Lock()
+	stoppedCount := len(runtime.stopped)
+	runtime.mu.Unlock()
+	if stoppedCount != 1 {
+		t.Errorf("runtime StopSession calls = %d, want 1", stoppedCount)
 	}
 
 	// Socket should be removed.

@@ -101,11 +101,7 @@ func runOneshotLogic(sourceArg string) error {
 		ReuseBuild:      previewReuseBuild,
 		FullThunk:       previewFullThunk,
 	}
-	opts.OnReady = func(ctx context.Context, device, deviceSetPath string) error {
-		data, err := platform.Screenshot(ctx, device, deviceSetPath)
-		if err != nil {
-			return err
-		}
+	opts.OnScreenshot = func(_ context.Context, data []byte) error {
 		_, err = os.Stdout.Write(data)
 		return err
 	}

@@ -24,7 +24,7 @@ message Command {
 }
 
 // AddStream creates a new preview stream.
-// The CLI allocates a simulator from the device pool based on device_type + runtime.
+// The CLI allocates a simulator session through simruntime based on device_type + runtime.
 message AddStream {
   string file = 1;            // Swift file path to preview
   string device_type = 2;     // e.g. "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"

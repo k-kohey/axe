@@ -10,6 +10,7 @@ import (
 	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
+	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
@@ -45,7 +46,7 @@ type RunOptions struct {
 
 	// DeviceUDID is a pre-acquired simulator UDID.
 	// When set, Run() skips ResolveAxeSimulator and uses this device directly.
-	// Used by parallel report mode where DevicePool manages device lifecycle.
+	// Used by callers that need to bind the preview lifecycle to an existing simulator.
 	DeviceUDID    string
 	DeviceSetPath string
 
@@ -54,6 +55,16 @@ type RunOptions struct {
 	// Only invoked in oneshot mode (not watch, not serve).
 	// If nil, oneshot returns immediately after verifying readiness.
 	OnReady func(ctx context.Context, device, deviceSetPath string) error
+
+	// OnScreenshot is called with a runtime-captured screenshot after the
+	// preview is ready. Used by the CLI oneshot path to write PNG bytes.
+	OnScreenshot func(ctx context.Context, data []byte) error
+}
+
+type inputHandler interface {
+	HandleInput(ctx context.Context, input *pb.Input)
+	HandleTap(ctx context.Context, x, y float64)
+	HandleSwipe(ctx context.Context, startX, startY, endX, endY, duration float64)
 }
 
 // compileConfigFromSettings converts build.Settings to codegen.CompileConfig.

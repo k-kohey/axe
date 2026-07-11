@@ -20,7 +20,7 @@ func TestStreamManager_UsesSharedPreparer(t *testing.T) {
 	pc := ProjectConfig{Project: "/tmp/TestProject.xcodeproj", Scheme: "TestScheme"}
 	preparer := build.NewPreparer(pc, build.ProjectDirs{Build: t.TempDir()}, false, br)
 
-	sm := NewStreamManager(newFakeDevicePool(), protocol.NewEventWriter(&syncBuffer{}),
+	sm := NewRuntimeStreamManager(newFakeSimRuntimeManager(), protocol.NewEventWriter(&syncBuffer{}),
 		pc, "", preparer,
 		br, &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{}, false, 32, 0)
 

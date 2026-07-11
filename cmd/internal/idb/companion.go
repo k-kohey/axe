@@ -241,13 +241,6 @@ func (c *Companion) Stop() error {
 	}
 }
 
-// Boot boots a simulator (with Simulator.app window) via idb_companion.
-// The returned Companion's Stop() will terminate idb_companion and shut down
-// the simulator automatically.
-func Boot(udid, deviceSetPath string) (*Companion, error) {
-	return BootWith(DefaultCommander(), udid, deviceSetPath)
-}
-
 // BootWith boots a simulator using the given Commander.
 func BootWith(cmdr Commander, udid, deviceSetPath string) (*Companion, error) {
 	return bootSimulator(cmdr, udid, deviceSetPath, false)

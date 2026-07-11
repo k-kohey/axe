@@ -14,7 +14,6 @@ import (
 	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/k-kohey/axe/internal/preview/codegen"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
-	"github.com/k-kohey/axe/internal/preview/protocol"
 	"github.com/k-kohey/axe/internal/preview/watch"
 )
 
@@ -37,7 +36,7 @@ func sendWatchStatus(wctx watchContext, phase string) {
 // and dispatchStdinCommands / dispatchProtocolCommands for stdin routing.
 func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	bs *build.Settings, dirs previewDirs, wctx watchContext,
-	ws *watchState, hid *protocol.HIDHandler,
+	ws *watchState, hid inputHandler,
 	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
 
 	// Set up shared file watcher.
@@ -65,7 +64,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	if wctx.serve {
 		protoCmdCh := make(chan *pb.Command, 1)
 		go readProtocolCommands(ctx, wctx.ew, protoCmdCh)
-		go dispatchProtocolCommands(ctx, protoCmdCh, hid, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
+		go dispatchProtocolCommands(ctx, protoCmdCh, switchFileCh, nextPreviewCh, forceRebuildCh, inputCh)
 	} else {
 		cmdCh := make(chan stdinCommand, 1)
 		go readStdinCommands(cmdCh, false)
