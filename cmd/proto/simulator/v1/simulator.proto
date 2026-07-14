@@ -7,7 +7,12 @@ option go_package = "github.com/k-kohey/axe/pkg/simulatorapi/v1;simulatorv1";
 service SimulatorService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+  rpc ListManagedDevices(ListManagedDevicesRequest) returns (ListManagedDevicesResponse);
+  rpc AddManagedDevice(AddManagedDeviceRequest) returns (AddManagedDeviceResponse);
+  rpc RemoveManagedDevice(RemoveManagedDeviceRequest) returns (RemoveManagedDeviceResponse);
+  rpc SetDefaultManagedDevice(SetDefaultManagedDeviceRequest) returns (SetDefaultManagedDeviceResponse);
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc GetSession(GetSessionRequest) returns (Session);
   rpc StopSession(StopSessionRequest) returns (StopSessionResponse);
   rpc InstallApp(InstallAppRequest) returns (InstallAppResponse);
@@ -42,9 +47,48 @@ message Runtime {
   string name = 2;
 }
 
+message ListManagedDevicesRequest {}
+
+message ListManagedDevicesResponse {
+  repeated ManagedDevice devices = 1;
+}
+
+message ManagedDevice {
+  string udid = 1;
+  string name = 2;
+  string runtime = 3;
+  string runtime_id = 4;
+  string state = 5;
+  bool is_default = 6;
+}
+
+message AddManagedDeviceRequest {
+  string device_type = 1;
+  string runtime = 2;
+  bool set_default = 3;
+}
+
+message AddManagedDeviceResponse {
+  ManagedDevice device = 1;
+}
+
+message RemoveManagedDeviceRequest {
+  string udid = 1;
+}
+
+message RemoveManagedDeviceResponse {}
+
+message SetDefaultManagedDeviceRequest {
+  string udid = 1;
+}
+
+message SetDefaultManagedDeviceResponse {}
+
 message CreateSessionRequest {
   string device_type = 1;
   string runtime = 2;
+  string device_udid = 3;
+  bool no_headless = 4;
   oneof launch_target {
     AppBundle app_bundle = 10;
     InstalledApp installed_app = 11;
@@ -62,6 +106,12 @@ message InstalledApp {
 
 message CreateSessionResponse {
   Session session = 1;
+}
+
+message ListSessionsRequest {}
+
+message ListSessionsResponse {
+  repeated Session sessions = 1;
 }
 
 message GetSessionRequest {

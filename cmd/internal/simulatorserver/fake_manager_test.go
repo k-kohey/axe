@@ -12,11 +12,15 @@ type fakeManager struct {
 	mu sync.Mutex
 
 	devices []simruntime.DeviceType
+	managed []simruntime.ManagedDevice
 	session *simruntime.SessionInfo
 
 	createReqs []simruntime.CreateSessionRequest
+	addReqs    []simruntime.AddManagedDeviceRequest
 	inputs     []simruntime.InputEvent
 	stoppedIDs []string
+	removed    []string
+	defaults   []string
 	installed  []string
 	launched   []launchCall
 	terminated []string
@@ -42,6 +46,14 @@ func newFakeManager() *fakeManager {
 				Name:       "iOS 18.2",
 			}},
 		}},
+		managed: []simruntime.ManagedDevice{{
+			UDID:      "UDID-1",
+			Name:      "axe iPhone 16 Pro (1)",
+			Runtime:   "iOS 18.2",
+			RuntimeID: "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+			State:     "Shutdown",
+			IsDefault: true,
+		}},
 		session: &simruntime.SessionInfo{
 			ID:           "session-1",
 			DeviceUDID:   "UDID-1",
@@ -61,6 +73,40 @@ func (m *fakeManager) ListDevices(context.Context) ([]simruntime.DeviceType, err
 	return m.devices, nil
 }
 
+func (m *fakeManager) ListManagedDevices(context.Context) ([]simruntime.ManagedDevice, error) {
+	return m.managed, nil
+}
+
+func (m *fakeManager) AddManagedDevice(_ context.Context, req simruntime.AddManagedDeviceRequest) (*simruntime.ManagedDevice, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.addReqs = append(m.addReqs, req)
+	device := simruntime.ManagedDevice{
+		UDID:      "UDID-2",
+		Name:      "axe iPhone 16 Pro (2)",
+		Runtime:   "iOS 18.2",
+		RuntimeID: req.Runtime,
+		State:     "Shutdown",
+		IsDefault: req.SetDefault,
+	}
+	m.managed = append(m.managed, device)
+	return &device, nil
+}
+
+func (m *fakeManager) RemoveManagedDevice(_ context.Context, udid string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removed = append(m.removed, udid)
+	return nil
+}
+
+func (m *fakeManager) SetDefaultManagedDevice(_ context.Context, udid string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.defaults = append(m.defaults, udid)
+	return nil
+}
+
 func (m *fakeManager) CreateSession(_ context.Context, req simruntime.CreateSessionRequest) (*simruntime.SessionInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -69,6 +115,13 @@ func (m *fakeManager) CreateSession(_ context.Context, req simruntime.CreateSess
 		return nil, fmt.Errorf("no session")
 	}
 	return m.session, nil
+}
+
+func (m *fakeManager) ListSessions() []*simruntime.SessionInfo {
+	if m.session == nil {
+		return nil
+	}
+	return []*simruntime.SessionInfo{m.session}
 }
 
 func (m *fakeManager) GetSession(id string) (*simruntime.SessionInfo, error) {

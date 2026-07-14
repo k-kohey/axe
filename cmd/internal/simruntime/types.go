@@ -16,6 +16,21 @@ type Runtime struct {
 	Name       string
 }
 
+type ManagedDevice struct {
+	UDID      string
+	Name      string
+	Runtime   string
+	RuntimeID string
+	State     string
+	IsDefault bool
+}
+
+type AddManagedDeviceRequest struct {
+	DeviceType string
+	Runtime    string
+	SetDefault bool
+}
+
 type LaunchTarget struct {
 	AppBundle    *AppBundle
 	InstalledApp *InstalledApp
@@ -111,7 +126,12 @@ type VideoFrame struct {
 
 type Manager interface {
 	ListDevices(ctx context.Context) ([]DeviceType, error)
+	ListManagedDevices(ctx context.Context) ([]ManagedDevice, error)
+	AddManagedDevice(ctx context.Context, req AddManagedDeviceRequest) (*ManagedDevice, error)
+	RemoveManagedDevice(ctx context.Context, udid string) error
+	SetDefaultManagedDevice(ctx context.Context, udid string) error
 	CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error)
+	ListSessions() []*SessionInfo
 	GetSession(id string) (*SessionInfo, error)
 	StopSession(ctx context.Context, id string) error
 	InstallApp(ctx context.Context, id, appPath string) error

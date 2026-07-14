@@ -26,16 +26,53 @@ func deviceTypesToProto(devices []simruntime.DeviceType) []*simulatorv1.DeviceTy
 	return out
 }
 
+func managedDevicesToProto(devices []simruntime.ManagedDevice) []*simulatorv1.ManagedDevice {
+	out := make([]*simulatorv1.ManagedDevice, 0, len(devices))
+	for _, d := range devices {
+		out = append(out, managedDeviceToProto(d))
+	}
+	return out
+}
+
+func managedDeviceToProto(d simruntime.ManagedDevice) *simulatorv1.ManagedDevice {
+	return &simulatorv1.ManagedDevice{
+		Udid:      d.UDID,
+		Name:      d.Name,
+		Runtime:   d.Runtime,
+		RuntimeId: d.RuntimeID,
+		State:     d.State,
+		IsDefault: d.IsDefault,
+	}
+}
+
+func addManagedDeviceFromProto(req *simulatorv1.AddManagedDeviceRequest) simruntime.AddManagedDeviceRequest {
+	return simruntime.AddManagedDeviceRequest{
+		DeviceType: req.GetDeviceType(),
+		Runtime:    req.GetRuntime(),
+		SetDefault: req.GetSetDefault(),
+	}
+}
+
 func createSessionFromProto(req *simulatorv1.CreateSessionRequest) simruntime.CreateSessionRequest {
 	out := simruntime.CreateSessionRequest{
 		DeviceType: req.GetDeviceType(),
 		Runtime:    req.GetRuntime(),
+		DeviceUDID: req.GetDeviceUdid(),
+		NoHeadless: req.GetNoHeadless(),
 	}
 	if app := req.GetAppBundle(); app != nil {
 		out.Target.AppBundle = &simruntime.AppBundle{Path: app.GetPath(), BundleID: app.GetBundleId()}
 	}
 	if app := req.GetInstalledApp(); app != nil {
 		out.Target.InstalledApp = &simruntime.InstalledApp{BundleID: app.GetBundleId()}
+	}
+	return out
+}
+
+func sessionsToProto(sessions []*simruntime.SessionInfo) []*simulatorv1.Session {
+	out := make([]*simulatorv1.Session, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, sessionToProto(s))
 	}
 	return out
 }

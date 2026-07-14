@@ -32,9 +32,9 @@ type SimctlRunner interface {
 type RealSimctlRunner struct{}
 
 func (r *RealSimctlRunner) ListDevices(ctx context.Context, setPath string) ([]simDevice, error) {
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "list", "devices", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "--set", setPath, "list", "devices", "--json").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("simctl list devices in set: %w", err)
+		return nil, fmt.Errorf("simctl list devices in set: %w\n%s", err, out)
 	}
 	return parseDevicesJSON(out)
 }
@@ -97,25 +97,25 @@ func (r *RealSimctlRunner) ListAllDevices(ctx context.Context, onlyAvailable boo
 		args = append(args, "available")
 	}
 	args = append(args, "--json")
-	out, err := procgroup.Command(ctx, "xcrun", args...).Output()
+	out, err := procgroup.Command(ctx, "xcrun", args...).CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("simctl list devices: %w", err)
+		return nil, fmt.Errorf("simctl list devices: %w\n%s", err, out)
 	}
 	return out, nil
 }
 
 func (r *RealSimctlRunner) ListRuntimes(ctx context.Context) ([]byte, error) {
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "runtimes", "available", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "runtimes", "available", "--json").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("simctl list runtimes: %w", err)
+		return nil, fmt.Errorf("simctl list runtimes: %w\n%s", err, out)
 	}
 	return out, nil
 }
 
 func (r *RealSimctlRunner) ListDeviceTypes(ctx context.Context) ([]byte, error) {
-	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").Output()
+	out, err := procgroup.Command(ctx, "xcrun", "simctl", "list", "devicetypes", "--json").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("simctl list devicetypes: %w", err)
+		return nil, fmt.Errorf("simctl list devicetypes: %w\n%s", err, out)
 	}
 	return out, nil
 }

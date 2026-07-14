@@ -26,6 +26,46 @@ func TestGRPCServerListDevices(t *testing.T) {
 	}
 }
 
+func TestGRPCServerManagedDevicesAndSessions(t *testing.T) {
+	manager := newFakeManager()
+	server := NewGRPCServer(manager, "test")
+
+	managed, err := server.ListManagedDevices(context.Background(), &simulatorv1.ListManagedDevicesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(managed.GetDevices()) != 1 || managed.GetDevices()[0].GetUdid() != "UDID-1" {
+		t.Fatalf("managed devices = %+v", managed.GetDevices())
+	}
+
+	added, err := server.AddManagedDevice(context.Background(), &simulatorv1.AddManagedDeviceRequest{
+		DeviceType: "device",
+		Runtime:    "runtime",
+		SetDefault: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.GetDevice().GetUdid() != "UDID-2" {
+		t.Fatalf("added = %+v", added.GetDevice())
+	}
+
+	if _, err := server.SetDefaultManagedDevice(context.Background(), &simulatorv1.SetDefaultManagedDeviceRequest{Udid: "UDID-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.RemoveManagedDevice(context.Background(), &simulatorv1.RemoveManagedDeviceRequest{Udid: "UDID-2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := server.ListSessions(context.Background(), &simulatorv1.ListSessionsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions.GetSessions()) != 1 || sessions.GetSessions()[0].GetSessionId() != "session-1" {
+		t.Fatalf("sessions = %+v", sessions.GetSessions())
+	}
+}
+
 func TestGRPCServerSendInput(t *testing.T) {
 	manager := newFakeManager()
 	server := NewGRPCServer(manager, "test")

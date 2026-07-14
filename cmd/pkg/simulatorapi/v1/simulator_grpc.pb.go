@@ -19,17 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SimulatorService_Health_FullMethodName        = "/axe.simulator.v1.SimulatorService/Health"
-	SimulatorService_ListDevices_FullMethodName   = "/axe.simulator.v1.SimulatorService/ListDevices"
-	SimulatorService_CreateSession_FullMethodName = "/axe.simulator.v1.SimulatorService/CreateSession"
-	SimulatorService_GetSession_FullMethodName    = "/axe.simulator.v1.SimulatorService/GetSession"
-	SimulatorService_StopSession_FullMethodName   = "/axe.simulator.v1.SimulatorService/StopSession"
-	SimulatorService_InstallApp_FullMethodName    = "/axe.simulator.v1.SimulatorService/InstallApp"
-	SimulatorService_LaunchApp_FullMethodName     = "/axe.simulator.v1.SimulatorService/LaunchApp"
-	SimulatorService_TerminateApp_FullMethodName  = "/axe.simulator.v1.SimulatorService/TerminateApp"
-	SimulatorService_SendInput_FullMethodName     = "/axe.simulator.v1.SimulatorService/SendInput"
-	SimulatorService_WatchEvents_FullMethodName   = "/axe.simulator.v1.SimulatorService/WatchEvents"
-	SimulatorService_WatchVideo_FullMethodName    = "/axe.simulator.v1.SimulatorService/WatchVideo"
+	SimulatorService_Health_FullMethodName                  = "/axe.simulator.v1.SimulatorService/Health"
+	SimulatorService_ListDevices_FullMethodName             = "/axe.simulator.v1.SimulatorService/ListDevices"
+	SimulatorService_ListManagedDevices_FullMethodName      = "/axe.simulator.v1.SimulatorService/ListManagedDevices"
+	SimulatorService_AddManagedDevice_FullMethodName        = "/axe.simulator.v1.SimulatorService/AddManagedDevice"
+	SimulatorService_RemoveManagedDevice_FullMethodName     = "/axe.simulator.v1.SimulatorService/RemoveManagedDevice"
+	SimulatorService_SetDefaultManagedDevice_FullMethodName = "/axe.simulator.v1.SimulatorService/SetDefaultManagedDevice"
+	SimulatorService_CreateSession_FullMethodName           = "/axe.simulator.v1.SimulatorService/CreateSession"
+	SimulatorService_ListSessions_FullMethodName            = "/axe.simulator.v1.SimulatorService/ListSessions"
+	SimulatorService_GetSession_FullMethodName              = "/axe.simulator.v1.SimulatorService/GetSession"
+	SimulatorService_StopSession_FullMethodName             = "/axe.simulator.v1.SimulatorService/StopSession"
+	SimulatorService_InstallApp_FullMethodName              = "/axe.simulator.v1.SimulatorService/InstallApp"
+	SimulatorService_LaunchApp_FullMethodName               = "/axe.simulator.v1.SimulatorService/LaunchApp"
+	SimulatorService_TerminateApp_FullMethodName            = "/axe.simulator.v1.SimulatorService/TerminateApp"
+	SimulatorService_SendInput_FullMethodName               = "/axe.simulator.v1.SimulatorService/SendInput"
+	SimulatorService_WatchEvents_FullMethodName             = "/axe.simulator.v1.SimulatorService/WatchEvents"
+	SimulatorService_WatchVideo_FullMethodName              = "/axe.simulator.v1.SimulatorService/WatchVideo"
 )
 
 // SimulatorServiceClient is the client API for SimulatorService service.
@@ -38,7 +43,12 @@ const (
 type SimulatorServiceClient interface {
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	ListDevices(ctx context.Context, in *ListDevicesRequest, opts ...grpc.CallOption) (*ListDevicesResponse, error)
+	ListManagedDevices(ctx context.Context, in *ListManagedDevicesRequest, opts ...grpc.CallOption) (*ListManagedDevicesResponse, error)
+	AddManagedDevice(ctx context.Context, in *AddManagedDeviceRequest, opts ...grpc.CallOption) (*AddManagedDeviceResponse, error)
+	RemoveManagedDevice(ctx context.Context, in *RemoveManagedDeviceRequest, opts ...grpc.CallOption) (*RemoveManagedDeviceResponse, error)
+	SetDefaultManagedDevice(ctx context.Context, in *SetDefaultManagedDeviceRequest, opts ...grpc.CallOption) (*SetDefaultManagedDeviceResponse, error)
 	CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error)
+	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*Session, error)
 	StopSession(ctx context.Context, in *StopSessionRequest, opts ...grpc.CallOption) (*StopSessionResponse, error)
 	InstallApp(ctx context.Context, in *InstallAppRequest, opts ...grpc.CallOption) (*InstallAppResponse, error)
@@ -77,10 +87,60 @@ func (c *simulatorServiceClient) ListDevices(ctx context.Context, in *ListDevice
 	return out, nil
 }
 
+func (c *simulatorServiceClient) ListManagedDevices(ctx context.Context, in *ListManagedDevicesRequest, opts ...grpc.CallOption) (*ListManagedDevicesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListManagedDevicesResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_ListManagedDevices_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) AddManagedDevice(ctx context.Context, in *AddManagedDeviceRequest, opts ...grpc.CallOption) (*AddManagedDeviceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddManagedDeviceResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_AddManagedDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) RemoveManagedDevice(ctx context.Context, in *RemoveManagedDeviceRequest, opts ...grpc.CallOption) (*RemoveManagedDeviceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveManagedDeviceResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_RemoveManagedDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) SetDefaultManagedDevice(ctx context.Context, in *SetDefaultManagedDeviceRequest, opts ...grpc.CallOption) (*SetDefaultManagedDeviceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetDefaultManagedDeviceResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_SetDefaultManagedDevice_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *simulatorServiceClient) CreateSession(ctx context.Context, in *CreateSessionRequest, opts ...grpc.CallOption) (*CreateSessionResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateSessionResponse)
 	err := c.cc.Invoke(ctx, SimulatorService_CreateSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *simulatorServiceClient) ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionsResponse)
+	err := c.cc.Invoke(ctx, SimulatorService_ListSessions_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +251,12 @@ type SimulatorService_WatchVideoClient = grpc.ServerStreamingClient[VideoFrame]
 type SimulatorServiceServer interface {
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error)
+	ListManagedDevices(context.Context, *ListManagedDevicesRequest) (*ListManagedDevicesResponse, error)
+	AddManagedDevice(context.Context, *AddManagedDeviceRequest) (*AddManagedDeviceResponse, error)
+	RemoveManagedDevice(context.Context, *RemoveManagedDeviceRequest) (*RemoveManagedDeviceResponse, error)
+	SetDefaultManagedDevice(context.Context, *SetDefaultManagedDeviceRequest) (*SetDefaultManagedDeviceResponse, error)
 	CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error)
+	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
 	GetSession(context.Context, *GetSessionRequest) (*Session, error)
 	StopSession(context.Context, *StopSessionRequest) (*StopSessionResponse, error)
 	InstallApp(context.Context, *InstallAppRequest) (*InstallAppResponse, error)
@@ -216,8 +281,23 @@ func (UnimplementedSimulatorServiceServer) Health(context.Context, *HealthReques
 func (UnimplementedSimulatorServiceServer) ListDevices(context.Context, *ListDevicesRequest) (*ListDevicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDevices not implemented")
 }
+func (UnimplementedSimulatorServiceServer) ListManagedDevices(context.Context, *ListManagedDevicesRequest) (*ListManagedDevicesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListManagedDevices not implemented")
+}
+func (UnimplementedSimulatorServiceServer) AddManagedDevice(context.Context, *AddManagedDeviceRequest) (*AddManagedDeviceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddManagedDevice not implemented")
+}
+func (UnimplementedSimulatorServiceServer) RemoveManagedDevice(context.Context, *RemoveManagedDeviceRequest) (*RemoveManagedDeviceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveManagedDevice not implemented")
+}
+func (UnimplementedSimulatorServiceServer) SetDefaultManagedDevice(context.Context, *SetDefaultManagedDeviceRequest) (*SetDefaultManagedDeviceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetDefaultManagedDevice not implemented")
+}
 func (UnimplementedSimulatorServiceServer) CreateSession(context.Context, *CreateSessionRequest) (*CreateSessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateSession not implemented")
+}
+func (UnimplementedSimulatorServiceServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSessions not implemented")
 }
 func (UnimplementedSimulatorServiceServer) GetSession(context.Context, *GetSessionRequest) (*Session, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSession not implemented")
@@ -300,6 +380,78 @@ func _SimulatorService_ListDevices_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SimulatorService_ListManagedDevices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListManagedDevicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).ListManagedDevices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_ListManagedDevices_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).ListManagedDevices(ctx, req.(*ListManagedDevicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_AddManagedDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddManagedDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).AddManagedDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_AddManagedDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).AddManagedDevice(ctx, req.(*AddManagedDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_RemoveManagedDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveManagedDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).RemoveManagedDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_RemoveManagedDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).RemoveManagedDevice(ctx, req.(*RemoveManagedDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_SetDefaultManagedDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetDefaultManagedDeviceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).SetDefaultManagedDevice(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_SetDefaultManagedDevice_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).SetDefaultManagedDevice(ctx, req.(*SetDefaultManagedDeviceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SimulatorService_CreateSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateSessionRequest)
 	if err := dec(in); err != nil {
@@ -314,6 +466,24 @@ func _SimulatorService_CreateSession_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SimulatorServiceServer).CreateSession(ctx, req.(*CreateSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SimulatorService_ListSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SimulatorServiceServer).ListSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SimulatorService_ListSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SimulatorServiceServer).ListSessions(ctx, req.(*ListSessionsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -464,8 +634,28 @@ var SimulatorService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SimulatorService_ListDevices_Handler,
 		},
 		{
+			MethodName: "ListManagedDevices",
+			Handler:    _SimulatorService_ListManagedDevices_Handler,
+		},
+		{
+			MethodName: "AddManagedDevice",
+			Handler:    _SimulatorService_AddManagedDevice_Handler,
+		},
+		{
+			MethodName: "RemoveManagedDevice",
+			Handler:    _SimulatorService_RemoveManagedDevice_Handler,
+		},
+		{
+			MethodName: "SetDefaultManagedDevice",
+			Handler:    _SimulatorService_SetDefaultManagedDevice_Handler,
+		},
+		{
 			MethodName: "CreateSession",
 			Handler:    _SimulatorService_CreateSession_Handler,
+		},
+		{
+			MethodName: "ListSessions",
+			Handler:    _SimulatorService_ListSessions_Handler,
 		},
 		{
 			MethodName: "GetSession",

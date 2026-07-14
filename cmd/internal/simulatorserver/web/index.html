@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>simulator-server</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      color-scheme: dark;
+      --bg: #181818;
+      --panel: #242424;
+      --panel-2: #2e2e2e;
+      --border: #3c3c3c;
+      --text: #eeeeee;
+      --muted: #a8a8a8;
+      --accent: #4fb286;
+      --warn: #d6a84f;
+      --danger: #e07070;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: #202020;
+    }
+    h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: 0; }
+    h1 { font-size: 15px; }
+    h2 { font-size: 13px; color: var(--muted); text-transform: uppercase; }
+    h3 { font-size: 13px; }
+    main {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 48px);
+    }
+    aside {
+      border-right: 1px solid var(--border);
+      background: #202020;
+      overflow: auto;
+    }
+    section {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .stack { display: grid; gap: 10px; }
+    label { display: grid; gap: 5px; color: var(--muted); }
+    input, select, button {
+      height: 30px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+    }
+    input, select { width: 100%; padding: 0 8px; }
+    button {
+      padding: 0 10px;
+      cursor: pointer;
+      background: var(--panel-2);
+    }
+    button.primary {
+      border-color: #3b7d62;
+      background: #24533f;
+    }
+    button.danger {
+      border-color: #7b4141;
+      color: #ffd7d7;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .row > * { flex: 1; }
+    .status {
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .status.error { color: var(--danger); }
+    .status.busy { color: var(--warn); }
+    .device-list, .session-list {
+      display: grid;
+      gap: 8px;
+    }
+    .item {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .pill {
+      flex: 0 0 auto;
+      height: 22px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #333333;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .pill.live { color: #d8f3e7; background: #25543f; }
+    .workspace {
+      min-width: 0;
+      overflow: auto;
+      padding: 14px;
+    }
+    .session-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 12px;
+    }
+    .session-card {
+      min-height: 420px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      display: grid;
+      grid-template-rows: 1fr auto;
+      overflow: hidden;
+    }
+    .screen-wrap {
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      background: #111111;
+    }
+    .bezel {
+      height: 100%;
+      max-height: 740px;
+      max-width: 100%;
+      padding: 7px;
+      border-radius: 42px;
+      background: #303030;
+      display: flex;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 28px rgba(0,0,0,0.32);
+    }
+    .screen {
+      min-width: 150px;
+      min-height: 260px;
+      border-radius: 35px;
+      overflow: hidden;
+      background: #000000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .screen img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      user-select: none;
+      -webkit-user-drag: none;
+      touch-action: none;
+    }
+    .empty {
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 280px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+    }
+    .card-footer {
+      border-top: 1px solid var(--border);
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; }
+      .session-card { min-height: 520px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>simulator-server</h1>
+    <div class="row" style="flex: 0 1 420px">
+      <span id="health" class="status">Checking...</span>
+      <button id="refresh">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <section class="stack">
+        <h2>Create Session</h2>
+        <label>Device type <select id="deviceType"></select></label>
+        <label>Runtime <select id="runtime"></select></label>
+        <label>Managed device <select id="managedDevice"></select></label>
+        <label>App path <input id="appPath" placeholder="/path/to/App.app"></label>
+        <label>Bundle id <input id="bundleId" placeholder="com.example.App"></label>
+        <label class="row" style="display:flex">
+          <input id="noHeadless" type="checkbox" style="width:16px; flex:0 0 auto">
+          <span>No headless</span>
+        </label>
+        <button id="createSession" class="primary">Create</button>
+      </section>
+
+      <section class="stack">
+        <h2>Add Simulator</h2>
+        <label>Device type <select id="addDeviceType"></select></label>
+        <label>Runtime <select id="addRuntime"></select></label>
+        <label class="row" style="display:flex">
+          <input id="setDefault" type="checkbox" style="width:16px; flex:0 0 auto">
+          <span>Set default</span>
+        </label>
+        <button id="addDevice">Add</button>
+      </section>
+
+      <section class="stack">
+        <div class="row">
+          <h2>Managed</h2>
+          <span id="managedCount" class="status"></span>
+        </div>
+        <div id="managedList" class="device-list"></div>
+      </section>
+    </aside>
+
+    <div class="workspace">
+      <div id="sessions" class="session-grid"></div>
+      <div id="empty" class="empty">No active sessions</div>
+    </div>
+  </main>
+
+  <script>
+    const state = {
+      devices: [],
+      managed: [],
+      sessions: [],
+      eventSources: new Map(),
+      inputSockets: new Map(),
+      drag: new Map(),
+      creatingSession: false,
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const params = new URLSearchParams(window.location.search);
+
+    function setHealth(text, isError = false) {
+      $("health").textContent = text;
+      $("health").classList.toggle("error", isError);
+      $("health").classList.toggle("busy", false);
+    }
+
+    function setBusy(text) {
+      $("health").textContent = text;
+      $("health").classList.remove("error");
+      $("health").classList.add("busy");
+    }
+
+    async function withButton(button, busyLabel, fn) {
+      if (button.disabled) return;
+      const label = button.textContent;
+      button.disabled = true;
+      button.textContent = busyLabel;
+      try {
+        return await fn();
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        ...options,
+        headers: {"content-type": "application/json", ...(options.headers || {})},
+      });
+      if (!res.ok) {
+        let message = res.statusText;
+        try {
+          const body = await res.json();
+          message = body.error || message;
+        } catch {}
+        throw new Error(message);
+      }
+      return res.json();
+    }
+
+    function option(value, label) {
+      const el = document.createElement("option");
+      el.value = value;
+      el.textContent = label;
+      return el;
+    }
+
+    function fillDeviceSelect(select, runtimeSelect) {
+      select.replaceChildren();
+      if (!state.devices.length) {
+        select.appendChild(option("", "No device types available"));
+        fillRuntimeSelect(select, runtimeSelect);
+        return;
+      }
+      for (const device of state.devices) {
+        select.appendChild(option(device.identifier, device.name));
+      }
+      select.onchange = () => fillRuntimeSelect(select, runtimeSelect);
+      fillRuntimeSelect(select, runtimeSelect);
+    }
+
+    function fillRuntimeSelect(deviceSelect, runtimeSelect) {
+      const device = state.devices.find((d) => d.identifier === deviceSelect.value);
+      runtimeSelect.replaceChildren();
+      const runtimes = device?.runtimes || [];
+      if (!runtimes.length) {
+        runtimeSelect.appendChild(option("", "No runtimes available"));
+        return;
+      }
+      for (const runtime of runtimes) {
+        runtimeSelect.appendChild(option(runtime.identifier, runtime.name));
+      }
+    }
+
+    function renderManaged() {
+      $("managedCount").textContent = String(state.managed.length);
+      $("managedDevice").replaceChildren(option("", "Use device type"));
+      for (const device of state.managed) {
+        $("managedDevice").appendChild(option(device.udid, `${device.name} ${device.isDefault ? "(default)" : ""}`));
+      }
+
+      $("managedList").replaceChildren();
+      for (const device of state.managed) {
+        const item = document.createElement("div");
+        item.className = "item";
+        item.innerHTML = `
+          <div class="row">
+            <h3></h3>
+            <span class="pill"></span>
+          </div>
+          <div class="meta"></div>
+          <div class="row">
+            <button data-action="default">Default</button>
+            <button data-action="delete" class="danger">Delete</button>
+          </div>
+        `;
+        item.querySelector("h3").textContent = device.name;
+        item.querySelector(".pill").textContent = device.state || "Unknown";
+        item.querySelector(".meta").textContent = `${device.runtime || device.runtimeId}  ${device.udid}`;
+        item.querySelector("[data-action=default]").disabled = device.isDefault;
+        item.querySelector("[data-action=default]").onclick = (event) => setDefaultDevice(device.udid, event.currentTarget).catch((err) => setHealth(err.message, true));
+        item.querySelector("[data-action=delete]").onclick = (event) => removeManagedDevice(device.udid, event.currentTarget).catch((err) => setHealth(err.message, true));
+        $("managedList").appendChild(item);
+      }
+    }
+
+    function renderSessions() {
+      const root = $("sessions");
+      root.replaceChildren();
+      $("empty").style.display = state.sessions.length ? "none" : "flex";
+      const active = new Set(state.sessions.map((s) => s.sessionId));
+      for (const [id, source] of state.eventSources) {
+        if (!active.has(id)) {
+          source.close();
+          state.eventSources.delete(id);
+        }
+      }
+      for (const [id, socket] of state.inputSockets) {
+        if (!active.has(id)) {
+          socket.close();
+          state.inputSockets.delete(id);
+        }
+      }
+      for (const session of state.sessions) {
+        root.appendChild(sessionCard(session));
+        attachEvents(session.sessionId);
+        openInputSocket(session.sessionId);
+      }
+    }
+
+    function sessionCard(session) {
+      const card = document.createElement("div");
+      card.className = "session-card";
+      card.dataset.sessionId = session.sessionId;
+      card.innerHTML = `
+        <div class="screen-wrap">
+          <div class="bezel">
+            <div class="screen">
+              <img alt="">
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <div class="row">
+            <h3></h3>
+            <span class="pill live"></span>
+          </div>
+          <div class="meta"></div>
+          <div class="row">
+            <input data-role="text" placeholder="Text input">
+            <button data-action="sendText">Send</button>
+          </div>
+          <div class="row">
+            <input data-role="appPath" placeholder="/path/to/App.app">
+            <button data-action="install">Install</button>
+          </div>
+          <div class="row">
+            <input data-role="bundleId" placeholder="Bundle id">
+            <button data-action="launch">Launch</button>
+            <button data-action="stop" class="danger">Stop</button>
+          </div>
+        </div>
+      `;
+      card.querySelector("h3").textContent = session.deviceUdid || session.sessionId;
+      card.querySelector(".pill").textContent = session.state || "Running";
+      card.querySelector(".meta").textContent = `${session.sessionId}  ${session.bundleId || ""}`;
+      const img = card.querySelector("img");
+      if (session.screenWidth && session.screenHeight) {
+        img.src = `/v1/sessions/${session.sessionId}/video`;
+        setupPointerInput(img, session.sessionId);
+      } else {
+        img.remove();
+        card.querySelector(".screen").textContent = "Starting...";
+      }
+      card.querySelector("[data-action=sendText]").onclick = (event) => sendText(session.sessionId, card.querySelector("[data-role=text]").value, event.currentTarget).catch((err) => setHealth(err.message, true));
+      card.querySelector("[data-action=install]").onclick = (event) => installApp(session.sessionId, card.querySelector("[data-role=appPath]").value, event.currentTarget).catch((err) => setHealth(err.message, true));
+      card.querySelector("[data-action=launch]").onclick = (event) => launchApp(session.sessionId, card.querySelector("[data-role=bundleId]").value, event.currentTarget).catch((err) => setHealth(err.message, true));
+      card.querySelector("[data-action=stop]").onclick = (event) => stopSession(session.sessionId, event.currentTarget).catch((err) => setHealth(err.message, true));
+      return card;
+    }
+
+    function setupPointerInput(img, sessionId) {
+      const point = (event) => {
+        const rect = img.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+          y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+        };
+      };
+      img.onpointerdown = (event) => {
+        event.preventDefault();
+        img.setPointerCapture(event.pointerId);
+        const start = point(event);
+        state.drag.set(sessionId, {
+          last: start,
+          moveScheduled: false,
+        });
+        sendInput(sessionId, {touchDown: start}).catch((err) => setHealth(err.message, true));
+      };
+      img.onpointermove = (event) => {
+        const drag = state.drag.get(sessionId);
+        if (!drag) return;
+        event.preventDefault();
+        drag.last = point(event);
+        if (drag.moveScheduled) return;
+        drag.moveScheduled = true;
+        requestAnimationFrame(() => {
+          const current = state.drag.get(sessionId);
+          if (!current) return;
+          current.moveScheduled = false;
+          sendInput(sessionId, {touchMove: current.last}).catch((err) => setHealth(err.message, true));
+        });
+      };
+      img.onpointerup = (event) => {
+        const drag = state.drag.get(sessionId);
+        if (!drag) return;
+        event.preventDefault();
+        state.drag.delete(sessionId);
+        drag.last = point(event);
+        sendInput(sessionId, {touchUp: drag.last}).catch((err) => setHealth(err.message, true));
+      };
+      img.onpointercancel = () => state.drag.delete(sessionId);
+      img.ondragstart = (event) => event.preventDefault();
+      img.oncontextmenu = (event) => event.preventDefault();
+    }
+
+    function openInputSocket(sessionId) {
+      const existing = state.inputSockets.get(sessionId);
+      if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+        return existing;
+      }
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${protocol}//${window.location.host}/v1/sessions/${sessionId}/input-stream`);
+      socket._queue = [];
+      socket.onopen = () => {
+        for (const input of socket._queue.splice(0)) {
+          socket.send(JSON.stringify(input));
+        }
+      };
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.error) setHealth(msg.error, true);
+        } catch {}
+      };
+      socket.onclose = () => {
+        if (state.inputSockets.get(sessionId) === socket) {
+          state.inputSockets.delete(sessionId);
+        }
+      };
+      socket.onerror = () => {
+        if (state.inputSockets.get(sessionId) === socket) {
+          state.inputSockets.delete(sessionId);
+        }
+      };
+      state.inputSockets.set(sessionId, socket);
+      return socket;
+    }
+
+    function attachEvents(sessionId) {
+      if (state.eventSources.has(sessionId)) return;
+      const source = new EventSource(`/v1/sessions/${sessionId}/events`);
+      source.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        const card = document.querySelector(`[data-session-id="${sessionId}"]`);
+        if (!card) return;
+        const pill = card.querySelector(".pill");
+        if (msg.status) pill.textContent = msg.status.phase;
+        if (msg.error) {
+          pill.textContent = "error";
+          card.querySelector(".meta").textContent = msg.error.message;
+        }
+        if (msg.stopped) refreshAll();
+      };
+      source.onerror = () => {
+        source.close();
+        state.eventSources.delete(sessionId);
+      };
+      state.eventSources.set(sessionId, source);
+    }
+
+    async function refreshAll() {
+      try {
+        const health = await api("/v1/health");
+        setHealth(`${health.status} ${health.version}`);
+        const [devices, managed, sessions] = await Promise.allSettled([
+          api("/v1/devices"),
+          api("/v1/managed-devices"),
+          api("/v1/sessions"),
+        ]);
+        const errors = [];
+        if (devices.status === "fulfilled") {
+          state.devices = devices.value.deviceTypes || [];
+        } else {
+          state.devices = [];
+          errors.push(`devices: ${devices.reason.message}`);
+        }
+        if (managed.status === "fulfilled") {
+          state.managed = managed.value.devices || [];
+        } else {
+          state.managed = [];
+          errors.push(`managed: ${managed.reason.message}`);
+        }
+        if (sessions.status === "fulfilled") {
+          state.sessions = sessions.value.sessions || [];
+        } else {
+          state.sessions = [];
+          errors.push(`sessions: ${sessions.reason.message}`);
+        }
+        fillDeviceSelect($("deviceType"), $("runtime"));
+        fillDeviceSelect($("addDeviceType"), $("addRuntime"));
+        renderManaged();
+        applyQueryParams();
+        renderSessions();
+        if (errors.length) {
+          setHealth(errors.join(" | "), true);
+        }
+      } catch (err) {
+        setHealth(err.message, true);
+      }
+    }
+
+    function applyQueryParams() {
+      if (params.has("appPath")) $("appPath").value = params.get("appPath") || "";
+      if (params.has("bundleId")) $("bundleId").value = params.get("bundleId") || "";
+      if (params.has("noHeadless")) $("noHeadless").checked = params.get("noHeadless") === "true";
+      if (params.has("deviceUdid")) {
+        const udid = params.get("deviceUdid") || "";
+        if ([...$("managedDevice").options].some((item) => item.value === udid)) {
+          $("managedDevice").value = udid;
+        }
+      }
+      if (params.has("deviceType")) {
+        const deviceType = params.get("deviceType") || "";
+        if ([...$("deviceType").options].some((item) => item.value === deviceType)) {
+          $("deviceType").value = deviceType;
+          fillRuntimeSelect($("deviceType"), $("runtime"));
+        }
+        if ([...$("addDeviceType").options].some((item) => item.value === deviceType)) {
+          $("addDeviceType").value = deviceType;
+          fillRuntimeSelect($("addDeviceType"), $("addRuntime"));
+        }
+      }
+      if (params.has("runtime")) {
+        const runtime = params.get("runtime") || "";
+        if ([...$("runtime").options].some((item) => item.value === runtime)) $("runtime").value = runtime;
+        if ([...$("addRuntime").options].some((item) => item.value === runtime)) $("addRuntime").value = runtime;
+      }
+    }
+
+    async function createSession() {
+      if (state.creatingSession) return;
+      const body = {
+        noHeadless: $("noHeadless").checked,
+      };
+      if ($("managedDevice").value) {
+        body.deviceUdid = $("managedDevice").value;
+      } else {
+        if (!$("deviceType").value || !$("runtime").value) return;
+        body.deviceType = $("deviceType").value;
+        body.runtime = $("runtime").value;
+      }
+      if ($("appPath").value) {
+        body.appBundle = {path: $("appPath").value, bundleId: $("bundleId").value};
+      } else if ($("bundleId").value) {
+        body.installedApp = {bundleId: $("bundleId").value};
+      }
+      state.creatingSession = true;
+      $("createSession").disabled = true;
+      $("createSession").textContent = "Creating...";
+      setBusy("Creating session...");
+      const create = api("/v1/sessions", {method: "POST", body: JSON.stringify(body)});
+      window.setTimeout(() => refreshAll().catch(() => {}), 500);
+      try {
+        await create;
+        await refreshAll();
+      } finally {
+        state.creatingSession = false;
+        $("createSession").disabled = false;
+        $("createSession").textContent = "Create";
+      }
+    }
+
+    async function addManagedDevice(button) {
+      if (!$("addDeviceType").value || !$("addRuntime").value) return;
+      await withButton(button, "Adding...", async () => {
+        setBusy("Adding simulator...");
+        await api("/v1/managed-devices", {
+          method: "POST",
+          body: JSON.stringify({
+            deviceType: $("addDeviceType").value,
+            runtime: $("addRuntime").value,
+            setDefault: $("setDefault").checked,
+          }),
+        });
+        await refreshAll();
+      });
+    }
+
+    async function removeManagedDevice(udid, button) {
+      await withButton(button, "Deleting...", async () => {
+        setBusy("Deleting simulator...");
+        await api(`/v1/managed-devices/${encodeURIComponent(udid)}`, {method: "DELETE"});
+        await refreshAll();
+      });
+    }
+
+    async function setDefaultDevice(udid, button) {
+      await withButton(button, "Setting...", async () => {
+        setBusy("Setting default simulator...");
+        await api(`/v1/managed-devices/${encodeURIComponent(udid)}/default`, {method: "POST", body: "{}"});
+        await refreshAll();
+      });
+    }
+
+    async function stopSession(id, button) {
+      await withButton(button, "Stopping...", async () => {
+        setBusy("Stopping session...");
+        const card = document.querySelector(`[data-session-id="${id}"]`);
+        if (card) {
+          const pill = card.querySelector(".pill");
+          if (pill) pill.textContent = "stopping";
+        }
+        await api(`/v1/sessions/${id}`, {method: "DELETE"});
+        await refreshAll();
+      });
+    }
+
+    async function installApp(id, appPath, button) {
+      if (!appPath) return;
+      await withButton(button, "Installing...", async () => {
+        setBusy("Installing app...");
+        await api(`/v1/sessions/${id}/install`, {method: "POST", body: JSON.stringify({appPath})});
+        setHealth("Install complete");
+      });
+    }
+
+    async function launchApp(id, bundleId, button) {
+      if (!bundleId) return;
+      await withButton(button, "Launching...", async () => {
+        setBusy("Launching app...");
+        await api(`/v1/sessions/${id}/launch`, {method: "POST", body: JSON.stringify({bundleId})});
+        await refreshAll();
+      });
+    }
+
+    async function sendInput(id, input) {
+      const socket = openInputSocket(id);
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(input));
+        return;
+      }
+      if (socket.readyState === WebSocket.CONNECTING) {
+        socket._queue.push(input);
+        return;
+      }
+      await api(`/v1/sessions/${id}/input`, {method: "POST", body: JSON.stringify({input})});
+    }
+
+    async function sendText(id, value, button) {
+      if (!value) return;
+      await withButton(button, "Sending...", async () => {
+        setBusy("Sending text...");
+        for (const char of value) {
+          await sendInput(id, {text: {value: char}});
+        }
+        setHealth("Text sent");
+      });
+    }
+
+    $("refresh").onclick = refreshAll;
+    $("createSession").onclick = () => createSession().catch((err) => setHealth(err.message, true));
+    $("addDevice").onclick = (event) => addManagedDevice(event.currentTarget).catch((err) => setHealth(err.message, true));
+    refreshAll();
+  </script>
+</body>
+</html>

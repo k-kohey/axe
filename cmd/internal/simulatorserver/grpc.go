@@ -29,12 +29,46 @@ func (s *GRPCServer) ListDevices(ctx context.Context, _ *simulatorv1.ListDevices
 	return &simulatorv1.ListDevicesResponse{DeviceTypes: deviceTypesToProto(devices)}, nil
 }
 
+func (s *GRPCServer) ListManagedDevices(ctx context.Context, _ *simulatorv1.ListManagedDevicesRequest) (*simulatorv1.ListManagedDevicesResponse, error) {
+	devices, err := s.runtime.ListManagedDevices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &simulatorv1.ListManagedDevicesResponse{Devices: managedDevicesToProto(devices)}, nil
+}
+
+func (s *GRPCServer) AddManagedDevice(ctx context.Context, req *simulatorv1.AddManagedDeviceRequest) (*simulatorv1.AddManagedDeviceResponse, error) {
+	device, err := s.runtime.AddManagedDevice(ctx, addManagedDeviceFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	return &simulatorv1.AddManagedDeviceResponse{Device: managedDeviceToProto(*device)}, nil
+}
+
+func (s *GRPCServer) RemoveManagedDevice(ctx context.Context, req *simulatorv1.RemoveManagedDeviceRequest) (*simulatorv1.RemoveManagedDeviceResponse, error) {
+	if err := s.runtime.RemoveManagedDevice(ctx, req.GetUdid()); err != nil {
+		return nil, err
+	}
+	return &simulatorv1.RemoveManagedDeviceResponse{}, nil
+}
+
+func (s *GRPCServer) SetDefaultManagedDevice(ctx context.Context, req *simulatorv1.SetDefaultManagedDeviceRequest) (*simulatorv1.SetDefaultManagedDeviceResponse, error) {
+	if err := s.runtime.SetDefaultManagedDevice(ctx, req.GetUdid()); err != nil {
+		return nil, err
+	}
+	return &simulatorv1.SetDefaultManagedDeviceResponse{}, nil
+}
+
 func (s *GRPCServer) CreateSession(ctx context.Context, req *simulatorv1.CreateSessionRequest) (*simulatorv1.CreateSessionResponse, error) {
 	session, err := s.runtime.CreateSession(ctx, createSessionFromProto(req))
 	if err != nil {
 		return nil, err
 	}
 	return &simulatorv1.CreateSessionResponse{Session: sessionToProto(session)}, nil
+}
+
+func (s *GRPCServer) ListSessions(context.Context, *simulatorv1.ListSessionsRequest) (*simulatorv1.ListSessionsResponse, error) {
+	return &simulatorv1.ListSessionsResponse{Sessions: sessionsToProto(s.runtime.ListSessions())}, nil
 }
 
 func (s *GRPCServer) GetSession(_ context.Context, req *simulatorv1.GetSessionRequest) (*simulatorv1.Session, error) {

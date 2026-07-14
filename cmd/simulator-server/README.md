@@ -37,6 +37,12 @@ Defaults:
 - HTTP: `127.0.0.1:3977`
 - gRPC: `127.0.0.1:3978`
 
+Open the browser UI:
+
+```sh
+open http://127.0.0.1:3977/ui/
+```
+
 Custom addresses:
 
 ```sh
@@ -63,6 +69,11 @@ Useful endpoints:
 
 - `GET /v1/health`
 - `GET /v1/devices`
+- `GET /v1/managed-devices`
+- `POST /v1/managed-devices`
+- `DELETE /v1/managed-devices/{udid}`
+- `POST /v1/managed-devices/{udid}/default`
+- `GET /v1/sessions`
 - `POST /v1/sessions`
 - `GET /v1/sessions/{session_id}`
 - `DELETE /v1/sessions/{session_id}`

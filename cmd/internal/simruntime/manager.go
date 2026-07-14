@@ -81,6 +81,71 @@ func (m *RuntimeManager) ListDevices(ctx context.Context) ([]DeviceType, error) 
 	return out, nil
 }
 
+func (m *RuntimeManager) ListManagedDevices(ctx context.Context) ([]ManagedDevice, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	store, err := platform.NewConfigStore()
+	if err != nil {
+		return nil, err
+	}
+	devices, err := platform.ListManaged(m.simctl, store)
+	if err != nil {
+		return nil, err
+	}
+	return managedDevicesFromPlatform(devices), nil
+}
+
+func (m *RuntimeManager) AddManagedDevice(ctx context.Context, req AddManagedDeviceRequest) (*ManagedDevice, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if req.DeviceType == "" {
+		return nil, fmt.Errorf("device type is required")
+	}
+	if req.Runtime == "" {
+		return nil, fmt.Errorf("runtime is required")
+	}
+	store, err := platform.NewConfigStore()
+	if err != nil {
+		return nil, err
+	}
+	device, err := platform.Add(m.simctl, req.DeviceType, req.Runtime, req.SetDefault, store)
+	if err != nil {
+		return nil, err
+	}
+	out := managedDeviceFromPlatform(device)
+	return &out, nil
+}
+
+func (m *RuntimeManager) RemoveManagedDevice(ctx context.Context, udid string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if udid == "" {
+		return fmt.Errorf("udid is required")
+	}
+	store, err := platform.NewConfigStore()
+	if err != nil {
+		return err
+	}
+	return platform.Remove(m.simctl, udid, store)
+}
+
+func (m *RuntimeManager) SetDefaultManagedDevice(ctx context.Context, udid string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	store, err := platform.NewConfigStore()
+	if err != nil {
+		return err
+	}
+	if udid == "" {
+		return store.ClearDefault()
+	}
+	return store.SetDefault(udid)
+}
+
 func (m *RuntimeManager) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
 	if req.DeviceUDID == "" && req.DeviceType == "" {
 		return nil, fmt.Errorf("device type is required")
@@ -111,6 +176,16 @@ func (m *RuntimeManager) CreateSession(ctx context.Context, req CreateSessionReq
 		return nil, err
 	}
 	return s.info(), nil
+}
+
+func (m *RuntimeManager) ListSessions() []*SessionInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*SessionInfo, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		out = append(out, s.info())
+	}
+	return out
 }
 
 func (m *RuntimeManager) startSession(ctx context.Context, s *Session, req CreateSessionRequest) error {
@@ -296,6 +371,9 @@ func (m *RuntimeManager) WatchVideo(ctx context.Context, id string, fps int) (<-
 	s, err := m.lookup(id)
 	if err != nil {
 		return nil, err
+	}
+	if s.client == nil {
+		return nil, fmt.Errorf("session is not ready for video")
 	}
 	if fps <= 0 {
 		fps = 30
@@ -517,4 +595,23 @@ func bundleIDFromApp(path string) (string, error) {
 		return "", fmt.Errorf("CFBundleIdentifier not found in %s", infoPlist)
 	}
 	return info.BundleID, nil
+}
+
+func managedDevicesFromPlatform(devices []platform.ManagedSimulator) []ManagedDevice {
+	out := make([]ManagedDevice, 0, len(devices))
+	for _, d := range devices {
+		out = append(out, managedDeviceFromPlatform(d))
+	}
+	return out
+}
+
+func managedDeviceFromPlatform(d platform.ManagedSimulator) ManagedDevice {
+	return ManagedDevice{
+		UDID:      d.UDID,
+		Name:      d.Name,
+		Runtime:   d.Runtime,
+		RuntimeID: d.RuntimeID,
+		State:     d.State,
+		IsDefault: d.IsDefault,
+	}
 }

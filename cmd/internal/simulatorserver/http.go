@@ -2,20 +2,27 @@ package simulatorserver
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strings"
+	"time"
 
 	"github.com/k-kohey/axe/internal/simruntime"
 	simulatorv1 "github.com/k-kohey/axe/pkg/simulatorapi/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"nhooyr.io/websocket"
 )
+
+//go:embed web/*
+var webAssets embed.FS
 
 type HTTPServer struct {
 	runtime simruntime.Manager
@@ -38,10 +45,35 @@ func (s *HTTPServer) Handler() http.Handler {
 }
 
 func (s *HTTPServer) routes() {
+	web, err := fs.Sub(webAssets, "web")
+	if err != nil {
+		panic(err)
+	}
+	s.mux.HandleFunc("/", s.handleRoot)
+	s.mux.HandleFunc("/ui", s.handleUIRedirect)
+	s.mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web))))
 	s.mux.HandleFunc("/v1/health", s.handleHealth)
 	s.mux.HandleFunc("/v1/devices", s.handleDevices)
+	s.mux.HandleFunc("/v1/managed-devices", s.handleManagedDevices)
+	s.mux.HandleFunc("/v1/managed-devices/", s.handleManagedDeviceResource)
 	s.mux.HandleFunc("/v1/sessions", s.handleSessions)
 	s.mux.HandleFunc("/v1/sessions/", s.handleSessionResource)
+}
+
+func (s *HTTPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/ui/", http.StatusFound)
+}
+
+func (s *HTTPServer) handleUIRedirect(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/ui" {
+		http.NotFound(w, r)
+		return
+	}
+	http.Redirect(w, r, "/ui/", http.StatusFound)
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -65,9 +97,78 @@ func (s *HTTPServer) handleDevices(w http.ResponseWriter, r *http.Request) {
 	writeProto(w, &simulatorv1.ListDevicesResponse{DeviceTypes: deviceTypesToProto(devices)})
 }
 
+func (s *HTTPServer) handleManagedDevices(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/v1/managed-devices" {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		devices, err := s.runtime.ListManagedDevices(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeProto(w, &simulatorv1.ListManagedDevicesResponse{Devices: managedDevicesToProto(devices)})
+	case http.MethodPost:
+		req := &simulatorv1.AddManagedDeviceRequest{}
+		if err := readProto(r, req); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		device, err := s.runtime.AddManagedDevice(r.Context(), addManagedDeviceFromProto(req))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeProto(w, &simulatorv1.AddManagedDeviceResponse{Device: managedDeviceToProto(*device)})
+	default:
+		methodNotAllowed(w)
+	}
+}
+
+func (s *HTTPServer) handleManagedDeviceResource(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/managed-devices/")
+	parts := strings.Split(strings.Trim(rest, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	udid := parts[0]
+	if len(parts) == 1 {
+		if r.Method != http.MethodDelete {
+			methodNotAllowed(w)
+			return
+		}
+		if err := s.runtime.RemoveManagedDevice(r.Context(), udid); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeProto(w, &simulatorv1.RemoveManagedDeviceResponse{})
+		return
+	}
+	if len(parts) == 2 && parts[1] == "default" {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w)
+			return
+		}
+		if err := s.runtime.SetDefaultManagedDevice(r.Context(), udid); err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeProto(w, &simulatorv1.SetDefaultManagedDeviceResponse{})
+		return
+	}
+	http.NotFound(w, r)
+}
+
 func (s *HTTPServer) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/v1/sessions" {
 		http.NotFound(w, r)
+		return
+	}
+	if r.Method == http.MethodGet {
+		writeProto(w, &simulatorv1.ListSessionsResponse{Sessions: sessionsToProto(s.runtime.ListSessions())})
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -106,6 +207,8 @@ func (s *HTTPServer) handleSessionResource(w http.ResponseWriter, r *http.Reques
 	switch parts[1] {
 	case "input":
 		s.handleInput(w, r, sessionID)
+	case "input-stream":
+		s.handleInputStream(w, r, sessionID)
 	case "install":
 		s.handleInstall(w, r, sessionID)
 	case "launch":
@@ -159,6 +262,54 @@ func (s *HTTPServer) handleInput(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	writeProto(w, &simulatorv1.SendInputResponse{})
+}
+
+func (s *HTTPServer) handleInputStream(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		OriginPatterns: []string{"*"},
+	})
+	if err != nil {
+		slog.Debug("failed to accept input websocket", "session", sessionID, "err", err)
+		return
+	}
+	defer func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}()
+
+	ctx := r.Context()
+	for {
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			if websocket.CloseStatus(err) == websocket.StatusNormalClosure ||
+				websocket.CloseStatus(err) == websocket.StatusGoingAway {
+				return
+			}
+			slog.Debug("input websocket read failed", "session", sessionID, "err", err)
+			return
+		}
+		input := &simulatorv1.InputEvent{}
+		if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, input); err != nil {
+			writeInputStreamError(ctx, conn, fmt.Errorf("invalid input event: %w", err))
+			continue
+		}
+		if err := s.runtime.SendInput(ctx, sessionID, inputFromProto(input)); err != nil {
+			writeInputStreamError(ctx, conn, err)
+		}
+	}
+}
+
+func writeInputStreamError(ctx context.Context, conn *websocket.Conn, err error) {
+	writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	data, marshalErr := json.Marshal(map[string]string{"error": err.Error()})
+	if marshalErr != nil {
+		return
+	}
+	_ = conn.Write(writeCtx, websocket.MessageText, data)
 }
 
 func (s *HTTPServer) handleInstall(w http.ResponseWriter, r *http.Request, sessionID string) {

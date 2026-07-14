@@ -54,6 +54,22 @@ func (m *fakeSimRuntimeManager) ListDevices(context.Context) ([]simruntime.Devic
 	return nil, nil
 }
 
+func (m *fakeSimRuntimeManager) ListManagedDevices(context.Context) ([]simruntime.ManagedDevice, error) {
+	return nil, nil
+}
+
+func (m *fakeSimRuntimeManager) AddManagedDevice(context.Context, simruntime.AddManagedDeviceRequest) (*simruntime.ManagedDevice, error) {
+	return nil, nil
+}
+
+func (m *fakeSimRuntimeManager) RemoveManagedDevice(context.Context, string) error {
+	return nil
+}
+
+func (m *fakeSimRuntimeManager) SetDefaultManagedDevice(context.Context, string) error {
+	return nil
+}
+
 func (m *fakeSimRuntimeManager) CreateSession(_ context.Context, req simruntime.CreateSessionRequest) (*simruntime.SessionInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -74,6 +90,10 @@ func (m *fakeSimRuntimeManager) CreateSession(_ context.Context, req simruntime.
 		ScreenWidth:  390,
 		ScreenHeight: 844,
 	}, nil
+}
+
+func (m *fakeSimRuntimeManager) ListSessions() []*simruntime.SessionInfo {
+	return nil
 }
 
 func (m *fakeSimRuntimeManager) GetSession(string) (*simruntime.SessionInfo, error) {
