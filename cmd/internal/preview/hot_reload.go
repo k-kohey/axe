@@ -274,7 +274,24 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 	fmt.Fprintln(os.Stderr, "\nDependency changed, rebuilding...")
 	sendWatchStatus(wctx, "building")
 
-	if err := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); err != nil {
+	if pc.UsesBuildInfo() {
+		// The build belongs to the BuildInfo command (e.g. Bazel), not to xcodebuild.
+		if pc.BuildInfoCommand == "" {
+			return fmt.Errorf("this change needs a rebuild, which a --build-info file cannot provide; run the build again or set BUILD_INFO_COMMAND in .axerc")
+		}
+		source := pc.BuildInfoSource
+		if source == "" {
+			source = sourceFile
+		}
+		if _, err := build.RunBuildInfoCommand(pc, source, pc.BuildInfoDevice); err != nil {
+			return fmt.Errorf("rebuild: %w", err)
+		}
+		res, err := build.PrepareFromBuildInfo(pc.BuildInfoPath, dirs.ProjectDirs)
+		if err != nil {
+			return fmt.Errorf("rebuild: %w", err)
+		}
+		*bs = *res.Settings
+	} else if err := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); err != nil {
 		return fmt.Errorf("incremental build: %w", err)
 	}
 

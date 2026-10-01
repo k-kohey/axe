@@ -176,6 +176,7 @@ These flags are shared by all `preview` subcommands:
 | `--scheme` | Xcode scheme to build (required) |
 | `--device` | Simulator UDID to use (searches axe set first, then standard Xcode set) |
 | `--configuration` | Build configuration (e.g. `Debug`) |
+| `--build-info` | BuildInfo JSON of an app built by another build system; skips `xcodebuild` (see [Other Build Systems](#other-build-systems-buildinfo)) |
 
 All flags fall back to `.axerc` values when not specified.
 
@@ -307,6 +308,58 @@ SCHEME=MyApp
 CONFIGURATION=Debug
 DEVICE=<simulator-udid>
 ```
+
+## Other Build Systems (BuildInfo)
+
+Projects built by something other than `xcodebuild` (e.g. Bazel) can describe the build to axe with a BuildInfo JSON file
+instead. axe then never runs `xcodebuild`; it compiles preview thunks with the given compiler inputs and launches the
+given app.
+
+Point axe at a file, or at a command that builds the app and prints the JSON to stdout:
+
+```
+# .axerc
+BUILD_INFO=build-info.json
+# or
+BUILD_INFO_COMMAND=./tools/preview-build-info {file} --device {device}
+```
+
+`{file}` is replaced with the absolute path of the previewed source file and `{device}` with the simulator UDID
+(`generic` when none is selected). With `BUILD_INFO_COMMAND`, `preview watch` runs the command again when a change needs
+a full rebuild. `PROJECT`, `WORKSPACE` and `SCHEME` are not needed in this mode.
+
+```json
+{
+  "schemaVersion": 1,
+  "module": "FeatureUI",
+  "configuration": "Debug",
+  "provider": "bazel",
+  "swiftcArguments": ["-module-name", "FeatureUI", "-target", "arm64-apple-ios17.0-simulator", "-swift-version", "6"],
+  "sourceFiles": ["/abs/path/FeatureUI/View.swift"],
+  "moduleSearchPaths": ["/abs/path/out/FeatureUI"],
+  "frameworkSearchPaths": [],
+  "indexStorePath": "/abs/path/out/index",
+  "transitiveDependencies": [],
+  "appBundlePath": "/abs/path/out/MyApp.app",
+  "appBundleId": "com.example.MyApp"
+}
+```
+
+| Field | Description |
+|---|---|
+| `schemaVersion` | Must be `1` |
+| `module` | Module that owns the previewed sources |
+| `configuration`, `provider` | Informational (shown in logs) |
+| `swiftcArguments` | Swift compiler arguments of the module; axe reads `-target`, `-swift-version` and `-Xcc -fmodule-map-file=` |
+| `sourceFiles` | Absolute paths of the module's sources (used to map a file to its module) |
+| `moduleSearchPaths`, `frameworkSearchPaths` | `-I` / `-F` paths needed to compile against the module and its dependencies |
+| `indexStorePath` | Optional index store; relative paths recorded in it are resolved against the project root |
+| `transitiveDependencies` | Optional, informational |
+| `appBundlePath`, `appBundleId` | Simulator app that links the module (required) |
+
+The producer must build that app with `-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports` on the
+module (what axe adds through `xcodebuild` otherwise). Read-only build outputs are fine: axe stages a writable copy of
+the app.
 
 ## Known Issues
 
