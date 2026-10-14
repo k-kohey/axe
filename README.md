@@ -321,12 +321,12 @@ Point axe at a file, or at a command that builds the app and prints the JSON to 
 # .axerc
 BUILD_INFO=build-info.json
 # or
-BUILD_INFO_COMMAND=./tools/preview-build-info {file} --device {device}
+BUILD_INFO_COMMAND=./tools/preview-build-info "$AXE_PREVIEW_FILE" --device "$AXE_PREVIEW_DEVICE"
 ```
 
-`{file}` is replaced with the absolute path of the previewed source file and `{device}` with the simulator UDID
-(`generic` when none is selected). With `BUILD_INFO_COMMAND`, `preview watch` runs the command again when a change needs
-a full rebuild. `PROJECT`, `WORKSPACE` and `SCHEME` are not needed in this mode.
+The command runs with `AXE_PREVIEW_FILE` set to the absolute path of the previewed source file and `AXE_PREVIEW_DEVICE`
+set to the simulator UDID (`generic` when none is selected); quote them as shown. With `BUILD_INFO_COMMAND`,
+`preview watch` runs the command again when a change needs a full rebuild. `PROJECT`, `WORKSPACE` and `SCHEME` are not needed in this mode.
 
 ```json
 {

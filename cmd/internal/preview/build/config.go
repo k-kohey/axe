@@ -19,13 +19,13 @@ type ProjectConfig struct {
 	// BuildInfoPath is a BuildInfo JSON file (see buildinfo.go). When set, axe uses it
 	// instead of running xcodebuild, so any build system can drive previews.
 	BuildInfoPath string
-	// BuildInfoCommand is a shell command template printing BuildInfo JSON to stdout.
-	// {file} and {device} are substituted before running it.
+	// BuildInfoCommand is a shell command printing BuildInfo JSON to stdout.
+	// It runs with AXE_PREVIEW_FILE and AXE_PREVIEW_DEVICE set in its environment.
 	BuildInfoCommand string
 	// Root is the project root used when neither Project nor Workspace is set (build info mode).
 	Root string
-	// BuildInfoDevice is the {device} value BuildInfoCommand runs with; BuildInfoSource the {file} value. Kept so
-	// that watch mode can run the command again when a change needs a rebuild.
+	// BuildInfoDevice is the AXE_PREVIEW_DEVICE value BuildInfoCommand runs with; BuildInfoSource the
+	// AXE_PREVIEW_FILE value. Kept so that watch mode can run the command again when a change needs a rebuild.
 	BuildInfoDevice string
 	BuildInfoSource string
 }
