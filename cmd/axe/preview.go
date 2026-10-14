@@ -8,6 +8,7 @@ import (
 
 	"github.com/k-kohey/axe/internal/platform"
 	"github.com/k-kohey/axe/internal/preview"
+	"github.com/k-kohey/axe/internal/preview/build"
 	"github.com/spf13/cobra"
 )
 
@@ -231,6 +232,9 @@ func resolveProjectConfig() (preview.ProjectConfig, error) {
 		buildInfo = rc["BUILD_INFO"]
 	}
 	buildInfoCommand := rc["BUILD_INFO_COMMAND"]
+	if err := build.CheckBuildInfoCommand(buildInfoCommand); err != nil {
+		return preview.ProjectConfig{}, err
+	}
 	if buildInfo != "" || buildInfoCommand != "" {
 		// Build info mode: another build system builds the app; no project or scheme is needed.
 		cwd, err := os.Getwd()

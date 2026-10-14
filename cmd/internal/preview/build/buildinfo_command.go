@@ -6,17 +6,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"regexp"
 )
 
-// RunBuildInfoCommand runs pc.BuildInfoCommand for sourceFile and device and writes its JSON output to a cache file,
-// returning the file's path. The values reach the command as AXE_PREVIEW_FILE and AXE_PREVIEW_DEVICE environment
-// variables, never as part of the shell source, so they are not evaluated. The command builds what the preview needs
-// (with whatever build system the project uses), so it is also how watch mode rebuilds.
-func RunBuildInfoCommand(pc ProjectConfig, sourceFile, device string) (string, error) {
-	if strings.Contains(pc.BuildInfoCommand, "{file}") || strings.Contains(pc.BuildInfoCommand, "{device}") {
-		return "", fmt.Errorf(`BUILD_INFO_COMMAND no longer substitutes {file}/{device}; use "$AXE_PREVIEW_FILE" instead of {file} and "$AXE_PREVIEW_DEVICE" instead of {device} (%s)`, pc.BuildInfoCommand)
+// legacyPlaceholder matches the former {file}/{device} placeholders, but not shell parameters such as ${file}.
+var legacyPlaceholder = regexp.MustCompile(`(^|[^$])\{(file|device)\}`)
+
+// CheckBuildInfoCommand rejects a command written for the former {file}/{device} placeholders.
+func CheckBuildInfoCommand(command string) error {
+	if legacyPlaceholder.MatchString(command) {
+		return fmt.Errorf(`BUILD_INFO_COMMAND no longer substitutes {file}/{device}; use "$AXE_PREVIEW_FILE" instead of {file} and "$AXE_PREVIEW_DEVICE" instead of {device} (%s)`, command)
 	}
+	return nil
+}
+
+// RunBuildInfoCommand runs pc.BuildInfoCommand for sourceFile and device and writes its JSON output to a cache file,
+// returning the file's path. The values are passed as environment variables (see ProjectConfig.BuildInfoCommand), not
+// as shell source. The command builds what the preview needs (with whatever build system the project uses), so it is
+// also how watch mode rebuilds.
+func RunBuildInfoCommand(pc ProjectConfig, sourceFile, device string) (string, error) {
 	if device == "" {
 		device = "generic"
 	}
@@ -26,7 +34,8 @@ func RunBuildInfoCommand(pc ProjectConfig, sourceFile, device string) (string, e
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("BUILD_INFO_COMMAND failed (%s): %w", pc.BuildInfoCommand, err)
+		return "", fmt.Errorf("BUILD_INFO_COMMAND failed (%s, AXE_PREVIEW_FILE=%s, AXE_PREVIEW_DEVICE=%s): %w",
+			pc.BuildInfoCommand, sourceFile, device, err)
 	}
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {

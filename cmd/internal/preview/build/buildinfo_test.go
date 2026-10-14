@@ -86,6 +86,13 @@ func TestLoadBuildInfoRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+// isolateUserCache points os.UserCacheDir (HOME on darwin, XDG_CACHE_HOME elsewhere) at a temporary directory.
+func isolateUserCache(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
 func TestRunBuildInfoCommandDoesNotEvaluateValues(t *testing.T) {
 	const printJSON = `printf '{"f":"%s","d":"%s"}' `
 	cases := []struct {
@@ -98,8 +105,7 @@ func TestRunBuildInfoCommandDoesNotEvaluateValues(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			t.Setenv("XDG_CACHE_HOME", t.TempDir())
+			isolateUserCache(t)
 			root := t.TempDir() // the command runs here, so a substituted touch would create root/PWNED
 			path, err := RunBuildInfoCommand(ProjectConfig{Root: root, BuildInfoCommand: tc.template}, tc.file, tc.device)
 			if err != nil {
@@ -127,8 +133,7 @@ func TestRunBuildInfoCommandDoesNotEvaluateValues(t *testing.T) {
 }
 
 func TestRunBuildInfoCommandDefaultDevice(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateUserCache(t)
 	path, err := RunBuildInfoCommand(ProjectConfig{Root: t.TempDir(), BuildInfoCommand: `printf %s "$AXE_PREVIEW_DEVICE"`}, "/a.swift", "")
 	if err != nil {
 		t.Fatal(err)
@@ -138,9 +143,14 @@ func TestRunBuildInfoCommandDefaultDevice(t *testing.T) {
 	}
 }
 
-func TestRunBuildInfoCommandRejectsPlaceholders(t *testing.T) {
+func TestCheckBuildInfoCommandRejectsPlaceholders(t *testing.T) {
+	for _, command := range []string{`./build "$AXE_PREVIEW_FILE"`, `file="$AXE_PREVIEW_FILE"; ./build "${file}" "${device:-generic}"`} {
+		if err := CheckBuildInfoCommand(command); err != nil {
+			t.Errorf("%q: %v", command, err)
+		}
+	}
 	for _, template := range []string{`./build {file}`, `./build "{file}"`, `./build --device {device}`} {
-		_, err := RunBuildInfoCommand(ProjectConfig{Root: t.TempDir(), BuildInfoCommand: template}, "/a.swift", "dev")
+		err := CheckBuildInfoCommand(template)
 		if err == nil {
 			t.Fatalf("%q: expected error", template)
 		}
