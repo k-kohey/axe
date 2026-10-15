@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -42,7 +41,7 @@ type DevicePool struct {
 	deviceSetPath string
 	available     map[deviceKey][]poolEntry // Shutdown devices ready for reuse
 	inUse         map[string]poolEntry      // UDID → in-use entry
-	lockFiles     map[string]*os.File       // UDID → held flock file handle
+	locks         *DeviceLocks
 	simctl        SimctlRunner
 }
 
@@ -52,7 +51,7 @@ func NewDevicePool(simctl SimctlRunner, deviceSetPath string) *DevicePool {
 		deviceSetPath: deviceSetPath,
 		available:     make(map[deviceKey][]poolEntry),
 		inUse:         make(map[string]poolEntry),
-		lockFiles:     make(map[string]*os.File),
+		locks:         NewDeviceLocks(deviceSetPath),
 		simctl:        simctl,
 	}
 }
@@ -71,7 +70,7 @@ func (p *DevicePool) Acquire(ctx context.Context, deviceType, runtime string) (s
 		p.available[key] = entries[:len(entries)-1]
 		p.inUse[entry.UDID] = entry
 		p.mu.Unlock()
-		p.acquireLockFile(entry.UDID)
+		_ = p.locks.Lock(entry.UDID)
 		p.writeMetaFile(entry.UDID)
 		slog.Info("Reusing pooled device", "udid", entry.UDID, "deviceType", deviceType, "runtime", runtime)
 		return entry.UDID, nil
@@ -109,7 +108,7 @@ func (p *DevicePool) Acquire(ctx context.Context, deviceType, runtime string) (s
 		p.inUse[d.UDID] = poolEntry{UDID: d.UDID, DeviceType: deviceType, Runtime: runtime}
 		p.mu.Unlock()
 
-		if p.acquireLockFile(d.UDID) {
+		if err := p.locks.Lock(d.UDID); err == nil {
 			p.writeMetaFile(d.UDID)
 			slog.Info("Reusing existing device from set", "udid", d.UDID, "deviceType", deviceType, "runtime", runtime)
 			return d.UDID, nil
@@ -139,7 +138,7 @@ func (p *DevicePool) Acquire(ctx context.Context, deviceType, runtime string) (s
 			} else {
 				p.inUse[udid] = entry
 				p.mu.Unlock()
-				p.acquireLockFile(udid)
+				_ = p.locks.Lock(udid)
 				p.writeMetaFile(udid)
 				slog.Info("Cloned device", "udid", udid, "source", cloneSource)
 				return udid, nil
@@ -171,7 +170,7 @@ func (p *DevicePool) Acquire(ctx context.Context, deviceType, runtime string) (s
 		}
 		p.inUse[udid] = entry
 		p.mu.Unlock()
-		p.acquireLockFile(udid)
+		_ = p.locks.Lock(udid)
 		p.writeMetaFile(udid)
 		slog.Info("Created new device", "udid", udid, "deviceType", deviceType, "runtime", runtime)
 		return udid, nil
@@ -195,13 +194,11 @@ func (p *DevicePool) Release(ctx context.Context, udid string) error {
 	if err := p.simctl.Shutdown(shutdownCtx, udid, p.deviceSetPath); err != nil {
 		// Shutdown failed — device state is unknown, don't return to pool.
 		// Still release the lock file to avoid leaking the flock.
-		p.closeLockFile(udid)
-		p.releaseLockFile(udid)
+		p.locks.Unlock(udid)
 		return fmt.Errorf("shutting down device %s: %w", udid, err)
 	}
 
-	p.closeLockFile(udid)
-	p.releaseLockFile(udid)
+	p.locks.Unlock(udid)
 
 	p.mu.Lock()
 	key := deviceKey{DeviceType: entry.DeviceType, Runtime: entry.Runtime}
@@ -233,8 +230,7 @@ func (p *DevicePool) ShutdownAll(ctx context.Context) {
 			slog.Debug("Failed to shutdown device during ShutdownAll", "udid", entry.UDID, "err", err)
 		}
 		sdCancel()
-		p.closeLockFile(entry.UDID)
-		p.releaseLockFile(entry.UDID)
+		p.locks.Unlock(entry.UDID)
 	}
 }
 
@@ -253,7 +249,7 @@ func (p *DevicePool) CleanupOrphans(ctx context.Context) error {
 		if d.State != "Booted" {
 			continue
 		}
-		if p.isOrphaned(d.UDID) {
+		if !p.locks.IsHeld(d.UDID) {
 			slog.Info("Cleaning up orphaned device", "udid", d.UDID, "name", d.Name)
 			sdCtx, sdCancel := context.WithTimeout(ctx, simctlTimeout)
 			if err := p.simctl.Shutdown(sdCtx, d.UDID, p.deviceSetPath); err != nil {
@@ -317,79 +313,8 @@ func (p *DevicePool) GarbageCollect(ctx context.Context) {
 			if err := os.Remove(filepath.Join(p.deviceSetPath, d.UDID+".meta.json")); err != nil && !os.IsNotExist(err) {
 				slog.Debug("Failed to remove meta file during GC", "udid", d.UDID, "err", err)
 			}
-			if err := os.Remove(filepath.Join(p.deviceSetPath, d.UDID+".lock")); err != nil && !os.IsNotExist(err) {
-				slog.Debug("Failed to remove lock file during GC", "udid", d.UDID, "err", err)
-			}
+			p.locks.remove(d.UDID)
 		}
-	}
-}
-
-// acquireLockFile creates and holds an exclusive flock for the device.
-// The OS automatically releases the flock on process exit (including SIGKILL),
-// allowing CleanupOrphans to detect zombie devices.
-// Returns true if the lock was successfully acquired.
-func (p *DevicePool) acquireLockFile(udid string) bool {
-	lockPath := filepath.Join(p.deviceSetPath, udid+".lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		slog.Debug("Failed to open lock file", "path", lockPath, "err", err)
-		return false
-	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		slog.Debug("Failed to acquire flock", "path", lockPath, "err", err)
-		_ = f.Close()
-		return false
-	}
-
-	p.mu.Lock()
-	p.lockFiles[udid] = f
-	p.mu.Unlock()
-	return true
-}
-
-// closeLockFile releases the flock and closes the file handle for a device.
-// The lock file on disk is not removed so that it can be reused.
-func (p *DevicePool) closeLockFile(udid string) {
-	p.mu.Lock()
-	f, ok := p.lockFiles[udid]
-	if ok {
-		delete(p.lockFiles, udid)
-	}
-	p.mu.Unlock()
-
-	if ok {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		_ = f.Close()
-	}
-}
-
-// isOrphaned checks whether a Booted device has no controlling process.
-// It tries to acquire the lock file in non-blocking mode. If the lock succeeds,
-// the controlling process is gone (OS releases flock on process exit).
-func (p *DevicePool) isOrphaned(udid string) bool {
-	lockPath := filepath.Join(p.deviceSetPath, udid+".lock")
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		// Can't open lock file → treat as non-orphaned (safe default).
-		return false
-	}
-	defer func() { _ = f.Close() }()
-
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	if err != nil {
-		// Lock held by another process → device is actively managed.
-		return false
-	}
-	// Lock acquired → controlling process is gone → orphaned.
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	return true
-}
-
-// releaseLockFile removes the lock file for a device.
-func (p *DevicePool) releaseLockFile(udid string) {
-	lockPath := filepath.Join(p.deviceSetPath, udid+".lock")
-	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
-		slog.Debug("Failed to remove lock file", "path", lockPath, "err", err)
 	}
 }
 

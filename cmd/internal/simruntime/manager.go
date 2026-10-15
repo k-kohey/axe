@@ -39,6 +39,7 @@ type RuntimeManager struct {
 	deviceSetPath     string
 	simctl            *platform.RealSimctlRunner
 	pool              *platform.DevicePool
+	locks             *platform.DeviceLocks
 	sessions          map[string]*Session
 	skipOrphanCleanup bool
 }
@@ -57,6 +58,7 @@ func New(opts ...Option) (*RuntimeManager, error) {
 		opt(m)
 	}
 	m.pool = platform.NewDevicePool(m.simctl, m.deviceSetPath)
+	m.locks = platform.NewDeviceLocks(m.deviceSetPath)
 	if !m.skipOrphanCleanup {
 		if err := m.pool.CleanupOrphans(context.Background()); err != nil {
 			slog.Warn("Failed to clean up orphaned simulator devices", "err", err)
@@ -115,6 +117,9 @@ func (m *RuntimeManager) CreateSession(ctx context.Context, req CreateSessionReq
 
 func (m *RuntimeManager) startSession(ctx context.Context, s *Session, req CreateSessionRequest) error {
 	if req.DeviceUDID != "" {
+		if err := m.locks.Lock(req.DeviceUDID); err != nil {
+			return fmt.Errorf("locking device: %w", err)
+		}
 		s.deviceUDID = req.DeviceUDID
 	} else {
 		s.publish(Event{SessionID: s.id, Time: time.Now(), Status: &StatusEvent{Phase: "acquiring_device"}})
@@ -391,9 +396,13 @@ func (m *RuntimeManager) cleanupSession(ctx context.Context, s *Session) {
 	if s.bootCompanion != nil {
 		_ = s.bootCompanion.Stop()
 	}
-	if s.deviceUDID != "" && s.deviceType != "" && s.runtime != "" {
-		if err := m.pool.Release(ctx, s.deviceUDID); err != nil {
-			slog.Debug("failed to release device", "session", s.id, "udid", s.deviceUDID, "err", err)
+	if s.deviceUDID != "" {
+		if s.deviceType != "" && s.runtime != "" {
+			if err := m.pool.Release(ctx, s.deviceUDID); err != nil {
+				slog.Debug("failed to release device", "session", s.id, "udid", s.deviceUDID, "err", err)
+			}
+		} else {
+			m.locks.Unlock(s.deviceUDID)
 		}
 	}
 }
