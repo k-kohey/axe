@@ -24,6 +24,9 @@ type Result struct {
 // Prepare runs the full build pipeline: fetch settings, optionally build,
 // and extract compiler paths. This is the high-level entry point.
 func Prepare(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, reuse bool, r Runner) (*Result, error) {
+	if pc.BuildInfoPath != "" {
+		return PrepareFromBuildInfo(pc.BuildInfoPath, dirs)
+	}
 	s, err := FetchSettings(ctx, pc, dirs, r)
 	if err != nil {
 		return nil, err

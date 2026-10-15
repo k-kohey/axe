@@ -1,5 +1,10 @@
 package build
 
+import (
+	"maps"
+	"path/filepath"
+)
+
 // Settings holds values extracted from xcodebuild -showBuildSettings,
 // plus additional compiler paths extracted from the swiftc response file.
 type Settings struct {
@@ -14,6 +19,24 @@ type Settings struct {
 	ExtraIncludePaths   []string // additional -I paths (SPM C module headers)
 	ExtraFrameworkPaths []string // additional -F paths (e.g. PackageFrameworks)
 	ExtraModuleMapFiles []string // -fmodule-map-file= paths (generated ObjC module maps)
+
+	// SourceModules maps absolute source paths to their module, when known from build info.
+	// It takes precedence over index store lookups (which depend on how paths were recorded).
+	SourceModules map[string]string
+}
+
+// ModuleForSource returns the module of sourceFile recorded in SourceModules, or "".
+func (s *Settings) ModuleForSource(sourceFile string) string {
+	if s == nil || s.SourceModules == nil {
+		return ""
+	}
+	if m, ok := s.SourceModules[sourceFile]; ok {
+		return m
+	}
+	if resolved, err := filepath.EvalSymlinks(sourceFile); err == nil {
+		return s.SourceModules[resolved]
+	}
+	return ""
 }
 
 // Clone returns a deep copy of the Settings. Use this when multiple goroutines
@@ -24,5 +47,9 @@ func (s *Settings) Clone() *Settings {
 	c.ExtraIncludePaths = append([]string(nil), s.ExtraIncludePaths...)
 	c.ExtraFrameworkPaths = append([]string(nil), s.ExtraFrameworkPaths...)
 	c.ExtraModuleMapFiles = append([]string(nil), s.ExtraModuleMapFiles...)
+	if s.SourceModules != nil {
+		c.SourceModules = make(map[string]string, len(s.SourceModules))
+		maps.Copy(c.SourceModules, s.SourceModules)
+	}
 	return &c
 }
