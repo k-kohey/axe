@@ -91,10 +91,10 @@ func compileAndLink(ctx context.Context, cfg CompileConfig, buildDir, sdk, targe
 		args = append(args, "-Xcc", "-fmodule-map-file="+p)
 	}
 	if cfg.SwiftVersion != "" {
-		// SWIFT_VERSION may be "6.0" but -swift-version expects "6", "5", "4.2", etc.
+		// SWIFT_VERSION may be "6.0" or "5.9" but -swift-version only accepts "4", "4.2", "5", "6".
 		sv := cfg.SwiftVersion
-		if strings.HasSuffix(sv, ".0") && sv != "4.0" {
-			sv = strings.TrimSuffix(sv, ".0")
+		if major, _, ok := strings.Cut(sv, "."); ok && sv != "4.2" {
+			sv = major
 		}
 		args = append(args, "-swift-version", sv)
 	}

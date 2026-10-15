@@ -201,7 +201,8 @@ func TestCompileThunk_SwiftVersionTrimming(t *testing.T) {
 	}{
 		{"6.0 trims to 6", "6.0", "6"},
 		{"5.0 trims to 5", "5.0", "5"},
-		{"4.0 stays as 4.0", "4.0", "4.0"},
+		{"5.9 trims to 5", "5.9", "5"},
+		{"4.0 trims to 4", "4.0", "4"},
 		{"4.2 stays as 4.2", "4.2", "4.2"},
 		{"empty omits flag", "", ""},
 	}
