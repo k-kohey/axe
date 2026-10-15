@@ -20,6 +20,9 @@ func TestReplacementModuleName(t *testing.T) {
 		{"MyApp", "HomeView.swift", 3, "MyApp_PreviewReplacement_HomeView_3"},
 		// Should use only the base name, not subdirectory path
 		{"App", "Views/HogeView.swift", 1, "App_PreviewReplacement_HogeView_1"},
+		// Non-identifier characters in the file name are replaced
+		{"MyFeature", "FooView.ui.swift", 0, "MyFeature_PreviewReplacement_FooView_ui_0"},
+		{"App", "Foo+Bar.swift", 2, "App_PreviewReplacement_Foo_Bar_2"},
 	}
 	for _, tt := range tests {
 		got := ReplacementModuleName(tt.moduleName, tt.sourceFileName, tt.counter)

@@ -5,15 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/k-kohey/axe/internal/preview/buildlock"
 )
 
+var nonIdentifierRe = regexp.MustCompile(`[^A-Za-z0-9_]`)
+
 // ReplacementModuleName generates the module name for a thunk dylib, matching
 // Xcode's convention: {Module}_PreviewReplacement_{FileName}_{N}.
 func ReplacementModuleName(moduleName, sourceFileName string, counter int) string {
 	base := strings.TrimSuffix(filepath.Base(sourceFileName), filepath.Ext(sourceFileName))
+	// "Foo+Bar.swift" or "FooView.ui.swift" would otherwise yield an invalid module identifier.
+	base = nonIdentifierRe.ReplaceAllString(base, "_")
 	return fmt.Sprintf("%s_PreviewReplacement_%s_%d", moduleName, base, counter)
 }
 
