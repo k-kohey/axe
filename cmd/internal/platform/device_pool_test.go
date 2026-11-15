@@ -586,6 +586,41 @@ func TestDevicePool_GC_Expired(t *testing.T) {
 	if runner.deleteCalls != 1 {
 		t.Errorf("expected 1 Delete call (expired device), got %d", runner.deleteCalls)
 	}
+	if _, err := os.Stat(filepath.Join(setPath, "OLD-1.lock")); !os.IsNotExist(err) {
+		t.Errorf("expected lock file to be removed with the device, stat err: %v", err)
+	}
+}
+
+func TestDevicePool_GC_ExpiredButLocked(t *testing.T) {
+	// A single session (in this or another process) holds the device without
+	// going through the pool; GC must not delete it however old its meta is.
+	runner := newFakeSimctlRunner()
+	setPath := t.TempDir()
+	pool := NewDevicePool(runner, setPath)
+
+	runner.addDevice("BUSY-1", "axe iPhone 16 Pro (1)", testDeviceType, testRuntime, "Booted")
+	metaPath := filepath.Join(setPath, "BUSY-1.meta.json")
+	data, _ := json.Marshal(deviceMeta{LastUsed: time.Now().Add(-15 * 24 * time.Hour)})
+	if err := os.WriteFile(metaPath, data, 0o600); err != nil {
+		t.Fatalf("writing meta: %v", err)
+	}
+
+	session := NewDeviceLocks(setPath)
+	if err := session.Lock("BUSY-1"); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	defer session.Unlock("BUSY-1")
+
+	pool.GarbageCollect(context.Background())
+
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	if runner.deleteCalls != 0 {
+		t.Errorf("expected 0 Delete calls (device is locked), got %d", runner.deleteCalls)
+	}
+	if _, err := os.Stat(metaPath); err != nil {
+		t.Errorf("expected meta file to remain, stat err: %v", err)
+	}
 }
 
 func TestDevicePool_GC_Recent(t *testing.T) {

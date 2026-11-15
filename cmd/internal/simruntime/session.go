@@ -21,6 +21,8 @@ type Session struct {
 	screenHeight int
 	cancel       context.CancelFunc
 
+	releaseDevice func(context.Context)
+
 	bootCompanion *idb.Companion
 	idbCompanion  *idb.Companion
 	client        idb.IDBClient
