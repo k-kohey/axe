@@ -2,6 +2,7 @@ package preview
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -40,7 +41,7 @@ func runWatcher(ctx context.Context, sourceFile string, pc ProjectConfig,
 	idbErrCh <-chan error, bootDiedCh <-chan struct{}) error {
 
 	// Set up shared file watcher.
-	watchRoot := filepath.Dir(pc.PrimaryPath())
+	watchRoot := pc.ProjectRoot()
 	sw, err := watch.NewSharedWatcher(ctx, watchRoot, wctx.sources)
 	if err != nil {
 		return fmt.Errorf("creating file watcher: %w", err)
@@ -208,6 +209,10 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 		// 4. Retry: rebuild project then try compile again.
 		slog.Info("Thunk compile failed, attempting rebuild", "err", err)
 		if buildErr := build.Run(ctx, pc, dirs.ProjectDirs, wctx.build); buildErr != nil {
+			if errors.Is(buildErr, build.ErrRebuildUnsupported) {
+				// The app is not xcodebuild's to rebuild; keep the compile error.
+				return err
+			}
 			return fmt.Errorf("rebuild: %w", buildErr)
 		}
 		dylibPath, err = compileFullThunkFiles(ctx, newSourceFile, files, cache, bs, dirs, "0", counter, wctx.toolchain)
@@ -255,6 +260,11 @@ func switchFile(ctx context.Context, newSourceFile string, pc ProjectConfig, bs 
 // when parseTrackedFiles returns empty, it retries with sourceFile only.
 // It also uses terminate → install → launch (not the hot-reload deploy path).
 func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig, bs *build.Settings, dirs previewDirs, wctx watchContext, ws *watchState) error {
+	// Checked up front, not left to build.Run: the "building" status below would otherwise
+	// reach serve clients and never be followed by a ready/error state.
+	if pc.UsesBuildInfo() {
+		return fmt.Errorf("this change needs a rebuild: %w", build.ErrRebuildUnsupported)
+	}
 	ws.mu.Lock()
 	if ws.building {
 		ws.mu.Unlock()
@@ -338,7 +348,7 @@ func rebuildAndRelaunch(ctx context.Context, sourceFile string, pc ProjectConfig
 
 	// Reload Index Store cache after rebuild (index data is updated by the build).
 	// Update the shared cache so all streams (in multi-stream mode) see fresh data.
-	projectRoot := filepath.Dir(pc.PrimaryPath())
+	projectRoot := pc.ProjectRoot()
 	newCache, cacheErr := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), projectRoot)
 	if cacheErr != nil && ctx.Err() == nil {
 		slog.Warn("Failed to reload index store cache after rebuild", "err", cacheErr)

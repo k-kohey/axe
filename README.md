@@ -176,6 +176,7 @@ These flags are shared by all `preview` subcommands:
 | `--scheme` | Xcode scheme to build (required) |
 | `--device` | Simulator UDID to use (searches axe set first, then standard Xcode set) |
 | `--configuration` | Build configuration (e.g. `Debug`) |
+| `--build-info` | BuildInfo JSON of an app built by another build system; skips `xcodebuild` (see [Other Build Systems](#other-build-systems-buildinfo)) |
 
 All flags fall back to `.axerc` values when not specified.
 
@@ -307,6 +308,33 @@ SCHEME=MyApp
 CONFIGURATION=Debug
 DEVICE=<simulator-udid>
 ```
+
+## Other Build Systems (BuildInfo)
+
+Projects built by something other than `xcodebuild` (e.g. Bazel) can describe the build to axe with a BuildInfo JSON file
+instead. axe then never runs `xcodebuild`; it compiles preview thunks with the given compiler inputs and launches the
+given app.
+
+Point axe at the file with `--build-info <file>` or `BUILD_INFO=<file>` in `.axerc`. `PROJECT`, `WORKSPACE` and `SCHEME` are not needed in this mode.
+
+```json
+{
+  "schemaVersion": 1,
+  "module": "FeatureUI",
+  "configuration": "Debug",
+  "provider": "bazel",
+  "swiftcArguments": ["-module-name", "FeatureUI", "-target", "arm64-apple-ios17.0-simulator", "-swift-version", "6"],
+  "sourceFiles": ["/abs/path/FeatureUI/View.swift"],
+  "moduleSearchPaths": ["/abs/path/out/FeatureUI"],
+  "frameworkSearchPaths": [],
+  "indexStorePath": "/abs/path/out/index",
+  "transitiveDependencies": [],
+  "appBundlePath": "/abs/path/out/MyApp.app",
+  "appBundleId": "com.example.MyApp"
+}
+```
+
+`schemaVersion` (`1`), `appBundlePath` and `appBundleId` (the simulator app that links the module) are required, and `swiftcArguments` must include an iOS simulator `-target`; `module` owns the previewed `sourceFiles`, and the rest is optional. axe reads `-target`, `-swift-version` and `-Xcc -fmodule-map-file=` from `swiftcArguments`, and takes `-I` / `-F` paths from `moduleSearchPaths` / `frameworkSearchPaths`. Relative paths (including those in the index store) are resolved against the project root (the directory of `--project`/`--workspace`, or the current directory); absolute paths are used as is. The producer must build the app with `-Xfrontend -enable-implicit-dynamic -Xfrontend -enable-private-imports` on the module, which axe otherwise adds through `xcodebuild`. Read-only build outputs are fine: axe stages a writable copy of the app.
 
 ## Known Issues
 

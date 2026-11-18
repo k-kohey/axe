@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/k-kohey/axe/internal/preview/analysis"
+	pb "github.com/k-kohey/axe/internal/preview/analysisproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
 )
 
@@ -707,5 +708,81 @@ func TestStdinCommand_JSONRoundtrip(t *testing.T) {
 		if got.Type != tc.Type {
 			t.Errorf("type mismatch: got %q, want %q", got.Type, tc.Type)
 		}
+	}
+}
+
+// buildInfoFixtureV is the minimal previewable source used by the --build-info tests.
+const buildInfoFixtureV = `import SwiftUI
+
+struct V: View {
+    var body: some View {
+        Text("Hello")
+    }
+}
+
+#Preview {
+    V()
+}
+`
+
+// With --build-info, a thunk compile failure must surface as-is: xcodebuild cannot rebuild
+// the app, so the build Runner is never called and the original compile error is returned.
+func TestSwitchFile_BuildInfoCompileFailureKeepsOriginalError(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := writeFixtureFile(t, dir, "V.swift", buildInfoFixtureV)
+	analysis.ResetCache()
+
+	errCompile := errors.New("swiftc exploded")
+	br := &fakeBuildRunner{}
+	pc := ProjectConfig{BuildInfoPath: filepath.Join(dir, "build-info.json")}
+	wctx := watchContext{
+		sources:   &errSourceLister{err: errCompile},
+		toolchain: &errToolchainRunner{err: errCompile},
+		build:     br,
+	}
+
+	cache := buildTestCache(map[string]*pb.IndexFileData{
+		sourcePath: {
+			Types: []*pb.IndexTypeInfo{{
+				Name: "V", Kind: pb.TypeKind_TYPE_KIND_STRUCT, AccessLevel: "internal",
+				InheritedTypes: []string{"View"},
+				Members: []*pb.IndexMemberInfo{
+					{Name: "body", Kind: pb.MemberKind_MEMBER_KIND_INSTANCE_PROPERTY, IsComputed: true, Line: 4},
+				},
+			}},
+		},
+	})
+	ws := &watchState{indexCache: newSharedIndexCache(cache)}
+
+	err := switchFile(context.Background(), sourcePath, pc, &build.Settings{ModuleName: "TestModule"}, previewDirs{Thunk: dir}, wctx, ws)
+	if !errors.Is(err, errCompile) {
+		t.Fatalf("expected the original compile error, got %v", err)
+	}
+	if br.buildArgs != nil || br.fetchArgs != nil {
+		t.Errorf("build Runner must not be called: build=%v fetch=%v", br.buildArgs, br.fetchArgs)
+	}
+}
+
+// With --build-info, a dependency change cannot be rebuilt; the error must come back before
+// any "building" status is sent, or serve clients would stay stuck in that phase.
+func TestRebuildAndRelaunch_BuildInfoFailsBeforeBuildingStatus(t *testing.T) {
+	var buf syncBuffer
+	br := &fakeBuildRunner{}
+	wctx := watchContext{serve: true, streamID: "s", ew: protocol.NewEventWriter(&buf), build: br}
+	pc := ProjectConfig{BuildInfoPath: "/tmp/build-info.json"}
+	ws := &watchState{}
+
+	err := rebuildAndRelaunch(context.Background(), "/tmp/V.swift", pc, &build.Settings{}, previewDirs{}, wctx, ws)
+	if !errors.Is(err, build.ErrRebuildUnsupported) {
+		t.Fatalf("expected ErrRebuildUnsupported, got %v", err)
+	}
+	if events := collectEvents(t, &buf); len(events) != 0 {
+		t.Errorf("no status event expected, got %d", len(events))
+	}
+	if ws.building {
+		t.Error("building flag must not be left set")
+	}
+	if br.buildArgs != nil || br.fetchArgs != nil {
+		t.Errorf("build Runner must not be called")
 	}
 }

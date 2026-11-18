@@ -63,6 +63,8 @@ func stageAppBundle(ctx context.Context, bs *build.Settings, dirs previewDirs, f
 	if err := fc.CopyDir(ctx, srcAppPath, stagedAppPath); err != nil {
 		return "", fmt.Errorf("copying app bundle to staging: %w", err)
 	}
+	// Build systems such as Bazel produce read-only outputs; the staged copy is rewritten below.
+	makeWritable(stagedAppPath)
 
 	return stagedAppPath, nil
 }
@@ -185,4 +187,17 @@ func launchWithHotReload(ctx context.Context, bs *build.Settings, loaderPath, th
 	}
 
 	return ar.Launch(ctx, device, bs.BundleID, deviceSetPath, env, nil)
+}
+
+// makeWritable adds owner write permission to every file and directory under root.
+func makeWritable(root string) {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if info.Mode().Perm()&0o200 == 0 {
+			_ = os.Chmod(path, info.Mode().Perm()|0o200)
+		}
+		return nil
+	})
 }

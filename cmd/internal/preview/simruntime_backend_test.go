@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/k-kohey/axe/internal/preview/analysis"
 	"github.com/k-kohey/axe/internal/preview/build"
 	pb "github.com/k-kohey/axe/internal/preview/previewproto"
 	"github.com/k-kohey/axe/internal/preview/protocol"
@@ -673,4 +674,30 @@ func assertStoppedMessageContains(t *testing.T, buf *syncBuffer, want string) {
 		t.Fatalf("StreamStopped message = %q, want containing %q", msg, want)
 	}
 	t.Fatalf("expected StreamStopped, got %+v", events)
+}
+
+// With --build-info, a failed optimistic compile must not trigger an xcodebuild rebuild;
+// the original compile error is kept and the compile strategy's main-only fallback still runs.
+func TestCompileInitialThunk_BuildInfoSkipsRebuild(t *testing.T) {
+	dir := t.TempDir()
+	file := writeFixtureFile(t, dir, "V.swift", buildInfoFixtureV)
+	analysis.ResetCache()
+
+	errCompile := errors.New("swiftc exploded")
+	br := &fakeBuildRunner{}
+	pc := ProjectConfig{BuildInfoPath: filepath.Join(dir, "build-info.json")}
+	sm := NewRuntimeStreamManager(newFakeSimRuntimeManager(), protocol.NewEventWriter(&syncBuffer{}),
+		pc, "", nil, br, &errToolchainRunner{err: errCompile}, &fakeAppRunner{}, &fakeFileCopier{}, &errSourceLister{err: errCompile}, false, 32, 0)
+	s := &stream{id: "s1", file: file, dirs: previewDirs{Thunk: dir}}
+
+	_, _, _, _, err := sm.compileInitialThunk(context.Background(), s, &build.Settings{ModuleName: "TestModule"}, false, func(string) {})
+	if !errors.Is(err, errCompile) {
+		t.Fatalf("expected the original compile error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "fallback compile also failed") {
+		t.Errorf("main-only fallback should have run, got %v", err)
+	}
+	if br.buildArgs != nil || br.fetchArgs != nil {
+		t.Errorf("build Runner must not be called: build=%v fetch=%v", br.buildArgs, br.fetchArgs)
+	}
 }

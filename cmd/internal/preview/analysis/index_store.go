@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -87,12 +88,26 @@ func LoadIndexStore(ctx context.Context, indexStorePath, sourceRoot string) (*In
 		typeMap: make(map[string][]string, len(result.GetTypeFileMap())),
 	}
 
+	// Index stores written with a file prefix map (e.g. Bazel's -file-prefix-map <execroot>=.) record
+	// paths relative to the workspace; make them absolute so they match source file paths.
+	base := sourceRoot
+	if base == "" {
+		base, _ = os.Getwd()
+	}
+	absolute := func(p string) string {
+		if p == "" || filepath.IsAbs(p) || base == "" {
+			return p
+		}
+		return filepath.Join(base, p)
+	}
+
 	for _, fd := range result.GetFiles() {
+		fd.FilePath = absolute(fd.GetFilePath())
 		cache.files[fd.GetFilePath()] = fd
 	}
 
 	for typeName, filePath := range result.GetTypeFileMap() {
-		cache.typeMap[typeName] = []string{filePath}
+		cache.typeMap[typeName] = []string{absolute(filePath)}
 	}
 
 	slog.Debug("Loaded index store cache",

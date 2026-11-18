@@ -15,6 +15,16 @@ type ProjectConfig struct {
 	Workspace     string
 	Scheme        string
 	Configuration string // e.g. "Debug", "Release"; empty means xcodebuild default
+
+	// BuildInfoPath is a BuildInfo JSON file (buildinfo.go); when set, xcodebuild is not run.
+	BuildInfoPath string
+	// Root is the project root used when neither Project nor Workspace is set (build info mode).
+	Root string
+}
+
+// UsesBuildInfo reports whether the build is driven by a BuildInfo file.
+func (pc ProjectConfig) UsesBuildInfo() bool {
+	return pc.BuildInfoPath != ""
 }
 
 // NewProjectConfig creates a ProjectConfig with absolute paths resolved.
@@ -51,10 +61,29 @@ func (pc ProjectConfig) XcodebuildArgs() []string {
 	return args
 }
 
-// PrimaryPath returns the workspace or project path (whichever is set).
+// PrimaryPath returns the path that names the project's cache: the BuildInfo file in build
+// info mode (so it never shares a cache with xcodebuild mode), else workspace, project, or Root.
 func (pc ProjectConfig) PrimaryPath() string {
+	if pc.UsesBuildInfo() {
+		return pc.BuildInfoPath
+	}
 	if pc.Workspace != "" {
 		return pc.Workspace
 	}
-	return pc.Project
+	if pc.Project != "" {
+		return pc.Project
+	}
+	return pc.Root
+}
+
+// ProjectRoot returns the directory that holds the project sources: the directory
+// of the workspace or project, or Root in build info mode without one.
+func (pc ProjectConfig) ProjectRoot() string {
+	if pc.Workspace != "" {
+		return filepath.Dir(pc.Workspace)
+	}
+	if pc.Project != "" {
+		return filepath.Dir(pc.Project)
+	}
+	return pc.Root
 }

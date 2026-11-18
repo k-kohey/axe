@@ -679,3 +679,47 @@ struct HelperView: View {
 		t.Errorf("tracked count = %d, want 2", len(tracked))
 	}
 }
+
+func TestCompileMainOnlyPipelineUsesBuildInfoModuleWithoutIndexStore(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := writeFixtureFile(t, dir, "FeatureView.swift", `import SwiftUI
+
+struct FeatureView: View {
+    var body: some View {
+        Text("Hello")
+    }
+}
+
+#Preview {
+    FeatureView()
+}
+`)
+
+	bs := &build.Settings{
+		ModuleName:       "HostApp",
+		SourceModules:    map[string]string{sourcePath: "FeatureUI"},
+		BuiltProductsDir: filepath.Join(dir, "Products"),
+		DeploymentTarget: "17.0",
+	}
+	// ProjectDirs.IndexStorePath() points under a directory that does not exist.
+	dirs := previewDirs{
+		ProjectDirs: build.ProjectDirs{Build: filepath.Join(dir, "build")},
+		Thunk:       filepath.Join(dir, "thunk"),
+	}
+	tc := &fakeToolchainRunner{sdkPathResult: "/fake/sdk"}
+
+	if _, err := compileMainOnlyPipeline(context.Background(), sourcePath, bs, dirs, "0", 0, tc); err != nil {
+		t.Fatal(err)
+	}
+
+	mainContent, err := os.ReadFile(filepath.Join(dirs.Thunk, "thunk_0__main.swift"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainContent), `@_private(sourceFile: "FeatureView.swift") import FeatureUI`) {
+		t.Fatalf("main-only thunk should import the BuildInfo source module, got:\n%s", string(mainContent))
+	}
+	if strings.Contains(string(mainContent), "import HostApp") {
+		t.Fatalf("main-only thunk must not import the host app, got:\n%s", string(mainContent))
+	}
+}

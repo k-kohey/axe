@@ -3,6 +3,7 @@ package preview
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -218,7 +219,7 @@ func (sm *StreamManager) compileInitialThunk(ctx context.Context, s *stream, bs 
 
 	compileAttempt := func() (string, error) {
 		sendStatus("compiling_thunk")
-		projectRoot := filepath.Dir(sm.pc.PrimaryPath())
+		projectRoot := sm.pc.ProjectRoot()
 		cache, cacheErr := analysis.LoadIndexStore(ctx, s.dirs.IndexStorePath(), projectRoot)
 		if cacheErr != nil && ctx.Err() == nil {
 			slog.Warn("Index store cache unavailable for stream", "streamId", s.id, "err", cacheErr)
@@ -255,6 +256,10 @@ func (sm *StreamManager) compileInitialThunk(ctx context.Context, s *stream, bs 
 				slog.Info("Optimistic launch failed; rebuilding and retrying once", "streamId", s.id, "err", err)
 				sendStatus("building")
 				if buildErr := build.Run(ctx, sm.pc, s.dirs.ProjectDirs, sm.build); buildErr != nil {
+					if errors.Is(buildErr, build.ErrRebuildUnsupported) {
+						// The app is not xcodebuild's to rebuild; keep the compile error.
+						return "", err
+					}
 					return "", fmt.Errorf("build failed: %w", buildErr)
 				}
 				build.ExtractCompilerPaths(ctx, bs, s.dirs.ProjectDirs)

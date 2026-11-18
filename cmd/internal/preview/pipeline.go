@@ -116,7 +116,7 @@ func compilePipeline(
 		return "", fmt.Errorf("no types found in tracked files")
 	}
 
-	moduleName := moduleNameForSource(sourceFile, bs.ModuleName, cache)
+	moduleName := moduleNameForSettings(sourceFile, bs, cache)
 	thunkPaths, err := codegen.GenerateThunks(files, moduleName, dirs.Thunk, previewSelector, sourceFile, counter)
 	if err != nil {
 		return "", fmt.Errorf("thunk: %w", err)
@@ -147,7 +147,7 @@ func compileFullThunkFiles(
 		return "", fmt.Errorf("no types found in tracked files")
 	}
 
-	moduleName := moduleNameForSource(sourceFile, bs.ModuleName, cache)
+	moduleName := moduleNameForSettings(sourceFile, bs, cache)
 	thunkPaths, err := codegen.GenerateThunks(files, moduleName, dirs.Thunk, previewSelector, sourceFile, counter)
 	if err != nil {
 		return "", fmt.Errorf("thunk: %w", err)
@@ -160,6 +160,15 @@ func compileFullThunkFiles(
 		return "", fmt.Errorf("compile: %w", err)
 	}
 	return dylibPath, nil
+}
+
+// moduleNameForSettings prefers the module recorded in build info, then the index store;
+// bs.ModuleName (the host app) is the last fallback.
+func moduleNameForSettings(sourceFile string, bs *build.Settings, cache *analysis.IndexStoreCache) string {
+	if m := bs.ModuleForSource(sourceFile); m != "" {
+		return m
+	}
+	return moduleNameForSource(sourceFile, bs.ModuleName, cache)
 }
 
 func moduleNameForSource(sourceFile, fallback string, cache *analysis.IndexStoreCache) string {
@@ -194,11 +203,14 @@ func compileMainOnlyPipeline(
 		return "", fmt.Errorf("source imports: %w", err)
 	}
 
-	moduleName := bs.ModuleName
-	if cache, err := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), ""); err == nil {
-		moduleName = moduleNameForSource(sourceFile, bs.ModuleName, cache)
-	} else {
-		slog.Debug("Failed to load index store for main-only module resolution", "err", err)
+	moduleName := bs.ModuleForSource(sourceFile)
+	if moduleName == "" {
+		moduleName = bs.ModuleName
+		if cache, err := analysis.LoadIndexStore(ctx, dirs.IndexStorePath(), ""); err == nil {
+			moduleName = moduleNameForSource(sourceFile, bs.ModuleName, cache)
+		} else {
+			slog.Debug("Failed to load index store for main-only module resolution", "err", err)
+		}
 	}
 
 	thunkPaths, err := codegen.GenerateMainOnlyThunk(moduleName, dirs.Thunk, sourceFile, previewSelector, imports, reloadCounter)

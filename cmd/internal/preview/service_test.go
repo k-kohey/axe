@@ -3,6 +3,7 @@ package preview
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,5 +65,14 @@ func TestRunServeWithDepsUsesRuntimeManagerAndShutsItDown(t *testing.T) {
 	events := collectEvents(t, &out)
 	if len(events) == 0 {
 		t.Fatal("expected hello event")
+	}
+}
+
+// With --build-info, `preview build` has nothing to build and must say so instead of
+// reporting a successful build.
+func TestRunBuildRejectsBuildInfo(t *testing.T) {
+	err := RunBuild(ProjectConfig{BuildInfoPath: filepath.Join(t.TempDir(), "build-info.json")})
+	if !errors.Is(err, build.ErrRebuildUnsupported) {
+		t.Fatalf("expected ErrRebuildUnsupported, got %v", err)
 	}
 }

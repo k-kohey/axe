@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -24,6 +25,9 @@ type Result struct {
 // Prepare runs the full build pipeline: fetch settings, optionally build,
 // and extract compiler paths. This is the high-level entry point.
 func Prepare(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, reuse bool, r Runner) (*Result, error) {
+	if pc.UsesBuildInfo() {
+		return PrepareFromBuildInfo(pc.BuildInfoPath, pc.ProjectRoot(), dirs)
+	}
 	s, err := FetchSettings(ctx, pc, dirs, r)
 	if err != nil {
 		return nil, err
@@ -111,9 +115,17 @@ func FetchSettings(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Ru
 	return s, nil
 }
 
+// ErrRebuildUnsupported is returned by Run when the app is described by build info:
+// another build system owns the build, so xcodebuild has nothing to rebuild.
+var ErrRebuildUnsupported = errors.New("xcodebuild cannot rebuild an app described by --build-info / BUILD_INFO; build it with your build system")
+
 // Run executes "xcodebuild build" with the flags required for axe preview
 // (dynamic replacement and private imports).
 func Run(ctx context.Context, pc ProjectConfig, dirs ProjectDirs, r Runner) error {
+	if pc.UsesBuildInfo() {
+		// The app is built by another build system; there is no project/scheme to hand to xcodebuild.
+		return ErrRebuildUnsupported
+	}
 	lock := buildlock.New(dirs.Build)
 	if err := lock.Lock(ctx); err != nil {
 		return fmt.Errorf("acquiring build lock: %w", err)
